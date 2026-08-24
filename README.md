@@ -1,50 +1,82 @@
-# NUKE NFL DFS HUB v14 — Market Model
+# NUKE NFL DFS HUB v15 — Free Player Model
 
-## Major changes
+No paid projections. No ownership subscription. No API key.
 
-### Backup-QB ownership fix
-Estimated ownership now uses a hard QB role gate.
+## Player Model
 
-A QB identified as a backup by the latest nflverse depth chart gets **0.0% estimated field ownership** unless current sportsbook passing props indicate that he is actually expected to start.
+The PLAYER MODEL now uses only free / already-available inputs:
 
-Very-low-projection QBs are also removed from the ownership pool.
+- nflverse historical weekly player stats
+- nflverse depth chart role
+- recent DraftKings fantasy scoring
+- recent opportunity / workload trend
+- DraftKings salary
+- game total
+- implied team total
+- spread / game environment
+- optional manual role adjustment
 
-### Prop-based fantasy projection
-The PLAYER MODEL now supports current NFL player props through PropLine.
+Outputs include:
 
-Prop markets are converted directly into DraftKings expectation:
+- Median
+- Floor
+- Ceiling
+- Value
+- Boom %
+- Estimated Field %
+- Small Field score
+- Large Field score
+- Confidence
+- Depth Role
+- Role Trend
+- Historical Games
 
-- Passing yards × 0.04
-- Passing TD expectation × 4
-- Rushing yards × 0.10
-- Receptions × 1
-- Receiving yards × 0.10
-- Anytime TD probability × 6
-- estimated 300-yard passing / 100-yard rushing / 100-yard receiving bonuses
+## Backup QB ownership protection
 
-When several prop markets exist for a player, the market-derived projection receives the majority of the Median projection weight.
+If the latest nflverse depth chart identifies a QB as a BACKUP:
 
-Historical nflverse usage remains in the model as a stabilizer.
+- projected median is heavily suppressed
+- ceiling is capped
+- Estimated Field % is forced to 0.0%
 
-### Depth chart role
-The model now attempts to load the latest 2026 nflverse depth-chart release and displays:
+Very-low-projection QBs are also excluded from the QB ownership pool.
 
-- STARTER
-- ROTATION
-- BACKUP
-- UNKNOWN
+## Estimated Field %
 
-### Free API integration
-PropLine currently advertises a free tier with 1,000 requests/day.
+This remains a heuristic, not a paid ownership feed.
 
-In PLAYER MODEL:
-1. Paste your PropLine API key.
-2. Click FETCH NFL PROPS.
-3. Click LOAD / REFRESH MODEL.
+It distributes likely field attention using:
 
-The API key is held in Streamlit Session State and is not written to the repo or workspace file.
+- projection strength
+- salary
+- value
+- game environment
+- position
+- depth-chart role
 
-NFL regular-season player props activate when books begin posting them.
+## Injury / role changes
 
-## Existing features retained
-Player pool, game-by-game analysis, QB plan, 1–4 lineup builder, FLEX late-swap optimizer, saved lineups, exposure, combo exposure, and DraftKings export all remain.
+Use **Player Role Adjustment** when news changes a player's expected workload faster than historical data can reflect it.
+
+Example:
+- backup RB becomes starter
+- add a positive role adjustment
+- rebuild model
+
+## Existing Hub features remain
+
+- Player Pool
+- Game-by-game slate analysis
+- QB Plan
+- 1–4 lineup multi-builder
+- FLEX late-swap optimization
+- Saved Lineups
+- Exposure & Combos
+- DraftKings CSV export
+- Workspace save/load
+
+## Deployment
+
+Replace `app.py`, `requirements.txt`, and `README.md` in the GitHub repo.
+
+Streamlit Community Cloud will redeploy automatically.

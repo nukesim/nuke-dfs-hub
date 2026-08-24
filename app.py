@@ -6,7 +6,6 @@ import re
 import math
 import unicodedata
 import numpy as np
-import requests
 from itertools import combinations
 from pathlib import Path
 
@@ -89,10 +88,7 @@ def init():
     st.session_state.setdefault("model_df",None)
     st.session_state.setdefault("model_errors",[])
     st.session_state.setdefault("projection_overrides",{})
-    st.session_state.setdefault("prop_api_key","")
-    st.session_state.setdefault("prop_df",None)
     st.session_state.setdefault("depth_df",None)
-    st.session_state.setdefault("market_fetch_note","")
 init()
 
 
@@ -780,224 +776,6 @@ def latest_depth_roles(slate):
     # Prefer exact team match where possible; name is still primary.
     return d[["ModelName","DepthRole","DepthRank","DepthTeam"]].drop_duplicates(["ModelName","DepthTeam"])
 
-def american_prob(price):
-    try:p=float(price)
-    except:return None
-    if p<0:return (-p)/((-p)+100)
-    if p>0:return 100/(p+100)
-    return None
-
-def median_market_line(points):
-    vals=[float(x) for x in points if x is not None and not pd.isna(x)]
-    return float(np.median(vals)) if vals else None
-
-def prop_market_alias(key):
-    aliases={
-        "player_pass_yds":"Pass Yds",
-        "player_pass_tds":"Pass TD",
-        "player_pass_completions":"Completions",
-        "player_pass_attempts":"Pass Att",
-        "player_rush_yds":"Rush Yds",
-        "player_rush_attempts":"Rush Att",
-        "player_receptions":"Rec",
-        "player_reception_yds":"Rec Yds",
-        "player_receiving_yds":"Rec Yds",
-        "player_anytime_td":"Anytime TD",
-    }
-    return aliases.get(key,key)
-
-def fetch_propline_props(api_key,slate):
-    """
-    Free PropLine NFL feed. Fetches events once, then props only for events
-    matching teams on the uploaded DraftKings slate.
-    """
-    if not api_key:
-        return pd.DataFrame(),"No PropLine API key supplied."
-
-    base="https://api.prop-line.com/v1/sports/football_nfl"
-    headers={"X-API-Key":api_key}
-    try:
-        r=requests.get(base+"/events",headers=headers,timeout=15)
-        r.raise_for_status()
-        events=r.json()
-    except Exception as e:
-        return pd.DataFrame(),f"PropLine events error: {e}"
-
-    slate_teams=set(slate["Team"].astype(str).str.upper())
-    # Normalize common display names to DK abbreviations.
-    team_map={
-        "ARIZONA CARDINALS":"ARI","ATLANTA FALCONS":"ATL","BALTIMORE RAVENS":"BAL",
-        "BUFFALO BILLS":"BUF","CAROLINA PANTHERS":"CAR","CHICAGO BEARS":"CHI",
-        "CINCINNATI BENGALS":"CIN","CLEVELAND BROWNS":"CLE","DALLAS COWBOYS":"DAL",
-        "DENVER BRONCOS":"DEN","DETROIT LIONS":"DET","GREEN BAY PACKERS":"GB",
-        "HOUSTON TEXANS":"HOU","INDIANAPOLIS COLTS":"IND","JACKSONVILLE JAGUARS":"JAX",
-        "KANSAS CITY CHIEFS":"KC","LAS VEGAS RAIDERS":"LV","LA RAIDERS":"LV",
-        "LOS ANGELES CHARGERS":"LAC","LA CHARGERS":"LAC","LOS ANGELES RAMS":"LAR","LA RAMS":"LAR",
-        "MIAMI DOLPHINS":"MIA","MINNESOTA VIKINGS":"MIN","NEW ENGLAND PATRIOTS":"NE",
-        "NEW ORLEANS SAINTS":"NO","NEW YORK GIANTS":"NYG","NY GIANTS":"NYG",
-        "NEW YORK JETS":"NYJ","NY JETS":"NYJ","PHILADELPHIA EAGLES":"PHI",
-        "PITTSBURGH STEELERS":"PIT","SAN FRANCISCO 49ERS":"SF","SF 49ERS":"SF",
-        "SEATTLE SEAHAWKS":"SEA","TAMPA BAY BUCCANEERS":"TB","TENNESSEE TITANS":"TEN",
-        "WASHINGTON COMMANDERS":"WAS"
-    }
-    def event_team(x):
-        s=str(x).upper().strip()
-        if s in team_map:return team_map[s]
-        # API sometimes returns "BUF Bills"-style display strings.
-        first=s.split()[0] if s else ""
-        if first in slate_teams:return first
-        if s.startswith("LA CHARG"):return "LAC"
-        if s.startswith("LA RAM"):return "LAR"
-        if s.startswith("NY JET"):return "NYJ"
-        if s.startswith("NY GIANT"):return "NYG"
-        if s.startswith("SF "):return "SF"
-        return ""
-
-    relevant=[]
-    for ev in events if isinstance(events,list) else []:
-        home=event_team(ev.get("home_team",""))
-        away=event_team(ev.get("away_team",""))
-        if home in slate_teams and away in slate_teams:
-            relevant.append(ev)
-
-    markets=[
-        "player_pass_yds","player_pass_tds","player_pass_attempts",
-        "player_rush_yds","player_rush_attempts",
-        "player_receptions","player_reception_yds","player_receiving_yds",
-        "player_anytime_td"
-    ]
-
-    records=[]
-    for ev in relevant:
-        eid=ev.get("id")
-        if not eid:continue
-        try:
-            rr=requests.get(
-                f"{base}/events/{eid}/odds",
-                headers=headers,
-                params={"markets":",".join(markets)},
-                timeout=20
-            )
-            if rr.status_code>=400:
-                continue
-            obj=rr.json()
-        except:
-            continue
-
-        # The Odds API-compatible event object has bookmakers -> markets -> outcomes.
-        event_objs=obj if isinstance(obj,list) else [obj]
-        for event_obj in event_objs:
-            for book in event_obj.get("bookmakers",[]) or []:
-                bkey=book.get("key","")
-                for market in book.get("markets",[]) or []:
-                    mk=market.get("key","")
-                    if mk not in markets:continue
-                    for out in market.get("outcomes",[]) or []:
-                        desc=out.get("description") or ""
-                        # For player markets description is normally the player.
-                        player=desc.strip()
-                        if not player:
-                            continue
-                        records.append({
-                            "ModelName":norm_player_name(player),
-                            "Player":player,
-                            "Market":mk,
-                            "MarketLabel":prop_market_alias(mk),
-                            "Outcome":out.get("name"),
-                            "Point":out.get("point"),
-                            "Price":out.get("price"),
-                            "Book":bkey,
-                            "EventID":eid
-                        })
-
-    if not records:
-        return pd.DataFrame(),"No NFL player props returned. NFL regular-season props may not be posted yet."
-
-    raw=pd.DataFrame(records)
-    rows=[]
-    for (nm,mk),g in raw.groupby(["ModelName","Market"]):
-        if mk=="player_anytime_td":
-            probs=[]
-            for _,x in g.iterrows():
-                nmout=str(x["Outcome"]).lower()
-                # anytime scorer can be a single priced player outcome; accept all player rows.
-                pr=american_prob(x["Price"])
-                if pr is not None:probs.append(pr)
-            val=float(np.median(probs)) if probs else None
-        else:
-            # Use market line itself. Over and Under share the same point, so median is robust.
-            val=median_market_line(g["Point"].tolist())
-        rows.append({"ModelName":nm,"Market":mk,"MarketValue":val,"Books":g["Book"].nunique()})
-    wide=pd.DataFrame(rows)
-    if wide.empty:
-        return pd.DataFrame(),"Props response contained no usable market lines."
-
-    wide=wide.pivot_table(index="ModelName",columns="Market",values="MarketValue",aggfunc="first").reset_index()
-    return wide,f"Loaded player props from {len(relevant)} slate games."
-
-def market_dk_projection(pos,prop_row,hist_row=None):
-    """Convert prop medians directly into DraftKings scoring expectation."""
-    if prop_row is None:
-        return None,0,[]
-
-    def pv(*keys):
-        for k in keys:
-            if k in prop_row and pd.notna(prop_row[k]):
-                return float(prop_row[k])
-        return None
-
-    used=[]
-    score=0.0
-    components=0
-
-    pass_yds=pv("player_pass_yds")
-    pass_tds=pv("player_pass_tds")
-    rush_yds=pv("player_rush_yds")
-    recs=pv("player_receptions")
-    rec_yds=pv("player_reception_yds","player_receiving_yds")
-    td_prob=pv("player_anytime_td")
-
-    if pass_yds is not None:
-        score+=pass_yds*.04
-        # Approximate 300-yard DK bonus probability from mean/typical dispersion.
-        sd=max(45,pass_yds*.18)
-        score+=3*normal_tail(300,pass_yds,sd)
-        used.append("Pass Yds");components+=1
-
-    if pass_tds is not None:
-        score+=pass_tds*4
-        used.append("Pass TD");components+=1
-
-    if rush_yds is not None:
-        score+=rush_yds*.10
-        sd=max(18,rush_yds*.45)
-        score+=3*normal_tail(100,rush_yds,sd)
-        used.append("Rush Yds");components+=1
-
-    if recs is not None:
-        score+=recs
-        used.append("Rec");components+=1
-
-    if rec_yds is not None:
-        score+=rec_yds*.10
-        sd=max(22,rec_yds*.40)
-        score+=3*normal_tail(100,rec_yds,sd)
-        used.append("Rec Yds");components+=1
-
-    if td_prob is not None:
-        # Applies to rushing/receiving TDs. Avoid double-counting QB passing TD prop.
-        if pos!="QB" or pass_tds is None:
-            score+=td_prob*6
-            used.append("Anytime TD");components+=1
-        else:
-            # QB anytime TD is usually rushing TD only, so it can coexist with pass TDs.
-            score+=td_prob*6
-            used.append("Rush TD Prob");components+=1
-
-    if components==0:
-        return None,0,[]
-    return score,components,used
-
 def norm_player_name(name):
     s="" if name is None else str(name)
     s=unicodedata.normalize("NFKD",s).encode("ascii","ignore").decode("ascii")
@@ -1192,12 +970,6 @@ def build_projection_model(slate,overrides):
         for _,dr in depth.iterrows():
             depth_map.setdefault(dr["ModelName"],[]).append(dr.to_dict())
 
-    props=st.session_state.get("prop_df")
-    prop_map={}
-    if props is not None and not props.empty:
-        for _,pr in props.iterrows():
-            prop_map[pr["ModelName"]]=pr.to_dict()
-
     for _,p in slate.iterrows():
         pos=str(p["Position"])
         sal=int(p["Salary"])
@@ -1213,13 +985,6 @@ def build_projection_model(slate,overrides):
             dr=(exact or drows)[0]
             depth_role=dr.get("DepthRole","UNKNOWN")
             depth_rank=dr.get("DepthRank",np.nan)
-
-        prop_row=prop_map.get(nm)
-        has_props=prop_row is not None
-        if pos=="QB" and has_props:
-            # A QB with a posted passing market should be treated as active starter signal.
-            if any(pd.notna(prop_row.get(k)) for k in ["player_pass_yds","player_pass_tds","player_pass_attempts"]):
-                depth_role="STARTER"
 
         if not hg.empty and pos!="DST":
             # Prefer same listed position where possible.
@@ -1267,23 +1032,12 @@ def build_projection_model(slate,overrides):
             confidence=28 if pos!="DST" else 38
             rtrend="No history"
 
-        market_proj,market_components,market_used=market_dk_projection(pos,prop_row)
-        market_weight=0.0
-        if market_proj is not None:
-            # Market gets majority weight when several stat props exist.
-            market_weight=.72 if market_components>=3 else .62 if market_components==2 else .48
-            median=market_weight*market_proj+(1-market_weight)*median
-            # Market data should also stabilize confidence.
-            confidence=max(confidence,72 if market_components>=3 else 62)
-            floor=max(0,min(floor,median*.72))
-            ceiling=max(ceiling,median*1.42)
-
         # Structural backup-QB guardrail.
-        if pos=="QB" and depth_role=="BACKUP" and not has_props:
+        if pos=="QB" and depth_role=="BACKUP":
             median=min(median,2.0)
             floor=0.0
             ceiling=min(ceiling,9.0)
-            confidence=max(confidence,85)
+            confidence=max(confidence,90)
 
         override=float(overrides.get(str(p["Name + ID"]),0) or 0)
         override=np.clip(override,-50,150)
@@ -1323,9 +1077,6 @@ def build_projection_model(slate,overrides):
             "Role Trend":rtrend,
             "Depth Role":depth_role,
             "Depth Rank":depth_rank,
-            "Prop Markets":market_components,
-            "Market DK":round(market_proj,2) if market_proj is not None else np.nan,
-            "Market Weight":round(market_weight*100),
             "Role Adj %":round(override,1),
             "Env Score":round(env_score,1),
             "Game Rank":ctx.get("game_rank"),
@@ -1361,7 +1112,7 @@ def build_projection_model(slate,overrides):
         playable=np.ones(len(g),dtype=bool)
         if pos=="QB":
             # QB backups should not absorb DFS ownership.
-            playable=~((g["Depth Role"].eq("BACKUP")) & (g["Prop Markets"].eq(0))).to_numpy()
+            playable=~g["Depth Role"].eq("BACKUP").to_numpy()
             # Also filter obvious non-starting QBs with near-zero projection.
             playable &= (g["Median"]>=8).to_numpy()
 
@@ -1375,7 +1126,7 @@ def build_projection_model(slate,overrides):
 
     # Hard guardrail: non-starting QBs cannot carry field ownership.
     qb_backup=(out["Pos"].eq("QB")) & (
-        (out["Depth Role"].eq("BACKUP") & out["Prop Markets"].eq(0))
+        out["Depth Role"].eq("BACKUP")
         | (out["Median"]<8)
     )
     out.loc[qb_backup,"Est Own %"]=0.0
@@ -1546,33 +1297,13 @@ with hub:
 
 with modeltab:
     st.subheader("NUKE Player Model")
-    st.caption("Free projection model using historical NFL usage/results + DraftKings salary + your slate's betting environment. Small/Large Field are contest scores, not separate fantasy-point projections.")
+    st.caption("Free projection model using nflverse history/usage/depth charts + DraftKings salary + your slate's betting environment. Small/Large Field are contest scores, not separate fantasy-point projections.")
 
-    st.markdown("#### Market Props (Optional but Recommended)")
-    pk1,pk2=st.columns([1.35,.65])
-    api_key=pk1.text_input(
-        "PropLine free API key",
-        value=st.session_state.prop_api_key,
-        type="password",
-        placeholder="Paste key here — kept only in your Streamlit session",
-        key="prop_key_input"
+    st.markdown("#### Free Projection Engine")
+    st.caption(
+        "No subscriptions or API keys required. The model uses free nflverse history/depth charts, "
+        "DraftKings salary, and your slate's game totals/spreads/implied totals."
     )
-    st.session_state.prop_api_key=api_key
-
-    if pk2.button("FETCH NFL PROPS",use_container_width=True,disabled=not bool(api_key)):
-        with st.spinner("Fetching current NFL prop markets..."):
-            pdf,note=fetch_propline_props(api_key,st.session_state.slate)
-            st.session_state.prop_df=pdf
-            st.session_state.market_fetch_note=note
-        st.rerun()
-
-    if st.session_state.market_fetch_note:
-        if st.session_state.prop_df is not None and not st.session_state.prop_df.empty:
-            st.success(st.session_state.market_fetch_note)
-        else:
-            st.info(st.session_state.market_fetch_note)
-
-    st.caption("PropLine's NFL player props activate during the regular season. Until props are posted, the model falls back to nflverse history + depth chart + salary + betting environment.")
 
     c1,c2,c3=st.columns([.9,.9,1.8])
     if c1.button("LOAD / REFRESH MODEL",type="primary",use_container_width=True):
@@ -1601,7 +1332,7 @@ with modeltab:
         m1.metric("Players modeled",len(model))
         m2.metric("Historical matches",f"{matched} / {len(model)}")
         m3.metric("High confidence",int((model["Confidence"]>=75).sum()))
-        m4.metric("Market-prop matches",int((model["Prop Markets"]>0).sum()))
+        m4.metric("Manual role overrides",len(st.session_state.projection_overrides))
 
         if st.session_state.model_errors:
             st.caption("Data-source notes: "+", ".join(st.session_state.model_errors))
@@ -1626,7 +1357,7 @@ with modeltab:
         display_cols=[
             "Player","Pos","Team","Salary","Median","Floor","Ceiling",
             "Value","Boom %","Est Own %","Small Field","Large Field",
-            "Confidence","Depth Role","Prop Markets","Market DK","Role Trend","Hist Games"
+            "Confidence","Depth Role","Role Trend","Hist Games"
         ]
         st.dataframe(
             view[display_cols],
@@ -1646,7 +1377,7 @@ with modeltab:
                 "Confidence":st.column_config.ProgressColumn("Confidence",min_value=0,max_value=100,format="%d")
             }
         )
-        st.caption("*Est Own remains a heuristic field-popularity estimate, but backup QBs are now structurally excluded. Market DK is the direct fantasy-point expectation derived from available prop lines.")
+        st.caption("*Est Own is a heuristic field-popularity estimate. Backup QBs identified by the depth chart are structurally forced to 0.0%.")
 
         st.divider()
         st.markdown("#### Player Role Adjustment")

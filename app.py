@@ -1597,96 +1597,148 @@ with pooltab:
                     </div>""",unsafe_allow_html=True)
                 st.progress(min(int(pct),100))
 
-            st.markdown("#### Players in this game")
-            game_table=gdf.sort_values(["Team","Position","Salary"],ascending=[True,True,False]).copy()
-            game_table.insert(0,"Use",game_table["Name + ID"].isin(st.session_state.pending_pool_ids))
-            game_table.insert(1,"Status",game_table["Use"].map({True:"IN POOL",False:"—"}))
-            st.session_state.game_editor_map=game_table["Name + ID"].tolist()
+            st.markdown("#### Game Rosters")
+            st.caption("Build your staged player pool directly from each side of the matchup.")
 
-            st.data_editor(
-                game_table[["Use","Status","Name","Position","Team","Salary","Name + ID"]],
-                hide_index=True,
-                use_container_width=True,
-                height=520,
-                disabled=["Status","Name","Position","Team","Salary","Name + ID"],
-                column_config={
-                    "Use":st.column_config.CheckboxColumn("Use",width="small"),
-                    "Status":st.column_config.TextColumn("Staged",width="small"),
-                    "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
-                    "Name + ID":None
-                },
-                key="game_pool_editor",
-                on_change=sync_game_editor
-            )
+            # Keep team-player lists completely separated for easier game evaluation.
+            roster_left,roster_right=st.columns(2,gap="large")
 
-            selected_names=game_table.loc[
-                game_table["Name + ID"].isin(st.session_state.pending_pool_ids),
-                ["Name","Team","Position","Salary"]
-            ].copy()
+            for col,team_name,team_df,team_color in [
+                (roster_left,away,away_df,away_conc_color),
+                (roster_right,home,home_df,home_conc_color)
+            ]:
+                with col:
+                    staged_count=sum(
+                        nid in st.session_state.pending_pool_ids
+                        for nid in team_df["Name + ID"]
+                    )
 
-            st.markdown("#### Staged From This Game")
+                    st.markdown(
+                        "<div style='border:2px solid "+team_color+";border-radius:15px;"
+                        "padding:12px 14px;background:"+team_color+"12;margin-bottom:10px'>"
+                        "<div style='display:flex;justify-content:space-between;align-items:center;gap:10px'>"
+                        "<div>"
+                        "<div style='font-size:1.35rem;font-weight:1000'>"+team_name+"</div>"
+                        "<div style='font-size:.76rem;opacity:.60'>"+str(staged_count)+" players staged</div>"
+                        "</div>"
+                        "<div style='font-size:.73rem;font-weight:900;color:"+team_color+"'>"
+                        "POOL RANK #"+str(
+                            away_conc_rank if team_name==away else home_conc_rank
+                        )+" / "+str(conc_total)
+                        +"</div>"
+                        "</div></div>",
+                        unsafe_allow_html=True
+                    )
 
-            if selected_names.empty:
-                st.caption("No players from this matchup are currently staged.")
-            else:
-                total_selected=len(selected_names)
-                team_counts=selected_names.groupby("Team").size().to_dict()
-                pos_counts=selected_names.groupby("Position").size().to_dict()
+                    team_roster=team_df.drop_duplicates("Name + ID").copy()
+                    pos_sort={"QB":1,"RB":2,"WR":3,"TE":4,"DST":5}
+                    team_roster["_possort"]=team_roster["Position"].map(pos_sort).fillna(9)
+                    team_roster=team_roster.sort_values(
+                        ["_possort","Salary","Name"],
+                        ascending=[True,False,True]
+                    ).drop(columns="_possort")
 
-                s1,s2,s3=st.columns(3)
-                s1.metric("Players staged",total_selected)
-                s2.metric(away,int(team_counts.get(away,0)))
-                s3.metric(home,int(team_counts.get(home,0)))
+                    # Position counts at a glance.
+                    pos_counts=team_roster.groupby("Position").size().to_dict()
+                    pos_summary=" • ".join(
+                        f"{p} {int(pos_counts[p])}"
+                        for p in ["QB","RB","WR","TE","DST"]
+                        if p in pos_counts
+                    )
+                    if pos_summary:
+                        st.caption(pos_summary)
 
-                pos_order=["QB","RB","WR","TE","DST"]
-                pos_summary=" • ".join(
-                    f"{p}: {int(pos_counts[p])}"
-                    for p in pos_order
-                    if p in pos_counts
-                )
-                if pos_summary:
-                    st.caption(pos_summary)
+                    # Use a compact checkbox table for each team.
+                    team_editor=team_roster[
+                        ["Name","Position","Salary","Name + ID"]
+                    ].copy()
+                    team_editor.insert(
+                        0,
+                        "Use",
+                        team_editor["Name + ID"].isin(st.session_state.pending_pool_ids)
+                    )
 
-                tc1,tc2=st.columns(2,gap="large")
-                for col,team_name in zip([tc1,tc2],[away,home]):
-                    with col:
-                        team_selected=selected_names[selected_names["Team"]==team_name].copy()
-                        color=away_conc_color if team_name==away else home_conc_color
+                    editor_key=f"game_team_editor_{game_key}_{team_name}"
 
+                    edited=st.data_editor(
+                        team_editor,
+                        hide_index=True,
+                        use_container_width=True,
+                        height=min(620,75+34*len(team_editor)),
+                        disabled=["Name","Position","Salary","Name + ID"],
+                        column_config={
+                            "Use":st.column_config.CheckboxColumn(
+                                "Use",
+                                width="small"
+                            ),
+                            "Name":st.column_config.TextColumn(
+                                "Player",
+                                width="large"
+                            ),
+                            "Position":st.column_config.TextColumn(
+                                "Pos",
+                                width="small"
+                            ),
+                            "Salary":st.column_config.NumberColumn(
+                                "Salary",
+                                format="$%d"
+                            ),
+                            "Name + ID":None
+                        },
+                        key=editor_key
+                    )
+
+                    # Capture changes for this team's visible roster immediately
+                    # into the staged player-pool state.
+                    shown_ids=set(team_editor["Name + ID"])
+                    checked_ids=set(
+                        edited.loc[edited["Use"],"Name + ID"]
+                    )
+
+                    current_for_team=(
+                        st.session_state.pending_pool_ids & shown_ids
+                    )
+                    if checked_ids != current_for_team:
+                        st.session_state.pending_pool_ids=(
+                            st.session_state.pending_pool_ids-shown_ids
+                        ) | checked_ids
+                        st.rerun()
+
+                    # Clean selected-player summary under each team only.
+                    selected_team=team_roster[
+                        team_roster["Name + ID"].isin(
+                            st.session_state.pending_pool_ids
+                        )
+                    ].copy()
+
+                    if selected_team.empty:
+                        st.caption("No "+team_name+" players staged.")
+                    else:
                         st.markdown(
-                            "<div style='border:1px solid "+color+";border-radius:14px;padding:11px 13px;"
-                            "background:"+color+"12;margin-bottom:8px'>"
-                            "<div style='font-size:.76rem;opacity:.62;font-weight:900'>STAGED PLAYERS</div>"
-                            "<div style='font-size:1.15rem;font-weight:950'>"+team_name+" • "+str(len(team_selected))+"</div>"
-                            "</div>",
+                            "<div style='font-size:.70rem;letter-spacing:.08em;"
+                            "font-weight:950;opacity:.58;margin-top:8px'>"
+                            "STAGED "+team_name+" PLAYERS</div>",
                             unsafe_allow_html=True
                         )
 
-                        if team_selected.empty:
-                            st.caption("None staged")
-                        else:
-                            for pos in pos_order:
-                                pdf=team_selected[team_selected["Position"]==pos].sort_values(
-                                    ["Salary","Name"],ascending=[False,True]
-                                )
-                                if pdf.empty:
-                                    continue
+                        for pos in ["QB","RB","WR","TE","DST"]:
+                            pdf=selected_team[
+                                selected_team["Position"]==pos
+                            ].sort_values(
+                                ["Salary","Name"],
+                                ascending=[False,True]
+                            )
+                            if pdf.empty:
+                                continue
 
-                                st.markdown(
-                                    f"<div style='font-size:.70rem;letter-spacing:.08em;font-weight:950;"
-                                    f"opacity:.62;margin:7px 0 2px 0'>{pos} • {len(pdf)}</div>",
-                                    unsafe_allow_html=True
-                                )
-
-                                for _,r in pdf.iterrows():
-                                    st.markdown(
-                                        "<div style='display:flex;justify-content:space-between;align-items:center;"
-                                        "gap:8px;padding:5px 0;border-bottom:1px solid rgba(128,128,128,.14)'>"
-                                        "<span style='font-size:.82rem;font-weight:800'>"+str(r["Name"])+"</span>"
-                                        "<span style='font-size:.76rem;opacity:.58'>$"+f"{int(r['Salary']):,}"+"</span>"
-                                        "</div>",
-                                        unsafe_allow_html=True
-                                    )
+                            names=", ".join(pdf["Name"].tolist())
+                            st.markdown(
+                                "<div style='margin:3px 0;font-size:.79rem'>"
+                                "<b>"+pos+"</b> "
+                                "<span style='opacity:.72'>"+names+"</span>"
+                                "</div>",
+                                unsafe_allow_html=True
+                            )
 
     st.divider()
     st.caption("These buttons change the **staged** pool only. Nothing affects the lineup builder until you click Apply.")

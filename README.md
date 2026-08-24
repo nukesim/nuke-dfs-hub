@@ -1,67 +1,50 @@
-# NUKE NFL DFS HUB v13 — Free Player Model
+# NUKE NFL DFS HUB v14 — Market Model
 
-This deployment-ready version adds a free projection/player-model layer to the existing NUKE Hub.
+## Major changes
 
-## Player Model
-After uploading a DraftKings slate, open **PLAYER MODEL** and click **LOAD / REFRESH MODEL**.
+### Backup-QB ownership fix
+Estimated ownership now uses a hard QB role gate.
 
-The model combines:
-- free historical weekly NFL player stats from nflverse
-- recent DraftKings fantasy scoring
-- recent opportunity / role trend
-- DraftKings salary
-- game total
-- implied team total
-- spread / game environment
-- optional manual role adjustments
+A QB identified as a backup by the latest nflverse depth chart gets **0.0% estimated field ownership** unless current sportsbook passing props indicate that he is actually expected to start.
 
-Outputs:
-- Median projection
-- Floor
-- Ceiling
-- Value
-- Boom %
-- Heuristic estimated ownership / popularity
-- Small Field score
-- Large Field score
-- Model confidence
+Very-low-projection QBs are also removed from the ownership pool.
 
-### Important
-`Est Own` is intentionally labeled as a heuristic. It is not presented as the equivalent of a paid ownership feed.
+### Prop-based fantasy projection
+The PLAYER MODEL now supports current NFL player props through PropLine.
 
-## Small vs Large Field
-Fantasy-point projections remain the same.
+Prop markets are converted directly into DraftKings expectation:
 
-Small Field score emphasizes:
-- median
-- ceiling
-- value
-- confidence
+- Passing yards × 0.04
+- Passing TD expectation × 4
+- Rushing yards × 0.10
+- Receptions × 1
+- Receiving yards × 0.10
+- Anytime TD probability × 6
+- estimated 300-yard passing / 100-yard rushing / 100-yard receiving bonuses
 
-Large Field score emphasizes:
-- ceiling
-- boom probability
-- leverage
-- game environment
+When several prop markets exist for a player, the market-derived projection receives the majority of the Median projection weight.
 
-## Injury / role adjustments
-Use **Player Role Adjustment** for information the historical data does not yet reflect.
+Historical nflverse usage remains in the model as a stabilizer.
 
-Example:
-A cheap backup RB becomes the starter:
-- select the player
-- add a positive role adjustment
-- rebuild automatically
+### Depth chart role
+The model now attempts to load the latest 2026 nflverse depth-chart release and displays:
 
-## Performance
-Historical data is not downloaded during normal lineup-building clicks.
+- STARTER
+- ROTATION
+- BACKUP
+- UNKNOWN
 
-The app fetches it only when you click **LOAD / REFRESH MODEL**, and Streamlit caches the free history for six hours.
+### Free API integration
+PropLine currently advertises a free tier with 1,000 requests/day.
 
-## Free data
-Historical weekly player stats are loaded from the nflverse public player-stats releases.
+In PLAYER MODEL:
+1. Paste your PropLine API key.
+2. Click FETCH NFL PROPS.
+3. Click LOAD / REFRESH MODEL.
 
-## Hosting
-This package remains ready for Streamlit Community Cloud.
+The API key is held in Streamlit Session State and is not written to the repo or workspace file.
 
-Replace the existing GitHub repo files with the v13 files and Streamlit will redeploy automatically.
+NFL regular-season player props activate when books begin posting them.
+
+## Existing features retained
+Player pool, game-by-game analysis, QB plan, 1–4 lineup builder, FLEX late-swap optimizer, saved lineups, exposure, combo exposure, and DraftKings export all remain.

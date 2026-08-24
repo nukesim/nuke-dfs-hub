@@ -60,6 +60,237 @@ div[data-testid="stMetric"]{border:1px solid rgba(128,128,128,.2);padding:9px 11
 .roster-player-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}
 .remove-x button{padding:0!important;min-height:26px!important;height:26px!important;width:28px!important;border-radius:7px!important;font-size:1rem!important;line-height:1!important}
 .active-select button{font-weight:900!important}
+
+:root{
+  --nuke-bg:#0b0f14;
+  --nuke-panel:#111820;
+  --nuke-panel2:#0f151c;
+  --nuke-border:rgba(255,255,255,.08);
+  --nuke-green:#19c37d;
+  --nuke-yellow:#f2c94c;
+  --nuke-red:#ff5d5d;
+  --nuke-text:#f5f7fa;
+  --nuke-muted:#8d99a8;
+}
+.stApp{
+  background:
+    radial-gradient(circle at 20% 0%, rgba(25,195,125,.08), transparent 28%),
+    linear-gradient(180deg,#0b0f14 0%,#0a0d12 100%);
+}
+.block-container{
+  padding-top:.85rem!important;
+  max-width:1680px!important;
+}
+h1,h2,h3{
+  letter-spacing:-.025em;
+}
+h1{
+  font-weight:1000!important;
+}
+[data-testid="stMetric"]{
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.015));
+  border:1px solid var(--nuke-border)!important;
+  border-radius:14px!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+}
+[data-testid="stTabs"] button{
+  font-weight:900!important;
+  letter-spacing:.02em!important;
+}
+[data-testid="stTabs"] button[aria-selected="true"]{
+  color:var(--nuke-green)!important;
+}
+.nuke-section-kicker{
+  font-size:.68rem;
+  font-weight:1000;
+  letter-spacing:.13em;
+  color:var(--nuke-green);
+  text-transform:uppercase;
+  margin-bottom:4px;
+}
+.nuke-card{
+  background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.012));
+  border:1px solid var(--nuke-border);
+  border-radius:16px;
+  padding:12px 14px;
+}
+.nuke-game-board{
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:18px;
+  padding:14px 16px;
+  margin:4px 0 12px 0;
+  background:
+    linear-gradient(90deg,rgba(25,195,125,.045),transparent 35%,transparent 65%,rgba(25,195,125,.025)),
+    rgba(255,255,255,.018);
+}
+.nuke-game-team{
+  font-size:1.6rem;
+  font-weight:1000;
+  line-height:1;
+}
+.nuke-odds-label{
+  font-size:.68rem;
+  font-weight:950;
+  letter-spacing:.08em;
+  color:var(--nuke-muted);
+  text-transform:uppercase;
+}
+.nuke-odds-value{
+  font-size:1.04rem;
+  font-weight:950;
+}
+.nuke-rank-pill{
+  display:inline-block;
+  border:1px solid currentColor;
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:.69rem;
+  font-weight:950;
+  margin-top:5px;
+}
+.nuke-roster-panel{
+  border:1px solid var(--nuke-border);
+  border-radius:16px;
+  padding:12px 13px 8px 13px;
+  background:rgba(255,255,255,.018);
+}
+.nuke-roster-panel.active{
+  border-color:rgba(25,195,125,.55);
+  background:rgba(25,195,125,.045);
+}
+.nuke-player-pool-banner{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  margin:6px 0 10px 0;
+}
+.nuke-pill{
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.025);
+  border-radius:999px;
+  padding:5px 9px;
+  font-size:.72rem;
+  font-weight:900;
+}
+.nuke-lineup-shell{
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:17px;
+  padding:11px;
+  background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(255,255,255,.012));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.02);
+}
+.nuke-lineup-shell.active{
+  border:2px solid rgba(25,195,125,.62);
+  background:linear-gradient(180deg,rgba(25,195,125,.055),rgba(255,255,255,.012));
+}
+.nuke-lineup-top{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  align-items:center;
+  margin-bottom:7px;
+}
+.nuke-lineup-name{
+  font-size:.82rem;
+  font-weight:1000;
+  letter-spacing:.08em;
+}
+.nuke-status-complete{
+  display:inline-block;
+  border-radius:999px;
+  padding:3px 7px;
+  font-size:.66rem;
+  font-weight:1000;
+  color:#74e6b4;
+  background:rgba(25,195,125,.13);
+  border:1px solid rgba(25,195,125,.35);
+}
+.nuke-status-draft{
+  display:inline-block;
+  border-radius:999px;
+  padding:3px 7px;
+  font-size:.66rem;
+  font-weight:1000;
+  color:#b9c2cc;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+}
+.salary-track{
+  width:100%;
+  height:8px;
+  background:rgba(255,255,255,.07);
+  border-radius:999px;
+  overflow:hidden;
+  margin:8px 0 4px 0;
+}
+.salary-fill{
+  height:100%;
+  border-radius:999px;
+}
+.salary-good{background:linear-gradient(90deg,#19c37d,#45d69a)}
+.salary-warn{background:linear-gradient(90deg,#f2c94c,#ffad3d)}
+.salary-over{background:linear-gradient(90deg,#ff5d5d,#ff8080)}
+.lineup-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px;
+  margin:7px 0 8px 0;
+}
+.lineup-summary-cell{
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:10px;
+  padding:6px 7px;
+  background:rgba(255,255,255,.018);
+}
+.lineup-summary-cell .lbl{
+  display:block;
+  font-size:.61rem;
+  color:var(--nuke-muted);
+  font-weight:900;
+  letter-spacing:.06em;
+}
+.lineup-summary-cell .val{
+  display:block;
+  font-size:.88rem;
+  font-weight:1000;
+  margin-top:2px;
+}
+.saved-card{
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:15px;
+  padding:10px 11px;
+  background:rgba(255,255,255,.017);
+}
+.saved-card h4{
+  margin:0 0 5px 0;
+  font-size:.82rem;
+}
+.exposure-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:5px 0;
+}
+.exposure-name{
+  min-width:145px;
+  font-size:.79rem;
+  font-weight:850;
+}
+.exposure-track{
+  flex:1;
+  height:8px;
+  background:rgba(255,255,255,.07);
+  border-radius:999px;
+  overflow:hidden;
+}
+.exposure-fill{
+  height:100%;
+  border-radius:999px;
+}
+@media(max-width:1000px){
+  .lineup-summary-grid{grid-template-columns:1fr 1fr}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1176,9 +1407,11 @@ def sync_pool_editor():
                 st.session_state.pending_pool_ids.discard(nid)
 
 st.title("NUKE NFL DFS HUB")
-st.caption("Player Pool • Hand Building • Exposure • Combo Intelligence")
+st.markdown("<div class=\"nuke-section-kicker\">NFL DFS COMMAND CENTER</div>",unsafe_allow_html=True)
+st.caption("Slate Intel • Player Pool • QB Planning • Multi-Lineup Hand Building • Late Swap • Portfolio Control")
 
 with st.sidebar:
+    st.markdown('<div class="nuke-section-kicker">NUKE CONTROL PANEL</div>',unsafe_allow_html=True)
     st.subheader("Slate")
     up=st.file_uploader("DraftKings salary CSV",type="csv")
     if up is not None:
@@ -1422,7 +1655,22 @@ with modeltab:
 
 
 with pooltab:
+    st.markdown('<div class="nuke-section-kicker">YOUR DRAFT BOARD</div>',unsafe_allow_html=True)
     st.subheader("Choose the players you actually want to use")
+
+    pool_counts=st.session_state.slate[
+        st.session_state.slate["Name + ID"].isin(st.session_state.pending_pool_ids)
+    ]["Position"].value_counts().to_dict()
+    st.markdown(
+        '<div class="nuke-player-pool-banner">'
+        + f'<span class="nuke-pill">POOL {len(st.session_state.pending_pool_ids)} / {len(st.session_state.slate)}</span>'
+        + ''.join(
+            f'<span class="nuke-pill">{p} {int(pool_counts.get(p,0))}</span>'
+            for p in ["QB","RB","WR","TE","DST"]
+        )
+        + '</div>',
+        unsafe_allow_html=True
+    )
     st.caption("Selections are staged as you filter. Nothing is committed until you click **Apply Player Pool Changes**.")
 
     player_view,game_view=st.tabs(["PLAYERS","GAME BY GAME"])
@@ -1548,11 +1796,11 @@ with pooltab:
             if odds:
                 st.markdown(
                     f"""
-                    <div style="border:1px solid rgba(128,128,128,.28);border-radius:16px;padding:16px 18px;margin:4px 0 14px 0;background:rgba(128,128,128,.055)">
+                    <div class="nuke-game-board">
                       <div style="display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap">
                         <div style="min-width:190px">
                           <div style="font-size:.72rem;opacity:.58;font-weight:800">AWAY</div>
-                          <div style="font-size:1.45rem;font-weight:950">{away}</div>
+                          <div class="nuke-game-team">{away}</div>
                           <div style="font-size:.88rem;opacity:.75">Spread <b>{fmt_spread(odds.get("away_spread"))}</b> &nbsp; ML <b>{fmt_ml(odds.get("away_ml"))}</b></div>
                           <div style="font-size:.82rem;opacity:.62">Implied {odds.get("away_implied",0):.1f} pts <span class="rank-badge" style="color:{heat_color(team_rank.get(away),team_count)}">#{team_rank.get(away,"—")} of {team_count}</span></div>
                         </div>
@@ -1563,7 +1811,7 @@ with pooltab:
                         </div>
                         <div style="min-width:190px;text-align:right">
                           <div style="font-size:.72rem;opacity:.58;font-weight:800">HOME</div>
-                          <div style="font-size:1.45rem;font-weight:950">{home}</div>
+                          <div class="nuke-game-team">{home}</div>
                           <div style="font-size:.88rem;opacity:.75">Spread <b>{fmt_spread(odds.get("home_spread"))}</b> &nbsp; ML <b>{fmt_ml(odds.get("home_ml"))}</b></div>
                           <div style="font-size:.82rem;opacity:.62">Implied {odds.get("home_implied",0):.1f} pts <span class="rank-badge" style="color:{heat_color(team_rank.get(home),team_count)}">#{team_rank.get(home,"—")} of {team_count}</span></div>
                         </div>
@@ -1597,6 +1845,7 @@ with pooltab:
                     </div>""",unsafe_allow_html=True)
                 st.progress(min(int(pct),100))
 
+            st.markdown('<div class="nuke-section-kicker">MATCHUP PLAYER POOL</div>',unsafe_allow_html=True)
             st.markdown("#### Game Rosters")
             st.caption("Build your staged player pool directly from each side of the matchup.")
 
@@ -1850,6 +2099,7 @@ with qbplantab:
 
 
 with buildtab:
+    st.markdown('<div class="nuke-section-kicker">HAND BUILD MODE</div>',unsafe_allow_html=True)
     st.subheader("QB-Anchored Multi-Lineup Builder")
 
     groups=qb_group_options()
@@ -1985,10 +2235,18 @@ with buildtab:
                     border="#19c37d" if is_active else "rgba(128,128,128,.28)"
                     bg="rgba(25,195,125,.045)" if is_active else "rgba(128,128,128,.025)"
 
+                    is_complete=complete(lu) and valid(lu)
+                    status_html=(
+                        '<span class="nuke-status-complete">COMPLETE ✓</span>'
+                        if is_complete else
+                        '<span class="nuke-status-draft">DRAFT</span>'
+                    )
                     st.markdown(
-                        f'<div style="border:2px solid {border};border-radius:16px;padding:10px 11px;background:{bg};margin-bottom:6px">'
-                        f'<div style="font-size:.70rem;font-weight:950;letter-spacing:.08em;color:{border}">'
-                        f'{"ACTIVE • " if is_active else ""}LINEUP {draft_idx+1}</div></div>',
+                        '<div class="nuke-lineup-shell '+('active' if is_active else '')+'">'
+                        '<div class="nuke-lineup-top">'
+                        '<span class="nuke-lineup-name">'+('ACTIVE • ' if is_active else '')+'LINEUP '+str(draft_idx+1)+'</span>'
+                        +status_html+
+                        '</div></div>',
                         unsafe_allow_html=True
                     )
 
@@ -2028,7 +2286,18 @@ with buildtab:
                         f'<div class="metriclabel">LEFT</div><div class="metricvalue {"redtext" if rem<0 else ""}">${rem:,}</div></div>',
                         unsafe_allow_html=True
                     )
-                    st.caption(f'{s["label"]} • {count}/9 players')
+                    salary_pct=min(max(su/CAP,0),1.25)*100
+                    salary_class="salary-over" if su>CAP else "salary-warn" if su>=48000 else "salary-good"
+                    avg_left=(rem/max(1,9-count)) if count<9 else rem
+                    st.markdown(
+                        '<div class="salary-track"><div class="salary-fill '+salary_class+'" style="width:'+str(min(salary_pct,100))+'%"></div></div>'
+                        '<div class="lineup-summary-grid">'
+                        '<div class="lineup-summary-cell"><span class="lbl">STACK</span><span class="val">'+str(s["label"])+'</span></div>'
+                        '<div class="lineup-summary-cell"><span class="lbl">PLAYERS</span><span class="val">'+str(count)+'/9</span></div>'
+                        '<div class="lineup-summary-cell"><span class="lbl">AVG LEFT</span><span class="val">$'+f'{int(avg_left):,}'+'</span></div>'
+                        '</div>',
+                        unsafe_allow_html=True
+                    )
 
                     # FLEX late-swap optimization.
                     fs=flex_status(lu)
@@ -2158,6 +2427,28 @@ with savedtab:
         b.metric("Valid",len(valid_saved))
         c.metric("Duplicate groups",len(saved_duplicate_groups()))
 
+        st.markdown('<div class="nuke-section-kicker">PORTFOLIO BOARD</div>',unsafe_allow_html=True)
+        preview_cols=st.columns(min(4,len(saved)))
+        for pc,(pi,plu) in zip(preview_cols,saved[:4]):
+            with pc:
+                pstack=stack(plu)["label"]
+                psal=salary(plu)
+                player_lines=[]
+                for ss in SLOTS:
+                    pp=pbyid(plu.get(ss))
+                    if pp:
+                        player_lines.append(
+                            '<div style="font-size:.72rem;margin:2px 0">'
+                            '<b>'+ss+'</b> '+team_badge(pp["Team"])+' '+str(pp["Name"])+'</div>'
+                        )
+                st.markdown(
+                    '<div class="saved-card"><h4>LINEUP '+str(pi+1)+'</h4>'
+                    '<div style="font-size:.70rem;opacity:.62;margin-bottom:5px">$'+f'{psal:,}'+' • '+pstack+'</div>'
+                    +''.join(player_lines)+
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+
         rows=[]
         for i,lu in saved:
             row={"Lineup":i+1}
@@ -2222,8 +2513,21 @@ with exptab:
     else:
         l,r=st.columns([1.05,.95],gap="large")
         with l:
+            st.markdown('<div class="nuke-section-kicker">PORTFOLIO HEAT</div>',unsafe_allow_html=True)
             st.subheader("Player exposure")
-            st.dataframe(saved_exposure(),hide_index=True,use_container_width=True,height=520)
+            expdf=saved_exposure()
+            for _,er in expdf.head(12).iterrows():
+                pct=float(er["Exposure %"])
+                color="#19c37d" if pct<35 else "#f2c94c" if pct<60 else "#ff5d5d"
+                st.markdown(
+                    '<div class="exposure-row">'
+                    '<div class="exposure-name">'+str(er["Player"])+'</div>'
+                    '<div class="exposure-track"><div class="exposure-fill" style="width:'+str(min(pct,100))+'%;background:'+color+'"></div></div>'
+                    '<div style="font-size:.72rem;font-weight:950;min-width:38px;text-align:right">'+f'{pct:.0f}%</div>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            st.dataframe(expdf,hide_index=True,use_container_width=True,height=400)
         with r:
             st.subheader("Combo exposure")
             mode=st.radio("Combo size",["Pairs","Trios"],horizontal=True)

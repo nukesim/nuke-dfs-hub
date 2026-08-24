@@ -1,42 +1,43 @@
-# NUKE NFL DFS HUB v16
+# NUKE NFL DFS HUB v17
 
-## GAME BY GAME roster redesign
+## GAME BY GAME — Position Filter
 
-Each matchup now displays like a true two-team game board.
+GAME BY GAME now has a real roster position filter:
+
+- ALL
+- QB
+- RB
+- WR
+- TE
+- DST
+
+The selected position filters **both teams simultaneously**.
 
 Example:
 
-ARI                              LAC
-[ARI roster]                     [LAC roster]
+ARI vs LAC
 
-The away roster stays entirely on the left and the home roster stays entirely on the right.
+Select `QB`:
 
-For each team you can now see:
+- left side shows only ARI QBs
+- right side shows only LAC QBs
 
-- team abbreviation
-- number of staged players
-- player-pool concentration rank
-- QB / RB / WR / TE / DST counts
-- player
-- position
-- DraftKings salary
-- Use checkbox
+Select `WR`:
 
-Selecting or removing a player directly updates the staged player pool.
+- left side shows only ARI WRs
+- right side shows only LAC WRs
 
-Under each team's table is a compact staged-player summary grouped by position.
+The filter changes only what is displayed. Players already staged in your player pool remain staged when you switch positions.
 
-This replaces the mixed matchup table and the old wall-of-names staged section.
+## Existing v16 layout remains
 
-## Existing features retained
+- away roster on left
+- home roster on right
+- separate team headers
+- salaries
+- staged-player counts
+- pool concentration ranks
+- direct Use checkboxes
+- compact selected-player summaries
 
-- Free Player Model
-- slate/game betting context
-- player pool staging
-- QB Plan
-- 1–4 lineup builder
-- FLEX late-swap optimization
-- saved lineups
-- exposures / combos
-- DraftKings export
-- workspace save/load
+All other Hub features remain unchanged.

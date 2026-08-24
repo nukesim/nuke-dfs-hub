@@ -1600,6 +1600,16 @@ with pooltab:
             st.markdown("#### Game Rosters")
             st.caption("Build your staged player pool directly from each side of the matchup.")
 
+            filter_left,filter_right=st.columns([.35,1.65])
+            game_pos_filter=filter_left.selectbox(
+                "Position",
+                ["ALL","QB","RB","WR","TE","DST"],
+                key=f"game_pos_filter_{game_key}"
+            )
+            filter_right.caption(
+                "Position filtering applies to **both teams at the same time** so you can compare the matchup side-by-side."
+            )
+
             # Keep team-player lists completely separated for easier game evaluation.
             roster_left,roster_right=st.columns(2,gap="large")
 
@@ -1608,6 +1618,13 @@ with pooltab:
                 (roster_right,home,home_df,home_conc_color)
             ]:
                 with col:
+                    # Apply the shared position filter to both sides of the game.
+                    visible_team_df=team_df.copy()
+                    if game_pos_filter!="ALL":
+                        visible_team_df=visible_team_df[
+                            visible_team_df["Position"]==game_pos_filter
+                        ].copy()
+
                     staged_count=sum(
                         nid in st.session_state.pending_pool_ids
                         for nid in team_df["Name + ID"]
@@ -1630,7 +1647,7 @@ with pooltab:
                         unsafe_allow_html=True
                     )
 
-                    team_roster=team_df.drop_duplicates("Name + ID").copy()
+                    team_roster=visible_team_df.drop_duplicates("Name + ID").copy()
                     pos_sort={"QB":1,"RB":2,"WR":3,"TE":4,"DST":5}
                     team_roster["_possort"]=team_roster["Position"].map(pos_sort).fillna(9)
                     team_roster=team_roster.sort_values(
@@ -1647,6 +1664,12 @@ with pooltab:
                     )
                     if pos_summary:
                         st.caption(pos_summary)
+
+                    if team_roster.empty:
+                        st.info(
+                            f"No {game_pos_filter} players for {team_name} in this DraftKings slate."
+                        )
+                        continue
 
                     # Use a compact checkbox table for each team.
                     team_editor=team_roster[

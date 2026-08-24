@@ -558,6 +558,134 @@ def qb_group_options():
             opts.append((data.get("qb",qb_id),qb_id,data["slots"]))
     return opts
 
+
+def saved_game_portfolio_summary():
+    """
+    Summarize saved-lineup game concentration and game-stack structures.
+    Returns a dict keyed by sorted team-pair game key.
+    """
+    summary={}
+    ds=saved_valid_lineups()
+    for _,lu in ds:
+        ps=players(lu)
+        # Group rostered skill players by actual game.
+        game_players={}
+        for p in ps:
+            if p["Position"]=="DST":
+                continue
+            t=str(p["Team"]).strip()
+            o=str(p["Opp"]).strip()
+            if not t or not o:
+                continue
+            key="|".join(sorted([t,o]))
+            game_players.setdefault(key,[]).append(p)
+
+        for key,gps in game_players.items():
+            teams=key.split("|")
+            a,b=teams[0],teams[1]
+            ca=sum(p["Team"]==a for p in gps)
+            cb=sum(p["Team"]==b for p in gps)
+            total=len(gps)
+
+            if total<=1:
+                stack_type="1-off"
+            elif ca>0 and cb>0:
+                hi=max(ca,cb); lo=min(ca,cb)
+                stack_type=f"{hi}-{lo}"
+            else:
+                stack_type=f"{total}-0"
+
+            rec=summary.setdefault(
+                key,
+                {
+                    "lineups":0,
+                    "2plus":0,
+                    "3plus":0,
+                    "4plus":0,
+                    "types":{},
+                    "max_players":0
+                }
+            )
+            rec["lineups"]+=1
+            rec["2plus"]+=total>=2
+            rec["3plus"]+=total>=3
+            rec["4plus"]+=total>=4
+            rec["max_players"]=max(rec["max_players"],total)
+            rec["types"][stack_type]=rec["types"].get(stack_type,0)+1
+    return summary
+
+def game_pool_summary():
+    """One row per DK slate game with staged pool counts by team."""
+    slate=st.session_state.slate
+    if slate is None or slate.empty:
+        return pd.DataFrame()
+
+    rows=[]
+    seen=set()
+    saved_summary=saved_game_portfolio_summary()
+    saved_n=max(1,len(saved_valid_lineups()))
+
+    for _,r in slate.iterrows():
+        t=str(r["Team"]).strip()
+        o=str(r["Opp"]).strip()
+        if not t or not o:
+            continue
+        key="|".join(sorted([t,o]))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        odds=st.session_state.game_totals.get(key,{}) if st.session_state.get("game_totals") else {}
+        if odds:
+            away=odds.get("away") or key.split("|")[0]
+            home=odds.get("home") or key.split("|")[1]
+        else:
+            away,home=key.split("|")[0],key.split("|")[1]
+
+        away_all=slate[slate["Team"]==away]
+        home_all=slate[slate["Team"]==home]
+
+        away_pool=sum(n in st.session_state.pending_pool_ids for n in away_all["Name + ID"])
+        home_pool=sum(n in st.session_state.pending_pool_ids for n in home_all["Name + ID"])
+        game_pool=away_pool+home_pool
+
+        port=saved_summary.get(key,{})
+        types=port.get("types",{})
+        type_txt=" • ".join(
+            f"{k} x{v}"
+            for k,v in sorted(
+                types.items(),
+                key=lambda kv:(-sum(int(x) for x in kv[0].split("-") if x.isdigit()),-kv[1],kv[0])
+            )[:4]
+        ) if types else "—"
+
+        rows.append({
+            "GameKey":key,
+            "Game":f"{away} @ {home}",
+            "Away":away,
+            "Home":home,
+            "Away Pool":away_pool,
+            "Home Pool":home_pool,
+            "Game Pool":game_pool,
+            "Total":odds.get("total"),
+            "Saved LU":port.get("lineups",0),
+            "2+ Stack LU":port.get("2plus",0),
+            "3+ Stack LU":port.get("3plus",0),
+            "4+ Stack LU":port.get("4plus",0),
+            "Portfolio %":round(port.get("lineups",0)/saved_n*100,1) if saved_valid_lineups() else 0.0,
+            "Stack Types":type_txt,
+            "Max Players":port.get("max_players",0)
+        })
+
+    out=pd.DataFrame(rows)
+    if not out.empty:
+        out=out.sort_values(
+            ["Game Pool","Saved LU","Total"],
+            ascending=[False,False,False],
+            na_position="last"
+        ).reset_index(drop=True)
+    return out
+
 def saved_items():
     items=[]
     for k,v in st.session_state.saved_lineups.items():
@@ -1737,6 +1865,77 @@ with pooltab:
     with game_view:
         st.caption("Matchup dashboard using the Team + Opponent fields from DraftKings and your gametotals.xlsx betting lines.")
 
+        st.markdown('<div class="nuke-section-kicker">SLATE GAME MAP</div>',unsafe_allow_html=True)
+        st.markdown("### Player Pool + Portfolio by Game")
+
+        game_summary=game_pool_summary()
+        if not game_summary.empty:
+            total_saved=len(saved_valid_lineups())
+            o1,o2,o3,o4=st.columns(4)
+            o1.metric("Slate games",len(game_summary))
+            o2.metric("Pool players",len(st.session_state.pending_pool_ids))
+            o3.metric("Saved lineups",total_saved)
+            o4.metric(
+                "Most-used game",
+                "—" if game_summary.empty or game_summary.iloc[0]["Saved LU"]==0
+                else game_summary.sort_values("Saved LU",ascending=False).iloc[0]["Game"]
+            )
+
+            # Compact one-view cards: 3 games across.
+            card_cols=st.columns(3,gap="small")
+            for gi,row in game_summary.iterrows():
+                with card_cols[gi%3]:
+                    total=row["Total"]
+                    total_txt="—" if pd.isna(total) else f'{float(total):g}'
+                    port_pct=float(row["Portfolio %"])
+                    port_color="#19c37d" if port_pct<35 else "#f2c94c" if port_pct<65 else "#ff5d5d"
+
+                    st.markdown(
+                        '<div class="nuke-card" style="margin-bottom:8px">'
+                        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'
+                        '<div>'
+                        '<div style="font-size:.74rem;font-weight:1000;letter-spacing:.07em">'+str(row["Game"])+'</div>'
+                        '<div style="font-size:.69rem;opacity:.58;margin-top:2px">O/U '+total_txt+'</div>'
+                        '</div>'
+                        '<div style="font-size:.68rem;font-weight:950;color:'+port_color+'">'
+                        +f'{row["Saved LU"]} SAVED LU'
+                        +'</div></div>'
+                        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:8px">'
+                        '<div class="lineup-summary-cell"><span class="lbl">'+str(row["Away"])+' POOL</span><span class="val">'+str(int(row["Away Pool"]))+'</span></div>'
+                        '<div class="lineup-summary-cell"><span class="lbl">'+str(row["Home"])+' POOL</span><span class="val">'+str(int(row["Home Pool"]))+'</span></div>'
+                        '<div class="lineup-summary-cell"><span class="lbl">GAME POOL</span><span class="val">'+str(int(row["Game Pool"]))+'</span></div>'
+                        '</div>'
+                        '<div style="font-size:.68rem;opacity:.68;margin-top:7px">'
+                        '<b>Game stacks:</b> '+str(row["Stack Types"])
+                        +'</div>'
+                        '<div style="font-size:.66rem;opacity:.54;margin-top:3px">'
+                        +f'2+ players: {int(row["2+ Stack LU"])} LU • 3+: {int(row["3+ Stack LU"])} • 4+: {int(row["4+ Stack LU"])}'
+                        +'</div>'
+                        '</div>',
+                        unsafe_allow_html=True
+                    )
+
+            with st.expander("Detailed game portfolio table"):
+                detail=game_summary[
+                    [
+                        "Game","Total","Away Pool","Home Pool","Game Pool",
+                        "Saved LU","Portfolio %","2+ Stack LU","3+ Stack LU",
+                        "4+ Stack LU","Stack Types","Max Players"
+                    ]
+                ].copy()
+                st.dataframe(
+                    detail,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Total":st.column_config.NumberColumn("O/U",format="%.1f"),
+                        "Portfolio %":st.column_config.NumberColumn("Saved LU %",format="%.1f%%")
+                    }
+                )
+
+            st.divider()
+            st.markdown('<div class="nuke-section-kicker">MATCHUP WORKBENCH</div>',unsafe_allow_html=True)
+
         # Build unique matchups directly from the DK slate.
         game_lookup={}
         for _,p in st.session_state.slate.iterrows():
@@ -1824,27 +2023,6 @@ with pooltab:
                 st.markdown(f"### {away} @ {home}")
                 st.info("No betting line found for this matchup in gametotals.xlsx.")
 
-            # Very obvious staged-pool status by team.
-            c1,c2=st.columns(2,gap="large")
-            with c1:
-                pct=(away_selected/max(len(away_df),1))*100
-                st.markdown(
-                    f"""<div style="border:2px solid {away_conc_color};border-radius:14px;padding:13px 15px;background:{away_conc_color+'18'}">
-                    <div style="font-size:1.1rem;font-weight:950">{away}</div>
-                    <div style="font-size:1.7rem;font-weight:1000;color:{away_conc_color}">{away_selected} SELECTED</div>
-                    <div style="font-size:.78rem;opacity:.6">of {len(away_df)} slate players staged • concentration rank #{away_conc_rank} of {conc_total}</div>
-                    </div>""",unsafe_allow_html=True)
-                st.progress(min(int(pct),100))
-            with c2:
-                pct=(home_selected/max(len(home_df),1))*100
-                st.markdown(
-                    f"""<div style="border:2px solid {home_conc_color};border-radius:14px;padding:13px 15px;background:{home_conc_color+'18'}">
-                    <div style="font-size:1.1rem;font-weight:950">{home}</div>
-                    <div style="font-size:1.7rem;font-weight:1000;color:{home_conc_color}">{home_selected} SELECTED</div>
-                    <div style="font-size:.78rem;opacity:.6">of {len(home_df)} slate players staged • concentration rank #{home_conc_rank} of {conc_total}</div>
-                    </div>""",unsafe_allow_html=True)
-                st.progress(min(int(pct),100))
-
             st.markdown('<div class="nuke-section-kicker">MATCHUP PLAYER POOL</div>',unsafe_allow_html=True)
             st.markdown("#### Game Rosters")
             st.caption("Build your staged player pool directly from each side of the matchup.")
@@ -1880,17 +2058,11 @@ with pooltab:
                     )
 
                     st.markdown(
-                        "<div style='border:2px solid "+team_color+";border-radius:15px;"
-                        "padding:12px 14px;background:"+team_color+"12;margin-bottom:10px'>"
+                        "<div class='nuke-roster-panel' style='border-left:4px solid "+team_color+";margin-bottom:8px'>"
                         "<div style='display:flex;justify-content:space-between;align-items:center;gap:10px'>"
-                        "<div>"
-                        "<div style='font-size:1.35rem;font-weight:1000'>"+team_name+"</div>"
-                        "<div style='font-size:.76rem;opacity:.60'>"+str(staged_count)+" players staged</div>"
-                        "</div>"
-                        "<div style='font-size:.73rem;font-weight:900;color:"+team_color+"'>"
-                        "POOL RANK #"+str(
-                            away_conc_rank if team_name==away else home_conc_rank
-                        )+" / "+str(conc_total)
+                        "<div style='font-size:1.25rem;font-weight:1000'>"+team_name+"</div>"
+                        "<div style='font-size:.72rem;font-weight:900;color:"+team_color+"'>"
+                        +str(staged_count)+" IN POOL"
                         +"</div>"
                         "</div></div>",
                         unsafe_allow_html=True

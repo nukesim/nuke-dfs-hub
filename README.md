@@ -1,54 +1,40 @@
-# NUKE NFL DFS HUB v18 — Visual Command Center
+# NUKE NFL DFS HUB v19 — Game Portfolio Map
 
-This version is a full UI/visual pass while preserving the underlying workflow.
+## GAME BY GAME redesign
 
-## Visual direction
-The Hub now leans into a:
-- DraftKings lineup-builder feel
-- sportsbook board feel
-- fantasy draft room feel
-- NUKE-specific dark / vibrant identity
+The duplicate large team-selection cards above the rosters are removed.
 
-## Major visual upgrades
+The GAME BY GAME tab now starts with a **Slate Game Map** that shows every matchup in one view.
 
-### Global
-- darker command-center canvas
-- stronger typography
-- green action accents
-- cleaner cards and panel separation
-- reduced generic Streamlit look
+Each game card includes:
 
-### Player Pool
-- Draft Board section
-- total pool count
-- QB / RB / WR / TE / DST pool counts displayed as pills
+- Away-team players currently staged in your Player Pool
+- Home-team players currently staged in your Player Pool
+- Total players staged from the game
+- Game total
+- Number of saved lineups containing players from the game
+- Game-stack structures already used in the saved portfolio
+- Counts of lineups with 2+, 3+, and 4+ players from that game
 
-### Game By Game
-- stronger matchup-board treatment
-- larger team headers
-- better hierarchy around totals / spread / implied totals
-- clear Matchup Player Pool section
-- existing side-by-side rosters and position filtering retained
+Example stack labels:
 
-### BUILD
-- Hand Build Mode visual identity
-- stronger active-lineup treatment
-- COMPLETE / DRAFT status badges
-- salary progress meter
-- green / yellow / red salary states
-- stack / players / average salary left summary
-- team-color player badges retained
+- `2-1` = three players from the game, split 2 from one team / 1 from the other
+- `3-1` = four-player game stack
+- `2-2` = balanced four-player game stack
+- `3-0` = three players from only one side
+- `1-off` = only one player from the game
 
-### Saved Lineups
-- Portfolio Board preview cards
-- first four saved lineups can be scanned visually
-- detailed table still remains below
+A detailed portfolio table is available inside an expander.
 
-### Exposure
-- top player exposures now render as visual bars
-- conditional colors:
-  - green = lower concentration
-  - yellow = moderate
-  - red = heavy
+Below the overview is the **Matchup Workbench**:
 
-All existing features remain.
+- game selector
+- betting environment
+- position filter
+- away roster left
+- home roster right
+- direct Player Pool staging
+
+This keeps the top of GAME BY GAME focused on portfolio/slate understanding and the bottom focused on making player-pool decisions.
+
+All other v18 visual-command-center features remain.

@@ -3,6 +3,9 @@ import streamlit as st
 import pandas as pd
 import json
 import re
+import math
+import unicodedata
+import numpy as np
 from itertools import combinations
 from pathlib import Path
 
@@ -82,6 +85,9 @@ def init():
     st.session_state.setdefault("qb_slot_map",{})
     st.session_state.setdefault("multi_view",1)
     st.session_state.setdefault("active_build_slot",0)
+    st.session_state.setdefault("model_df",None)
+    st.session_state.setdefault("model_errors",[])
+    st.session_state.setdefault("projection_overrides",{})
 init()
 
 
@@ -678,7 +684,7 @@ def dupes():
     return [x for x in m.values() if len(x)>1]
 
 def workspace():
-    return json.dumps({"slate_name":st.session_state.slate_name,"pool_ids":list(st.session_state.pool_ids),"lineups":st.session_state.lineups,"saved_lineups":st.session_state.saved_lineups,"draft_saved_link":st.session_state.draft_saved_link,"qb_plan":st.session_state.qb_plan,"qb_slot_map":st.session_state.qb_slot_map},indent=2)
+    return json.dumps({"slate_name":st.session_state.slate_name,"pool_ids":list(st.session_state.pool_ids),"lineups":st.session_state.lineups,"saved_lineups":st.session_state.saved_lineups,"draft_saved_link":st.session_state.draft_saved_link,"qb_plan":st.session_state.qb_plan,"qb_slot_map":st.session_state.qb_slot_map,"projection_overrides":st.session_state.projection_overrides},indent=2)
 
 def restore(o):
     arr=o.get("lineups",[])[:MAX_LU]
@@ -689,6 +695,8 @@ def restore(o):
     st.session_state.draft_saved_link=o.get("draft_saved_link",{})
     st.session_state.qb_plan=o.get("qb_plan",{})
     st.session_state.qb_slot_map=o.get("qb_slot_map",{})
+    st.session_state.projection_overrides=o.get("projection_overrides",{})
+    st.session_state.model_df=None
     st.session_state.pending_pool_ids=set(st.session_state.pool_ids)
 
 def dk_export():
@@ -697,6 +705,348 @@ def dk_export():
         rs.append({"QB":l["QB"],"RB":l["RB1"],"RB.1":l["RB2"],"WR":l["WR1"],"WR.1":l["WR2"],"WR.2":l["WR3"],"TE":l["TE"],"FLEX":l["FLEX"],"DST":l["DST"]})
     return pd.DataFrame(rs).to_csv(index=False).encode()
 
+
+
+def norm_player_name(name):
+    s="" if name is None else str(name)
+    s=unicodedata.normalize("NFKD",s).encode("ascii","ignore").decode("ascii")
+    s=s.lower()
+    s=re.sub(r"\b(jr|sr|ii|iii|iv|v)\b"," ",s)
+    s=re.sub(r"[^a-z0-9 ]+"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+def ncol(df,name,default=0.0):
+    if name in df.columns:
+        return pd.to_numeric(df[name],errors="coerce").fillna(default)
+    return pd.Series(default,index=df.index,dtype=float)
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def load_free_nfl_history():
+    """
+    Free weekly player stats from nflverse.
+    Tries 2024-2026 so the model automatically incorporates 2026 games once released.
+    """
+    frames=[]
+    errors=[]
+    for season in [2024,2025,2026]:
+        url=f"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_{season}.csv"
+        try:
+            d=pd.read_csv(url)
+            if "season_type" in d.columns:
+                d=d[d["season_type"].astype(str).str.upper().eq("REG")].copy()
+            d["season_model"]=season
+            frames.append(d)
+        except Exception as e:
+            errors.append(f"{season}: {type(e).__name__}")
+    if not frames:
+        return pd.DataFrame(),errors
+
+    h=pd.concat(frames,ignore_index=True,sort=False)
+
+    name_col=next((c for c in ["player_display_name","player_name","name"] if c in h.columns),None)
+    if not name_col:
+        return pd.DataFrame(),errors+["No player-name column found"]
+
+    h["ModelName"]=h[name_col].map(norm_player_name)
+    if "position" in h.columns:
+        h["ModelPos"]=h["position"].astype(str).str.upper().replace({"HB":"RB","FB":"RB"})
+    else:
+        h["ModelPos"]=""
+
+    # DraftKings classic scoring from box-score stats.
+    py=ncol(h,"passing_yards")
+    ptd=ncol(h,"passing_tds")
+    ints=ncol(h,"interceptions")
+    ry=ncol(h,"rushing_yards")
+    rtd=ncol(h,"rushing_tds")
+    rec=ncol(h,"receptions")
+    rey=ncol(h,"receiving_yards")
+    retd=ncol(h,"receiving_tds")
+    fum=ncol(h,"fumbles_lost")
+    twopt=ncol(h,"passing_2pt_conversions")+ncol(h,"rushing_2pt_conversions")+ncol(h,"receiving_2pt_conversions")
+
+    h["DKFP"]=(
+        py*.04 + ptd*4 - ints
+        + ry*.10 + rtd*6
+        + rec + rey*.10 + retd*6
+        - fum + twopt*2
+        + (py>=300).astype(float)*3
+        + (ry>=100).astype(float)*3
+        + (rey>=100).astype(float)*3
+    )
+
+    attempts=ncol(h,"attempts")
+    carries=ncol(h,"carries")
+    targets=ncol(h,"targets")
+    h["RoleOpp"]=np.where(
+        h["ModelPos"].eq("QB"),
+        attempts + carries*.70,
+        np.where(
+            h["ModelPos"].eq("RB"),
+            carries + targets*1.50,
+            np.where(
+                h["ModelPos"].isin(["WR","TE"]),
+                targets*1.70 + carries,
+                0
+            )
+        )
+    )
+
+    if "week" not in h.columns:
+        h["week"]=0
+    if "season" not in h.columns:
+        h["season"]=h["season_model"]
+
+    h["week"]=pd.to_numeric(h["week"],errors="coerce").fillna(0)
+    h["season"]=pd.to_numeric(h["season"],errors="coerce").fillna(h["season_model"])
+    h=h.sort_values(["ModelName","season","week"]).reset_index(drop=True)
+    return h,errors
+
+def salary_baseline(position,salary):
+    s=float(salary)
+    if position=="QB":
+        return float(np.clip(12.0+(s-4000)*.0030,11,25))
+    if position=="RB":
+        return float(np.clip(4.5+(s-3000)*.0030,4,23))
+    if position=="WR":
+        return float(np.clip(4.0+(s-3000)*.0028,3.8,22))
+    if position=="TE":
+        return float(np.clip(3.5+(s-2500)*.0027,3.2,19))
+    if position=="DST":
+        return float(np.clip(5.0+(s-2000)*.0015,4,10))
+    return 8.0
+
+def betting_context(team,opp):
+    key="|".join(sorted([str(team),str(opp)]))
+    g=st.session_state.game_totals.get(key,{}) if st.session_state.get("game_totals") else {}
+    implied=None
+    spread=None
+    if g:
+        if g.get("away")==team:
+            implied=g.get("away_implied"); spread=g.get("away_spread")
+        elif g.get("home")==team:
+            implied=g.get("home_implied"); spread=g.get("home_spread")
+    game_rank,team_rank,ng,nt=slate_total_ranks()
+    return {
+        "key":key,
+        "total":g.get("total") if g else None,
+        "implied":implied,
+        "spread":spread,
+        "game_rank":game_rank.get(key),
+        "team_rank":team_rank.get(team),
+        "games":ng,
+        "teams":nt
+    }
+
+def environment_multiplier(position,ctx):
+    mult=1.0
+    implied=ctx.get("implied")
+    total=ctx.get("total")
+    spread=ctx.get("spread")
+
+    # Relative to ordinary NFL scoring environments; intentionally modest.
+    if implied is not None:
+        mult*=1+float(np.clip((float(implied)-23.0)*.012,-.08,.09))
+    if total is not None:
+        mult*=1+float(np.clip((float(total)-44.0)*.004,-.04,.05))
+
+    if spread is not None:
+        sp=float(spread)
+        if position=="RB":
+            if sp<=-6: mult*=1.04
+            elif sp>=6: mult*=.96
+        elif position in ["WR","TE"]:
+            if sp>=6: mult*=1.025
+        elif position=="QB" and abs(sp)<=3.5:
+            mult*=1.015
+    return float(np.clip(mult,.86,1.14))
+
+def env_score_from_context(ctx):
+    vals=[]
+    if ctx.get("game_rank") and ctx.get("games"):
+        vals.append(100*(ctx["games"]-ctx["game_rank"]+1)/ctx["games"])
+    if ctx.get("team_rank") and ctx.get("teams"):
+        vals.append(100*(ctx["teams"]-ctx["team_rank"]+1)/ctx["teams"])
+    return float(np.mean(vals)) if vals else 50.0
+
+def role_multiplier(hist_rows):
+    if hist_rows is None or len(hist_rows)<5:
+        return 1.0,"Unknown"
+    recent=hist_rows.tail(3)["RoleOpp"].mean()
+    baseline=hist_rows.tail(10)["RoleOpp"].mean()
+    if not baseline or pd.isna(baseline):
+        return 1.0,"Stable"
+    ratio=float(np.clip(recent/baseline,.88,1.15))
+    label="Up" if ratio>=1.06 else "Down" if ratio<=.94 else "Stable"
+    return ratio,label
+
+def normal_tail(threshold,mean,sd):
+    sd=max(float(sd),1.5)
+    z=(float(threshold)-float(mean))/(sd*math.sqrt(2))
+    return .5*(1-math.erf(z))
+
+def build_projection_model(slate,overrides):
+    hist,errors=load_free_nfl_history()
+    rows=[]
+
+    # Index history by normalized player name for fast lookup.
+    hist_groups={}
+    if not hist.empty:
+        for nm,g in hist.groupby("ModelName",sort=False):
+            hist_groups[nm]=g
+
+    for _,p in slate.iterrows():
+        pos=str(p["Position"])
+        sal=int(p["Salary"])
+        base_salary=salary_baseline(pos,sal)
+        nm=norm_player_name(p["Name"])
+        hg=hist_groups.get(nm,pd.DataFrame())
+
+        if not hg.empty and pos!="DST":
+            # Prefer same listed position where possible.
+            samepos=hg[hg["ModelPos"].eq(pos)]
+            if len(samepos)>=2:
+                hg=samepos
+            hg=hg.sort_values(["season","week"])
+            # Exclude extreme zero-opportunity rows when enough real games exist.
+            real=hg[(hg["RoleOpp"]>0)|(hg["DKFP"]>1)]
+            if len(real)>=3:
+                hg=real
+
+        games=len(hg)
+        ctx=betting_context(str(p["Team"]),str(p["Opp"]))
+        env_mult=environment_multiplier(pos,ctx)
+        env_score=env_score_from_context(ctx)
+
+        rmult,rtrend=role_multiplier(hg) if games else (1.0,"Unknown")
+
+        if games:
+            last8=hg.tail(8)
+            weights=np.linspace(.70,1.30,len(last8))
+            recent=float(np.average(last8["DKFP"],weights=weights))
+            med_hist=float(hg.tail(17)["DKFP"].median())
+            if games>=6:
+                median=.55*recent+.25*med_hist+.20*base_salary
+            elif games>=3:
+                median=.45*recent+.20*med_hist+.35*base_salary
+            else:
+                median=.25*recent+.75*base_salary
+            median*=rmult*env_mult
+
+            hist_floor=float(hg.tail(17)["DKFP"].quantile(.20))
+            hist_ceil=float(hg.tail(17)["DKFP"].quantile(.85))
+            floor=max(0,min(median*.72,hist_floor*env_mult*rmult))
+            ceiling=max(median*1.34,hist_ceil*env_mult*rmult)
+            ceiling=min(ceiling,median*2.25)
+            hsd=float(hg.tail(12)["DKFP"].std(ddof=0)) if len(hg.tail(12))>1 else median*.28
+            confidence=float(np.clip(34+games*5.5,38,94))
+        else:
+            median=base_salary*env_mult
+            floor=max(0,median*.54)
+            ceiling=median*1.60
+            hsd=median*.32
+            confidence=28 if pos!="DST" else 38
+            rtrend="No history"
+
+        override=float(overrides.get(str(p["Name + ID"]),0) or 0)
+        override=np.clip(override,-50,150)
+        if override:
+            om=1+override/100
+            median*=om
+            floor*=max(.5,min(om,1.5))
+            ceiling*=om
+            confidence=max(20,confidence-5)
+
+        # Plausibility clamps.
+        caps={"QB":38,"RB":36,"WR":37,"TE":30,"DST":18}
+        median=float(np.clip(median,0,caps.get(pos,35)))
+        floor=float(np.clip(floor,0,median))
+        ceiling=float(np.clip(ceiling,max(median,floor),caps.get(pos,40)*1.35))
+
+        sd=max(hsd,(ceiling-floor)/2.56,2.0)
+        boom_mult=3.2 if pos=="QB" else 3.0 if pos=="DST" else 4.0
+        boom_threshold=(sal/1000)*boom_mult
+        boom=100*normal_tail(boom_threshold,median,sd)
+        value=median/(sal/1000)
+
+        rows.append({
+            "Name + ID":p["Name + ID"],
+            "Player":p["Name"],
+            "Pos":pos,
+            "Team":p["Team"],
+            "Opp":p["Opp"],
+            "Salary":sal,
+            "Median":round(median,2),
+            "Floor":round(floor,2),
+            "Ceiling":round(ceiling,2),
+            "Value":round(value,2),
+            "Boom %":round(float(np.clip(boom,0,100)),1),
+            "Hist Games":games,
+            "Confidence":round(confidence),
+            "Role Trend":rtrend,
+            "Role Adj %":round(override,1),
+            "Env Score":round(env_score,1),
+            "Game Rank":ctx.get("game_rank"),
+            "Team Total Rank":ctx.get("team_rank"),
+            "Implied Total":ctx.get("implied"),
+        })
+
+    out=pd.DataFrame(rows)
+    if out.empty:
+        return out,errors
+
+    # Percentile features by position.
+    feature_cols=["Median","Ceiling","Value","Boom %","Env Score"]
+    for col in feature_cols:
+        out[f"_{col}P"]=out.groupby("Pos")[col].rank(pct=True,method="average")
+
+    # Heuristic popularity estimate: useful as a field-popularity signal, not paid ownership.
+    own_budgets={"QB":100.0,"RB":260.0,"WR":360.0,"TE":120.0,"DST":100.0}
+    out["Est Own %"]=0.0
+    for pos,gidx in out.groupby("Pos").groups.items():
+        idx=list(gidx)
+        g=out.loc[idx]
+        sal_p=g["Salary"].rank(pct=True)
+        appeal=(
+            .38*g["_MedianP"]+
+            .30*g["_ValueP"]+
+            .17*g["_Env ScoreP"]+
+            .15*sal_p
+        )
+        weights=np.exp(3.4*appeal.to_numpy())-1
+        weights=np.maximum(weights,.001)
+        budget=own_budgets.get(pos,100.0)
+        own=budget*weights/weights.sum()
+        out.loc[idx,"Est Own %"]=own
+
+    out["Est Own %"]=out["Est Own %"].clip(0,48).round(1)
+    out["_LeverageP"]=1-out.groupby("Pos")["Est Own %"].rank(pct=True,method="average")
+    out["_ConfP"]=out["Confidence"]/100
+
+    out["Small Field"]=(
+        100*(
+            .45*out["_MedianP"]+
+            .20*out["_CeilingP"]+
+            .15*out["_ValueP"]+
+            .10*out["_ConfP"]+
+            .05*out["_Env ScoreP"]+
+            .05*out["_LeverageP"]
+        )
+    ).round(1)
+
+    out["Large Field"]=(
+        100*(
+            .18*out["_MedianP"]+
+            .34*out["_CeilingP"]+
+            .20*out["_Boom %P"]+
+            .15*out["_LeverageP"]+
+            .08*out["_Env ScoreP"]+
+            .05*out["_ValueP"]
+        )
+    ).round(1)
+
+    drop=[c for c in out.columns if c.startswith("_")]
+    return out.drop(columns=drop),errors
 
 def sync_pool_editor():
     """Capture checkbox edits immediately into a staged pool that survives filters."""
@@ -773,7 +1123,7 @@ if st.session_state.slate is None:
     st.info("Upload your DraftKings NFL salary CSV in the sidebar.")
     st.stop()
 
-hub,pooltab,qbplantab,buildtab,savedtab,exptab=st.tabs(["HUB","PLAYER POOL","QB PLAN","BUILD","SAVED LINEUPS","EXPOSURE & COMBOS"])
+hub,modeltab,pooltab,qbplantab,buildtab,savedtab,exptab=st.tabs(["HUB","PLAYER MODEL","PLAYER POOL","QB PLAN","BUILD","SAVED LINEUPS","EXPOSURE & COMBOS"])
 
 with hub:
     ov=slate_overview()
@@ -833,6 +1183,127 @@ with hub:
     if dups:
         st.error("Duplicate saved lineups: "+"; ".join(", ".join(map(str,g)) for g in dups))
 
+
+with modeltab:
+    st.subheader("NUKE Player Model")
+    st.caption("Free projection model using historical NFL usage/results + DraftKings salary + your slate's betting environment. Small/Large Field are contest scores, not separate fantasy-point projections.")
+
+    c1,c2,c3=st.columns([.9,.9,1.8])
+    if c1.button("LOAD / REFRESH MODEL",type="primary",use_container_width=True):
+        with st.spinner("Loading free NFL history and building slate model..."):
+            model,errs=build_projection_model(
+                st.session_state.slate,
+                st.session_state.projection_overrides
+            )
+            st.session_state.model_df=model
+            st.session_state.model_errors=errs
+        st.rerun()
+
+    if c2.button("CLEAR MODEL",use_container_width=True):
+        st.session_state.model_df=None
+        st.session_state.model_errors=[]
+        st.rerun()
+
+    c3.caption("Historical data is cached for 6 hours, so normal lineup-building clicks do not repeatedly download or rebuild the model.")
+
+    model=st.session_state.model_df
+    if model is None or model.empty:
+        st.info("Click **LOAD / REFRESH MODEL** once after uploading the DraftKings slate. The app will not fetch historical data until you ask it to.")
+    else:
+        matched=int((model["Hist Games"]>0).sum())
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Players modeled",len(model))
+        m2.metric("Historical matches",f"{matched} / {len(model)}")
+        m3.metric("High confidence",int((model["Confidence"]>=75).sum()))
+        m4.metric("Manual role overrides",len(st.session_state.projection_overrides))
+
+        if st.session_state.model_errors:
+            st.caption("Data-source notes: "+", ".join(st.session_state.model_errors))
+
+        f1,f2,f3,f4=st.columns([1.2,.7,.7,.8])
+        mq=f1.text_input("Search model",placeholder="Player, team…",key="model_search")
+        mpos=f2.selectbox("Position",["ALL","QB","RB","WR","TE","DST"],key="model_pos")
+        mteam=f3.selectbox("Team",["ALL"]+sorted(model["Team"].unique()),key="model_team")
+        contest=f4.selectbox("Rank by",["Large Field","Small Field","Median","Ceiling","Value"],key="model_rank")
+
+        view=model.copy()
+        if mq:
+            q=mq.lower()
+            view=view[view.apply(lambda r:q in f'{r["Player"]} {r["Team"]} {r["Opp"]}'.lower(),axis=1)]
+        if mpos!="ALL":
+            view=view[view["Pos"]==mpos]
+        if mteam!="ALL":
+            view=view[view["Team"]==mteam]
+
+        view=view.sort_values([contest,"Median"],ascending=[False,False])
+
+        display_cols=[
+            "Player","Pos","Team","Salary","Median","Floor","Ceiling",
+            "Value","Boom %","Est Own %","Small Field","Large Field",
+            "Confidence","Role Trend","Hist Games"
+        ]
+        st.dataframe(
+            view[display_cols],
+            hide_index=True,
+            use_container_width=True,
+            height=570,
+            column_config={
+                "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
+                "Median":st.column_config.NumberColumn("Median",format="%.1f"),
+                "Floor":st.column_config.NumberColumn("Floor",format="%.1f"),
+                "Ceiling":st.column_config.NumberColumn("Ceiling",format="%.1f"),
+                "Value":st.column_config.NumberColumn("Value",format="%.2fx"),
+                "Boom %":st.column_config.NumberColumn("Boom %",format="%.1f%%"),
+                "Est Own %":st.column_config.NumberColumn("Est Own*",format="%.1f%%"),
+                "Small Field":st.column_config.NumberColumn("Small",format="%.1f"),
+                "Large Field":st.column_config.NumberColumn("Large",format="%.1f"),
+                "Confidence":st.column_config.ProgressColumn("Confidence",min_value=0,max_value=100,format="%d")
+            }
+        )
+        st.caption("*Est Own is a heuristic field-popularity estimate, not a paid ownership projection.")
+
+        st.divider()
+        st.markdown("#### Player Role Adjustment")
+        st.caption("Use this for injury/role news the historical model cannot know — e.g. a backup RB becomes the starter. The adjustment changes that player's projection after you refresh the model.")
+
+        selectable=view["Name + ID"].tolist()
+        if selectable:
+            labels={nid:model.loc[model["Name + ID"]==nid,"Player"].iloc[0] for nid in selectable}
+            chosen_id=st.selectbox(
+                "Player",
+                selectable,
+                format_func=lambda x:labels.get(x,x),
+                key="override_player"
+            )
+            current=float(st.session_state.projection_overrides.get(chosen_id,0))
+            o1,o2,o3=st.columns([.8,.8,1.4])
+            new_adj=o1.number_input(
+                "Role adjustment %",
+                min_value=-50.0,max_value=150.0,value=current,step=5.0,
+                key="override_amount"
+            )
+            if o2.button("SAVE ADJUSTMENT",use_container_width=True):
+                if abs(new_adj)<.01:
+                    st.session_state.projection_overrides.pop(chosen_id,None)
+                else:
+                    st.session_state.projection_overrides[chosen_id]=float(new_adj)
+                with st.spinner("Rebuilding model..."):
+                    model,errs=build_projection_model(
+                        st.session_state.slate,
+                        st.session_state.projection_overrides
+                    )
+                    st.session_state.model_df=model
+                    st.session_state.model_errors=errs
+                st.rerun()
+            if o3.button("REMOVE ALL ROLE ADJUSTMENTS",use_container_width=True):
+                st.session_state.projection_overrides={}
+                with st.spinner("Rebuilding model..."):
+                    model,errs=build_projection_model(st.session_state.slate,{})
+                    st.session_state.model_df=model
+                    st.session_state.model_errors=errs
+                st.rerun()
+
+
 with pooltab:
     st.subheader("Choose the players you actually want to use")
     st.caption("Selections are staged as you filter. Nothing is committed until you click **Apply Player Pool Changes**.")
@@ -853,6 +1324,13 @@ with pooltab:
         if tm!="ALL":df=df[df["Team"]==tm]
         if po!="ALL":df=df[df["Position"]==po]
         df=df.sort_values(["Team","Salary"],ascending=[True,False]).copy()
+
+        if st.session_state.model_df is not None and not st.session_state.model_df.empty:
+            model_cols=st.session_state.model_df[
+                ["Name + ID","Median","Ceiling","Small Field","Large Field","Est Own %"]
+            ].copy()
+            df=df.merge(model_cols,on="Name + ID",how="left")
+
         df.insert(0,"Use",df["Name + ID"].isin(st.session_state.pending_pool_ids))
 
         st.session_state.pool_editor_map=df["Name + ID"].tolist()
@@ -866,15 +1344,25 @@ with pooltab:
 
         st.caption(f"{len(df)} players shown • {len(st.session_state.pending_pool_ids)} players staged for the next pool")
 
+        pool_cols=["Use","Name","Position","Team","Opp","Salary"]
+        if "Median" in df.columns:
+            pool_cols+=["Median","Ceiling","Small Field","Large Field","Est Own %"]
+        pool_cols+=["Name + ID"]
+
         st.data_editor(
-            df[["Use","Name","Position","Team","Opp","Salary","Name + ID"]],
+            df[pool_cols],
             hide_index=True,
             use_container_width=True,
             height=590,
-            disabled=["Name","Position","Team","Opp","Salary","Name + ID"],
+            disabled=[c for c in pool_cols if c!="Use"],
             column_config={
                 "Use":st.column_config.CheckboxColumn("Use",width="small"),
                 "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
+                "Median":st.column_config.NumberColumn("Med",format="%.1f"),
+                "Ceiling":st.column_config.NumberColumn("Ceil",format="%.1f"),
+                "Small Field":st.column_config.NumberColumn("Small",format="%.0f"),
+                "Large Field":st.column_config.NumberColumn("Large",format="%.0f"),
+                "Est Own %":st.column_config.NumberColumn("Est Own*",format="%.1f%%"),
                 "Name + ID":None,
             },
             key="pool_editor",

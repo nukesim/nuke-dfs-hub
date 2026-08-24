@@ -1,40 +1,37 @@
-# NUKE NFL DFS HUB v19 — Game Portfolio Map
+# NUKE NFL DFS HUB v20 — Correlation Builder
 
-## GAME BY GAME redesign
+## New in BUILD
+- Multi-row player selection.
+- Select two WRs, three RB/WR/TE options, etc. and add them in one action.
+- Players already used in the active lineup are hidden and cannot be selected again.
+- Selected players are automatically placed into the next legal DK roster slots.
 
-The duplicate large team-selection cards above the rosters are removed.
+## Correlation Map
+Every active lineup card now displays easy-to-read correlation badges:
+- `QB+2 BUF`
+- `BRING-BACK HOU x1`
+- `GAME BUF-HOU 4-2`
+- `DET x2`
 
-The GAME BY GAME tab now starts with a **Slate Game Map** that shows every matchup in one view.
+This exposes QB stacks, bring-backs, same-game concentration, and same-team correlation without requiring you to scan abbreviations manually.
 
-Each game card includes:
+## Game Portfolio Map
+The game board can now sort by:
+- Most stacked
+- Most saved lineup appearances
+- Most pool players
+- Highest game total
+- Most 4+ stacks
 
-- Away-team players currently staged in your Player Pool
-- Home-team players currently staged in your Player Pool
-- Total players staged from the game
-- Game total
-- Number of saved lineups containing players from the game
-- Game-stack structures already used in the saved portfolio
-- Counts of lineups with 2+, 3+, and 4+ players from that game
+Game-stack structures are larger and easier to read.
 
-Example stack labels:
+## Team Stacking / Exposure Ranking
+A new expandable table can sort teams by:
+- QB Stack LU
+- 3+ Team LU
+- 2+ Team LU
+- Saved LU
+- Pool
+- Players Used
 
-- `2-1` = three players from the game, split 2 from one team / 1 from the other
-- `3-1` = four-player game stack
-- `2-2` = balanced four-player game stack
-- `3-0` = three players from only one side
-- `1-off` = only one player from the game
-
-A detailed portfolio table is available inside an expander.
-
-Below the overview is the **Matchup Workbench**:
-
-- game selector
-- betting environment
-- position filter
-- away roster left
-- home roster right
-- direct Player Pool staging
-
-This keeps the top of GAME BY GAME focused on portfolio/slate understanding and the bottom focused on making player-pool decisions.
-
-All other v18 visual-command-center features remain.
+Saved Lineup preview cards also include the Correlation Map badges.

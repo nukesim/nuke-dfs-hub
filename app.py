@@ -291,6 +291,16 @@ h1{
 @media(max-width:1000px){
   .lineup-summary-grid{grid-template-columns:1fr 1fr}
 }
+
+.corr-wrap{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 9px 0}
+.corr-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 8px;font-size:.66rem;font-weight:950;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.025)}
+.corr-qb{color:#64d8ff;border-color:rgba(100,216,255,.35);background:rgba(100,216,255,.08)}
+.corr-game{color:#f2c94c;border-color:rgba(242,201,76,.35);background:rgba(242,201,76,.08)}
+.corr-team{color:#9be28f;border-color:rgba(155,226,143,.35);background:rgba(155,226,143,.08)}
+.corr-bring{color:#d4a7ff;border-color:rgba(212,167,255,.35);background:rgba(212,167,255,.08)}
+.corr-none{color:#8d99a8}
+.stack-big{font-size:.76rem;font-weight:1000;letter-spacing:.025em;padding:5px 7px;border-radius:8px;background:rgba(242,201,76,.07);border:1px solid rgba(242,201,76,.22);margin-top:5px}
+.portfolio-rank-pill{display:inline-block;border-radius:999px;padding:3px 7px;font-size:.65rem;font-weight:1000;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
 </style>
 """, unsafe_allow_html=True)
 
@@ -558,6 +568,115 @@ def qb_group_options():
             opts.append((data.get("qb",qb_id),qb_id,data["slots"]))
     return opts
 
+
+
+def lineup_correlation(lu):
+    ps=players(lu)
+    out={"qb_stack":None,"bringback":None,"team_clusters":[],"game_clusters":[]}
+
+    qb=next((p for p in ps if p["Position"]=="QB"),None)
+    if qb:
+        mates=[p for p in ps if p["Name + ID"]!=qb["Name + ID"] and p["Team"]==qb["Team"] and p["Position"] in ["RB","WR","TE"]]
+        bring=[p for p in ps if p["Team"]==qb["Opp"] and p["Position"] in ["RB","WR","TE"]]
+        if mates:
+            out["qb_stack"]={"team":qb["Team"],"count":len(mates),"names":[p["Name"] for p in mates]}
+        if bring:
+            out["bringback"]={"team":qb["Opp"],"count":len(bring),"names":[p["Name"] for p in bring]}
+
+    teams={}
+    for p in ps:
+        if p["Position"]=="DST":continue
+        teams.setdefault(p["Team"],[]).append(p)
+    for team,tps in teams.items():
+        if len(tps)>=2:
+            out["team_clusters"].append({"team":team,"count":len(tps),"names":[p["Name"] for p in tps]})
+
+    games={}
+    for p in ps:
+        if p["Position"]=="DST":continue
+        t=str(p["Team"]).strip(); o=str(p["Opp"]).strip()
+        if not t or not o:continue
+        key="|".join(sorted([t,o]))
+        games.setdefault(key,[]).append(p)
+
+    for key,gps in games.items():
+        if len(gps)>=2:
+            a,b=key.split("|")
+            ca=sum(p["Team"]==a for p in gps); cb=sum(p["Team"]==b for p in gps)
+            hi=max(ca,cb); lo=min(ca,cb)
+            out["game_clusters"].append({
+                "key":key,"label":f"{a}-{b} {hi}-{lo}","count":len(gps),
+                "names":[p["Name"] for p in gps]
+            })
+
+    out["team_clusters"].sort(key=lambda x:(-x["count"],x["team"]))
+    out["game_clusters"].sort(key=lambda x:(-x["count"],x["label"]))
+    return out
+
+def correlation_html(lu):
+    c=lineup_correlation(lu)
+    badges=[]
+    if c["qb_stack"]:
+        q=c["qb_stack"]
+        badges.append(f'<span class="corr-badge corr-qb">QB+{q["count"]} {q["team"]}</span>')
+    if c["bringback"]:
+        b=c["bringback"]
+        badges.append(f'<span class="corr-badge corr-bring">BRING-BACK {b["team"]} x{b["count"]}</span>')
+    for g in c["game_clusters"][:3]:
+        badges.append(f'<span class="corr-badge corr-game">GAME {g["label"]}</span>')
+    qb_team=c["qb_stack"]["team"] if c["qb_stack"] else None
+    for t in c["team_clusters"][:3]:
+        if t["team"]==qb_team:continue
+        badges.append(f'<span class="corr-badge corr-team">{t["team"]} x{t["count"]}</span>')
+    if not badges:
+        badges=['<span class="corr-badge corr-none">No meaningful correlation yet</span>']
+    return '<div class="corr-wrap">'+"".join(badges)+'</div>'
+
+def open_slots_for_position(lu,pos,preferred=None):
+    orders={"QB":["QB"],"RB":["RB1","RB2","FLEX"],"WR":["WR1","WR2","WR3","FLEX"],"TE":["TE","FLEX"],"DST":["DST"]}
+    slots=orders.get(pos,[])
+    if preferred in slots:
+        slots=[preferred]+[s for s in slots if s!=preferred]
+    return [s for s in slots if not lu.get(s)]
+
+def add_multiple_players(lu,player_ids,preferred_slot=None):
+    added=[]; skipped=[]
+    used=set(v for v in lu.values() if v)
+    for nid in player_ids:
+        p=pbyid(nid)
+        if not p:continue
+        if nid in used:
+            skipped.append(p["Name"]); continue
+        slots=open_slots_for_position(lu,p["Position"],preferred_slot)
+        if not slots:
+            skipped.append(p["Name"]); continue
+        lu[slots[0]]=nid
+        used.add(nid); added.append(p["Name"])
+        preferred_slot=None
+    return added,skipped
+
+def saved_team_portfolio_summary():
+    ds=saved_valid_lineups()
+    if st.session_state.slate is None:return pd.DataFrame()
+    rows=[]
+    for team in sorted(st.session_state.slate["Team"].unique()):
+        pool_df=st.session_state.slate[st.session_state.slate["Team"]==team]
+        pool_count=sum(n in st.session_state.pending_pool_ids for n in pool_df["Name + ID"])
+        lu_count=total_players=two_plus=three_plus=qb_stack_lu=0
+        for _,lu in ds:
+            ps=players(lu)
+            n=sum(p["Team"]==team and p["Position"]!="DST" for p in ps)
+            if n:
+                lu_count+=1; total_players+=n; two_plus+=n>=2; three_plus+=n>=3
+            c=lineup_correlation(lu)
+            if c["qb_stack"] and c["qb_stack"]["team"]==team:
+                qb_stack_lu+=1
+        rows.append({
+            "Team":team,"Pool":pool_count,"Saved LU":lu_count,"Players Used":total_players,
+            "2+ Team LU":two_plus,"3+ Team LU":three_plus,"QB Stack LU":qb_stack_lu,
+            "Portfolio %":round(lu_count/max(1,len(ds))*100,1) if ds else 0.0
+        })
+    return pd.DataFrame(rows)
 
 def saved_game_portfolio_summary():
     """
@@ -1870,6 +1989,24 @@ with pooltab:
 
         game_summary=game_pool_summary()
         if not game_summary.empty:
+            sort1,sort2=st.columns([.45,1.55])
+            game_sort=sort1.selectbox(
+                "Sort game map by",
+                ["Most stacked","Most saved lineup appearances","Most pool players","Highest game total","Most 4+ stacks"],
+                key="game_map_sort"
+            )
+            if game_sort=="Most stacked":
+                game_summary=game_summary.sort_values(["3+ Stack LU","4+ Stack LU","Saved LU","Game Pool"],ascending=[False,False,False,False],na_position="last")
+            elif game_sort=="Most saved lineup appearances":
+                game_summary=game_summary.sort_values(["Saved LU","3+ Stack LU","Game Pool"],ascending=[False,False,False],na_position="last")
+            elif game_sort=="Most pool players":
+                game_summary=game_summary.sort_values(["Game Pool","Saved LU"],ascending=[False,False],na_position="last")
+            elif game_sort=="Highest game total":
+                game_summary=game_summary.sort_values(["Total","Game Pool"],ascending=[False,False],na_position="last")
+            else:
+                game_summary=game_summary.sort_values(["4+ Stack LU","3+ Stack LU","Saved LU"],ascending=[False,False,False],na_position="last")
+            game_summary=game_summary.reset_index(drop=True)
+            sort2.caption("Most stacked prioritizes games appearing with 3+ correlated players across your saved portfolio.")
             total_saved=len(saved_valid_lineups())
             o1,o2,o3,o4=st.columns(4)
             o1.metric("Slate games",len(game_summary))
@@ -1932,6 +2069,22 @@ with pooltab:
                         "Portfolio %":st.column_config.NumberColumn("Saved LU %",format="%.1f%%")
                     }
                 )
+
+            with st.expander("Team stacking / exposure ranking"):
+                team_summary=saved_team_portfolio_summary()
+                if not team_summary.empty:
+                    team_sort=st.selectbox(
+                        "Sort teams by",
+                        ["QB Stack LU","3+ Team LU","2+ Team LU","Saved LU","Pool","Players Used"],
+                        key="team_port_sort"
+                    )
+                    team_summary=team_summary.sort_values([team_sort,"Saved LU","Pool"],ascending=[False,False,False])
+                    st.dataframe(
+                        team_summary,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={"Portfolio %":st.column_config.NumberColumn("Portfolio %",format="%.1f%%")}
+                    )
 
             st.divider()
             st.markdown('<div class="nuke-section-kicker">MATCHUP WORKBENCH</div>',unsafe_allow_html=True)
@@ -2343,57 +2496,73 @@ with buildtab:
                 cand=cand[cand.apply(lambda r:q in f"{r['Name']} {r['Team']} {r['Opp']}".lower(),axis=1)]
 
             used=set(v for v in active_lu.values() if v)
-            cand["In Active Lineup"]=cand["Name + ID"].isin(used)
+            cand=cand[~cand["Name + ID"].isin(used)].copy()
             cand=cand.sort_values(["Salary","Name"],ascending=[False,True]).reset_index(drop=True)
 
-            st.caption(f"Target: **Lineup {active_idx+1}** • Filling **{current_slot}** • {len(cand)} eligible")
+            st.caption(
+                f"Target: **Lineup {active_idx+1}** • Filling **{current_slot}** • "
+                f"{len(cand)} available • players already used are hidden"
+            )
 
             if cand.empty:
                 st.info("No eligible players match the current filters.")
             else:
                 event=st.dataframe(
-                    cand.assign(Kickoff=cand["Start"].map(fmt_start))[["Name","Position","Team","Opp","Kickoff","Salary","In Active Lineup"]],
+                    cand.assign(Kickoff=cand["Start"].map(fmt_start))[["Name","Position","Team","Opp","Kickoff","Salary"]],
                     hide_index=True,
                     use_container_width=True,
                     height=560,
                     on_select="rerun",
-                    selection_mode="single-row",
+                    selection_mode="multi-row",
                     column_config={
-                        "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
-                        "In Active Lineup":st.column_config.CheckboxColumn("Used",disabled=True)
+                        "Salary":st.column_config.NumberColumn("Salary",format="$%d")
                     },
                     key=f"multi_player_table_{active_idx}_{current_slot}"
                 )
-                selected_rows=event.selection.rows if event and hasattr(event,"selection") else []
-                selected_player=None
-                if selected_rows:
-                    ridx=selected_rows[0]
-                    if 0<=ridx<len(cand):
-                        selected_player=cand.iloc[ridx].to_dict()
 
-                if selected_player:
+                selected_rows=event.selection.rows if event and hasattr(event,"selection") else []
+                selected_players=[
+                    cand.iloc[ridx].to_dict()
+                    for ridx in selected_rows
+                    if 0<=ridx<len(cand)
+                ]
+
+                if selected_players:
+                    selected_ids=[p["Name + ID"] for p in selected_players]
+                    selected_names=", ".join(p["Name"] for p in selected_players)
+
                     st.markdown(
-                        '<div class="stack-card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center">'
-                        + '<div>' + team_badge(selected_player["Team"]) + ' <b>' + str(selected_player["Name"]) + '</b><br>'
-                        + '<span class="meta">' + str(selected_player["Position"]) + ' • ' + str(selected_player["Team"]) + ' vs ' + str(selected_player["Opp"]) + ' • ' + fmt_start(selected_player.get("Start")) + '</span></div>'
-                        + '<div style="font-size:1.05rem;font-weight:950">$' + f'{int(selected_player["Salary"]):,}' + '</div>'
-                        + '</div></div>',
+                        '<div class="stack-card">'
+                        '<div style="font-size:.69rem;font-weight:950;letter-spacing:.07em;color:#19c37d">SELECTED PLAYERS</div>'
+                        '<div style="font-size:.83rem;font-weight:850;margin-top:4px">'+selected_names+'</div>'
+                        '</div>',
                         unsafe_allow_html=True
                     )
+
+                    add_label=(
+                        f"ADD {len(selected_players)} PLAYERS TO LINEUP {active_idx+1}"
+                        if len(selected_players)>1
+                        else f"ADD {selected_players[0]['Name']} TO LINEUP {active_idx+1}"
+                    )
+
                     if st.button(
-                        f"ADD TO LINEUP {active_idx+1} • {current_slot}",
+                        add_label,
                         type="primary",
                         use_container_width=True,
-                        disabled=selected_player["Name + ID"] in used,
                         key=f"multi_add_{active_idx}_{current_slot}"
                     ):
-                        active_lu[current_slot]=selected_player["Name + ID"]
-                        idx=SLOTS.index(current_slot)
-                        nxt=next((s for s in SLOTS[idx+1:] if not active_lu.get(s)),None) or next((s for s in SLOTS if not active_lu.get(s)),current_slot)
-                        st.session_state.slot=nxt
+                        added,skipped=add_multiple_players(
+                            active_lu,
+                            selected_ids,
+                            preferred_slot=current_slot
+                        )
+                        st.session_state.slot=next(
+                            (s for s in SLOTS if not active_lu.get(s)),
+                            current_slot
+                        )
                         st.rerun()
                 else:
-                    st.caption("Click a player row, then add him to the active lineup.")
+                    st.caption("Select one or multiple rows. Example: select two WRs and add both at once.")
 
         # -------------------- 1-4 LINEUP SCREENS --------------------
         with right:
@@ -2468,6 +2637,12 @@ with buildtab:
                         '<div class="lineup-summary-cell"><span class="lbl">PLAYERS</span><span class="val">'+str(count)+'/9</span></div>'
                         '<div class="lineup-summary-cell"><span class="lbl">AVG LEFT</span><span class="val">$'+f'{int(avg_left):,}'+'</span></div>'
                         '</div>',
+                        unsafe_allow_html=True
+                    )
+
+                    st.markdown(
+                        '<div style="font-size:.64rem;font-weight:950;letter-spacing:.08em;opacity:.58;margin-top:5px">CORRELATION MAP</div>'
+                        + correlation_html(lu),
                         unsafe_allow_html=True
                     )
 
@@ -2605,6 +2780,7 @@ with savedtab:
             with pc:
                 pstack=stack(plu)["label"]
                 psal=salary(plu)
+                pcorr=correlation_html(plu)
                 player_lines=[]
                 for ss in SLOTS:
                     pp=pbyid(plu.get(ss))
@@ -2616,7 +2792,8 @@ with savedtab:
                 st.markdown(
                     '<div class="saved-card"><h4>LINEUP '+str(pi+1)+'</h4>'
                     '<div style="font-size:.70rem;opacity:.62;margin-bottom:5px">$'+f'{psal:,}'+' • '+pstack+'</div>'
-                    +''.join(player_lines)+
+                    +pcorr+
+                    ''.join(player_lines)+
                     '</div>',
                     unsafe_allow_html=True
                 )

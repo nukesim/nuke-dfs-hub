@@ -28,11 +28,12 @@ def prepare_slate(df):
     x = df.copy()
     aliases = {
         "Name": ["Name", "name", "Player", "player", "Name + ID"],
-        "Position": ["Position", "position", "Pos", "pos"],
+        "Position": ["Position", "position", "Pos", "pos", "Roster Position"],
         "Salary": ["Salary", "salary"],
         "Team": ["TeamAbbrev", "Team", "team", "team_abbrev"],
-        "Game": ["Game Info", "Game", "game", "game_info"],
+        "Game": ["Game Info", "Game", "game", "game_info", "game_id", "Game ID"],
         "ID": ["ID", "Id", "id", "player_id"],
+        "Status": ["Status", "status", "Injury Status", "injury_status"],
     }
     out = pd.DataFrame(index=x.index)
     for target, opts in aliases.items():
@@ -42,8 +43,9 @@ def prepare_slate(df):
     out["Position"] = out["Position"].map(_norm_pos)
     out["Salary"] = pd.to_numeric(out["Salary"], errors="coerce").fillna(0).astype(int)
     out["Team"] = out["Team"].astype(str).str.upper().str.strip()
-    out["Game"] = out["Game"].astype(str)
+    out["Game"] = out["Game"].astype(str).str.strip()
     out["ID"] = out["ID"].astype(str)
+    out["Status"] = out["Status"].astype(str).str.upper().str.strip()
     out = out[out["Position"].isin(["QB", "RB", "WR", "TE", "DST"]) & (out["Salary"] > 0)].reset_index(drop=True)
     out["market_score"] = out.groupby("Position")["Salary"].rank(pct=True).fillna(.5)
     out["role_override"] = "AUTO"
@@ -64,7 +66,6 @@ def _sample_points(row, rng, mode="NUKEM"):
     role = str(getattr(row, "role_override", "AUTO") or "AUTO").upper().strip()
     role_adj = ROLE_ADJUST.get(role, 0.0)
 
-    # Overrides shift opportunity rather than directly injecting a fantasy projection.
     if pos != "DST":
         mean *= usage * (1.0 + role_adj)
         sigma *= float(np.clip(np.sqrt(usage), .70, 1.45))

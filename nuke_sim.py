@@ -18,12 +18,96 @@ ROLE_ADJUST = {
 
 INACTIVE_STATUSES = {"OUT", "IR", "INACTIVE", "SUSPENDED"}
 
+# Automatic role multipliers are intentionally conservative. They are not fantasy
+# projections; they describe expected opportunity based on a player's place in his
+# own team's DraftKings salary hierarchy after inactive players are removed.
+AUTO_ROLE_MULTIPLIER = {
+    "QB1": 1.00,
+    "QB2+": 0.12,
+    "RB1": 1.08,
+    "RB2": 0.93,
+    "RB3": 0.78,
+    "RB4+": 0.62,
+    "WR1": 1.06,
+    "WR2": 1.00,
+    "WR3": 0.91,
+    "WR4+": 0.72,
+    "TE1": 1.04,
+    "TE2+": 0.76,
+    "DST": 1.00,
+}
+
 
 def _norm_pos(v):
     p = str(v).upper().strip()
     if p in {"D", "DEF", "DST"}:
         return "DST"
     return p.split("/")[0]
+
+
+def _auto_role_label(pos, depth_rank):
+    r = int(depth_rank)
+    if pos == "QB":
+        return "QB1" if r == 1 else "QB2+"
+    if pos == "RB":
+        return "RB1" if r == 1 else "RB2" if r == 2 else "RB3" if r == 3 else "RB4+"
+    if pos == "WR":
+        return "WR1" if r == 1 else "WR2" if r == 2 else "WR3" if r == 3 else "WR4+"
+    if pos == "TE":
+        return "TE1" if r == 1 else "TE2+"
+    return "DST"
+
+
+def _attach_auto_roles(out):
+    """Infer team depth roles from the active DK slate with no manual input.
+
+    Salary is used only as a market/depth-chart signal within each team/position.
+    The highest-salaried active QB on each team is treated as QB1. If a listed QB1
+    is OUT/IR/INACTIVE/SUSPENDED, he has already been removed and QB2 automatically
+    moves to QB1. Skill-position depth is softer: backups remain available but are
+    down-weighted rather than hard-excluded because backup RB/WR/TE players can still
+    become tournament-relevant.
+    """
+    x = out.copy()
+    x["team_depth_rank"] = 1
+    x["team_pos_salary_max"] = x["Salary"]
+
+    skill_mask = x["Position"].isin(["QB", "RB", "WR", "TE"])
+    if skill_mask.any():
+        ranked = x.loc[skill_mask].copy()
+        ranked["team_depth_rank"] = (
+            ranked.groupby(["Team", "Position"])["Salary"]
+            .rank(method="first", ascending=False)
+            .astype(int)
+        )
+        ranked["team_pos_salary_max"] = ranked.groupby(["Team", "Position"])["Salary"].transform("max")
+        x.loc[ranked.index, "team_depth_rank"] = ranked["team_depth_rank"]
+        x.loc[ranked.index, "team_pos_salary_max"] = ranked["team_pos_salary_max"]
+
+    x["salary_vs_team_top"] = (
+        x["Salary"] / pd.to_numeric(x["team_pos_salary_max"], errors="coerce").replace(0, np.nan)
+    ).fillna(1.0).clip(0.0, 1.0)
+    x["auto_role"] = [
+        _auto_role_label(pos, rank)
+        for pos, rank in zip(x["Position"], x["team_depth_rank"])
+    ]
+    x["auto_role_multiplier"] = x["auto_role"].map(AUTO_ROLE_MULTIPLIER).fillna(1.0).astype(float)
+
+    # QB is the one position where a true backup should not appear in a normal classic
+    # DFS lineup. Hard eligibility prevents random tail outcomes from promoting QB2s.
+    x["auto_qb_eligible"] = (~x["Position"].eq("QB")) | x["auto_role"].eq("QB1")
+
+    # Starter confidence is diagnostic/UI information, not an imported projection.
+    x["starter_confidence"] = 1.0
+    for idx, row in x.iterrows():
+        if row["Position"] == "QB":
+            x.at[idx, "starter_confidence"] = 0.995 if row["auto_role"] == "QB1" else 0.01
+        elif row["Position"] in {"RB", "WR", "TE"}:
+            depth = int(row["team_depth_rank"])
+            base = {1: .94, 2: .78, 3: .58}.get(depth, .32)
+            ratio = float(row["salary_vs_team_top"])
+            x.at[idx, "starter_confidence"] = float(np.clip(.65 * base + .35 * ratio, .05, .99))
+    return x
 
 
 def prepare_slate(df):
@@ -53,7 +137,7 @@ def prepare_slate(df):
     out["market_score"] = out.groupby("Position")["Salary"].rank(pct=True).fillna(.5)
     out["role_override"] = "AUTO"
     out["usage_multiplier"] = 1.0
-    return out
+    return _attach_auto_roles(out).reset_index(drop=True)
 
 
 def _sample_points(row, rng, mode="NUKEM"):
@@ -68,19 +152,24 @@ def _sample_points(row, rng, mode="NUKEM"):
     usage = float(np.clip(usage, 0.25, 2.25))
     role = str(getattr(row, "role_override", "AUTO") or "AUTO").upper().strip()
     role_adj = ROLE_ADJUST.get(role, 0.0)
+    auto_mult = float(getattr(row, "auto_role_multiplier", 1.0) or 1.0)
 
     if pos != "DST":
-        mean *= usage * (1.0 + role_adj)
-        sigma *= float(np.clip(np.sqrt(usage), .70, 1.45))
+        # Manual role is optional; automatic role/depth is always active underneath it.
+        mean *= usage * auto_mult * (1.0 + role_adj)
+        sigma *= float(np.clip(np.sqrt(usage * max(auto_mult, .25)), .55, 1.45))
 
     if mode == "NUKEM":
         market = float(getattr(row, "market_score", .5))
         boom_prob = .06 + .12 * market
         if role in {"RB1", "WR1", "TE1", "QB1"}:
             boom_prob += .03
+        # Deep backups can still hit, but they should not receive starter-like tail rates.
+        if pos in {"RB", "WR", "TE"}:
+            boom_prob *= float(np.clip(.55 + .45 * auto_mult, .35, 1.10))
         boom_prob *= float(np.clip(.8 + .2 * usage, .65, 1.30))
         if rng.random() < min(.32, boom_prob):
-            mean += rng.gamma(2.2, 4.0) * float(np.clip(usage, .7, 1.5))
+            mean += rng.gamma(2.2, 4.0) * float(np.clip(usage * auto_mult, .45, 1.5))
         if rng.random() < .055:
             mean *= rng.uniform(.05, .45)
 
@@ -117,17 +206,22 @@ def _valid_lineup(indices, p, min_salary, max_salary=50000):
     if sal < min_salary or sal > max_salary:
         return False
     counts = rows.Position.value_counts().to_dict()
-    return (
+    if not (
         counts.get("QB", 0) == 1
         and counts.get("RB", 0) >= 2
         and counts.get("WR", 0) >= 3
         and counts.get("TE", 0) >= 1
         and counts.get("DST", 0) == 1
-    )
+    ):
+        return False
+    qb_rows = rows[rows.Position.eq("QB")]
+    if "auto_qb_eligible" in qb_rows.columns and not bool(qb_rows.iloc[0]["auto_qb_eligible"]):
+        return False
+    return True
 
 
 def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
-    """Generate legal DK lineups with at least one QB pass-catcher stack."""
+    """Generate legal DK lineups with an inferred starting QB + pass-catcher stack."""
     rng = np.random.default_rng(seed)
     p = players.reset_index(drop=True)
     if p.empty:
@@ -139,15 +233,24 @@ def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
     market = p["market_score"].to_numpy(float)
     usage = p["usage_multiplier"].to_numpy(float) if "usage_multiplier" in p.columns else np.ones(len(p))
     roles = p["role_override"].astype(str).str.upper().map(ROLE_ADJUST).fillna(0).to_numpy(float) if "role_override" in p.columns else np.zeros(len(p))
+    auto_mult = p["auto_role_multiplier"].to_numpy(float) if "auto_role_multiplier" in p.columns else np.ones(len(p))
 
-    # Moderate market weighting keeps strong players favored without pushing every
-    # random lineup over the $50k cap. The previous exponent (6.0) was too steep.
     base_w = np.power(.08 + market, 3.0)
     base_w *= np.clip(usage, .35, 2.25)
     base_w *= np.clip(1.0 + roles, .45, 1.55)
+    base_w *= np.clip(auto_mult, .18, 1.15)
     base_w = np.clip(base_w, 1e-8, None)
 
-    pools = {pos: np.where(pos_arr == pos)[0] for pos in ["QB", "RB", "WR", "TE", "DST"]}
+    qb_mask = pos_arr == "QB"
+    if "auto_qb_eligible" in p.columns:
+        qb_mask &= p["auto_qb_eligible"].fillna(False).to_numpy(bool)
+    pools = {
+        "QB": np.where(qb_mask)[0],
+        "RB": np.where(pos_arr == "RB")[0],
+        "WR": np.where(pos_arr == "WR")[0],
+        "TE": np.where(pos_arr == "TE")[0],
+        "DST": np.where(pos_arr == "DST")[0],
+    }
     if any(len(v) == 0 for v in pools.values()):
         return []
     flex = np.where(np.isin(pos_arr, ["RB", "WR", "TE"]))[0]
@@ -208,7 +311,7 @@ def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
         if salary < int(min_salary) or salary > 50000:
             continue
         key = tuple(sorted(chosen))
-        if key in seen:
+        if key in seen or not _valid_lineup(chosen, p, min_salary):
             continue
         seen.add(key)
         result.append(chosen)
@@ -236,6 +339,8 @@ def evaluate_lineups(players, lineups, player_matrix):
         roster = players.iloc[lu]
         s = scores[:, j]
         salary = int(roster.Salary.sum())
+        qb = roster[roster.Position.eq("QB")]
+        qb_role = qb.iloc[0].get("auto_role", "QB1") if not qb.empty else ""
         rows.append({
             "Rank": 0,
             "NUKE Score": round(float(np.mean(s) + .65 * np.std(s) + .25 * np.quantile(s, .95)), 2),
@@ -243,6 +348,7 @@ def evaluate_lineups(players, lineups, player_matrix):
             "Ceiling 95": round(float(np.quantile(s, .95)), 2),
             "Salary": salary,
             "Stack": _stack_label(roster),
+            "QB Auto Role": qb_role,
             "QB": " / ".join(roster.loc[roster.Position.eq("QB"), "Name"].tolist()),
             "RB": " / ".join(roster.loc[roster.Position.eq("RB"), "Name"].tolist()),
             "WR": " / ".join(roster.loc[roster.Position.eq("WR"), "Name"].tolist()),
@@ -272,6 +378,8 @@ def exposure_table(players, results, top_n=50):
             "Pos": r.Position,
             "Team": r.Team,
             "Salary": int(r.Salary),
+            "Auto Role": getattr(r, "auto_role", ""),
+            "Starter Confidence": round(100 * float(getattr(r, "starter_confidence", 1.0)), 1),
             "Role": getattr(r, "role_override", "AUTO"),
             "Usage x": round(float(getattr(r, "usage_multiplier", 1.0)), 2),
             "Exposure %": round(100 * count / denom, 1),

@@ -56,14 +56,23 @@ def lineup_flex_position(players, indices):
 
 
 def add_dk_roster_columns(players, results, include_ids=True):
-    """Return analysis results with copy/paste-ready DK roster slots on the far left."""
+    """Return analysis results with unique, copy/paste-ready DK roster columns on the left."""
     if results is None or results.empty:
         return pd.DataFrame()
     out = results.copy().reset_index(drop=True)
     slot_rows = [lineup_to_dk_slots(players, lu) for lu in out["_indices"]]
     slots = pd.DataFrame(slot_rows, columns=ANALYSIS_ROSTER_HEADERS)
-    slots.insert(len(slots.columns), "FLEX Pos", [lineup_flex_position(players, lu) for lu in out["_indices"]])
-    return pd.concat([slots, out.drop(columns=["QB", "RB", "WR", "TE", "DST"], errors="ignore")], axis=1)
+    slots["FLEX Pos"] = [lineup_flex_position(players, lu) for lu in out["_indices"]]
+    # evaluate_lineups already carries summary columns such as QB/RB/WR/TE/DST and FLEX Pos.
+    # Remove them before concatenating the explicit DK slot columns so Arrow/Streamlit never
+    # receives duplicate column names.
+    drop_cols = ["QB", "RB", "WR", "TE", "DST", "FLEX Pos"]
+    remainder = out.drop(columns=drop_cols, errors="ignore")
+    combined = pd.concat([slots, remainder], axis=1)
+    if combined.columns.duplicated().any():
+        dupes = combined.columns[combined.columns.duplicated()].tolist()
+        raise ValueError(f"Duplicate analysis columns found: {dupes}")
+    return combined
 
 
 def build_lineup_only_csv(players, results, limit=None):

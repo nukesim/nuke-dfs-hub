@@ -27,7 +27,7 @@ with st.sidebar:
     field_size = st.number_input("Field size", 2, 100000, 470, 1)
     entry_fee = st.number_input("Entry fee ($)", 0.25, 10000.0, 25.0, 1.0)
     first_prize = st.number_input("1st prize ($)", 1.0, 10000000.0, 2500.0, 100.0)
-    user_lineups = st.number_input("Lineups to contest-sim", 1, 150, 50, 1)
+    st.caption("Every generated candidate lineup is contest-simmed automatically.")
     contest_iters = st.number_input("Contest iterations", 50, 5000, contest_iters, 50)
 
     st.divider()
@@ -127,20 +127,19 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
         pexposure = path_exposure(results, int(exposure_n))
 
         payout_label = "REAL DK PAYOUTS" if payouts_override is not None else "MODELED PAYOUTS"
-        st.write(f"4/5 · Simulating a {int(field_size):,}-entry tournament · {payout_label}...")
+        st.write(f"4/5 · Contest-simming all {len(results):,} candidates vs a {int(field_size):,}-entry tournament · {payout_label}...")
         contest_results, contest_summary = simulate_contest(
             results=results,
             player_matrix=matrix,
             field_size=int(field_size),
             entry_fee=float(entry_fee),
             first_prize=float(first_prize),
-            user_lineups=int(user_lineups),
             iterations=int(contest_iters),
             seed=int(seed) + 97,
             payouts_override=payouts_override,
         )
 
-        st.write("5/5 · Building a path-diversified portfolio...")
+        st.write("5/5 · Building a path-diversified portfolio from the full contest-simmed pool...")
         portfolio = build_portfolio(contest_results, size=int(portfolio_size), max_overlap=int(max_overlap), path_balance=float(path_balance))
         portfolio_paths, portfolio_stats = portfolio_summary(portfolio)
 
@@ -174,12 +173,14 @@ if results is not None and not results.empty:
         if contest_results is None or contest_results.empty:
             st.info("Run NUKE SIM to generate contest metrics.")
         else:
-            m1, m2, m3, m4, m5 = st.columns(5)
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
             m1.metric("Field", f"{int(contest_summary.get('field_size', 0)):,}")
             m2.metric("Entry", f"${float(contest_summary.get('entry_fee', 0)):,.2f}")
             m3.metric("Paid Places", f"{int(contest_summary.get('paid_places', 0)):,}")
             m4.metric("Contest Sims", f"{int(contest_summary.get('iterations', 0)):,}")
-            m5.metric("Payout Model", str(contest_summary.get("payout_model", "")))
+            m5.metric("Lineups Simmed", f"{int(contest_summary.get('contest_simmed_lineups', len(contest_results))):,}")
+            m6.metric("Payout Model", str(contest_summary.get("payout_model", "")))
+            st.caption("Every generated candidate is evaluated in the tournament model before contest ranking and portfolio selection.")
             if contest_summary.get("payout_model") == "Imported DraftKings payout ladder":
                 st.success("These ROI / payout metrics are using your imported payout ladder.")
             else:
@@ -293,11 +294,11 @@ if results is not None and not results.empty:
 
 **NUKEM Paths** classify the slate story each lineup is built to win.
 
-**Contest SIM** generates a tournament field and estimates `1st %`, `Top 0.1%`, `Top 1%`, `Cash %`, duplication, payout and ROI. When a payout file is uploaded, the payout and ROI math uses the imported ladder rather than NUKE's synthetic curve.
+**Contest SIM** evaluates every generated candidate against the modeled field and estimates `1st %`, `Top 0.1%`, `Top 1%`, `Cash %`, duplication, payout and ROI. When a payout file is uploaded, the payout and ROI math uses the imported ladder rather than NUKE's synthetic curve.
 
 **DK Export** can create roster-only CSVs or fill an actual DraftKings Entries CSV for direct re-upload.
 
-**Portfolio** selects lineups as a group, balancing contest quality against overlap and path concentration.
+**Portfolio** selects from the full contest-simmed candidate pool, balancing contest quality against overlap and path concentration.
 
 Current remaining limitation: the opponent lineups are still a modeled field. The next upgrade is optional ownership/projection input and Projection / Hybrid simulation modes.
         """)

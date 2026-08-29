@@ -16,6 +16,8 @@ ROLE_ADJUST = {
     "BACKUP": -0.20,
 }
 
+INACTIVE_STATUSES = {"OUT", "IR", "INACTIVE", "SUSPENDED"}
+
 
 def _norm_pos(v):
     p = str(v).upper().strip()
@@ -47,6 +49,7 @@ def prepare_slate(df):
     out["ID"] = out["ID"].fillna("").astype(str)
     out["Status"] = out["Status"].fillna("").astype(str).str.upper().str.strip()
     out = out[out["Position"].isin(["QB", "RB", "WR", "TE", "DST"]) & (out["Salary"] > 0)].reset_index(drop=True)
+    out = out[~out["Status"].isin(INACTIVE_STATUSES)].reset_index(drop=True)
     out["market_score"] = out.groupby("Position")["Salary"].rank(pct=True).fillna(.5)
     out["role_override"] = "AUTO"
     out["usage_multiplier"] = 1.0
@@ -124,26 +127,19 @@ def _valid_lineup(indices, p, min_salary, max_salary=50000):
 
 
 def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
-    """Generate legal DK lineups quickly from a full-slate player pool.
-
-    Weighting is precomputed once rather than recalculated with pandas on every draw.
-    A strong market-rank curve is used because high salary floors otherwise make rejection
-    sampling extremely slow on 500-700 player slates. Injury role/usage overrides still
-    materially change selection probability.
-    """
+    """Generate legal DK lineups with at least one QB pass-catcher stack."""
     rng = np.random.default_rng(seed)
     p = players.reset_index(drop=True)
     if p.empty:
         return []
 
     pos_arr = p["Position"].astype(str).to_numpy()
+    team_arr = p["Team"].astype(str).to_numpy()
     salaries = p["Salary"].to_numpy(int)
     market = p["market_score"].to_numpy(float)
     usage = p["usage_multiplier"].to_numpy(float) if "usage_multiplier" in p.columns else np.ones(len(p))
     roles = p["role_override"].astype(str).str.upper().map(ROLE_ADJUST).fillna(0).to_numpy(float) if "role_override" in p.columns else np.zeros(len(p))
 
-    # Steeper weighting keeps high-salary-floor lineup generation practical while still
-    # allowing promoted value plays to enter via usage/role boosts.
     base_w = np.power(.08 + market, 6.0)
     base_w *= np.clip(usage, .35, 2.25)
     base_w *= np.clip(1.0 + roles, .45, 1.55)
@@ -159,17 +155,45 @@ def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
         w = base_w[ids]
         pool_probs[pos] = w / w.sum()
 
+    qb_mates = {}
+    for qb in pools["QB"]:
+        ids = np.where((team_arr == team_arr[qb]) & np.isin(pos_arr, ["WR", "TE"]))[0]
+        qb_mates[int(qb)] = ids
+
     seen, result = set(), []
     attempts = 0
-    target_attempts = max(15000, int(n_lineups) * 65)
+    target_attempts = max(20000, int(n_lineups) * 110)
 
     while len(result) < int(n_lineups) and attempts < target_attempts:
         attempts += 1
-        chosen = [int(rng.choice(pools["QB"], p=pool_probs["QB"]))]
-        chosen += list(map(int, rng.choice(pools["RB"], 2, replace=False, p=pool_probs["RB"])))
-        chosen += list(map(int, rng.choice(pools["WR"], 3, replace=False, p=pool_probs["WR"])))
-        chosen += [int(rng.choice(pools["TE"], p=pool_probs["TE"]))]
-        chosen += [int(rng.choice(pools["DST"], p=pool_probs["DST"]))]
+        qb = int(rng.choice(pools["QB"], p=pool_probs["QB"]))
+        mates = qb_mates.get(qb, np.array([], dtype=int))
+        if len(mates) == 0:
+            continue
+        mw = base_w[mates]
+        mw = mw / mw.sum()
+        mate = int(rng.choice(mates, p=mw))
+        chosen = [qb, mate]
+
+        need = {
+            "RB": 2,
+            "WR": 3 - (1 if pos_arr[mate] == "WR" else 0),
+            "TE": 1 - (1 if pos_arr[mate] == "TE" else 0),
+            "DST": 1,
+        }
+        failed = False
+        for pos, count in need.items():
+            if count <= 0:
+                continue
+            ids = pools[pos][~np.isin(pools[pos], np.asarray(chosen, dtype=int))]
+            if len(ids) < count:
+                failed = True
+                break
+            w = base_w[ids]
+            w = w / w.sum()
+            chosen += list(map(int, rng.choice(ids, count, replace=False, p=w)))
+        if failed:
+            continue
 
         available_flex = flex[~np.isin(flex, np.asarray(chosen, dtype=int))]
         if len(available_flex) == 0:

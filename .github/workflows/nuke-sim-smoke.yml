@@ -20,5 +20,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
-      - name: Run NUKE SIM smoke test
-        run: pytest -q tests/test_nuke_sim_smoke.py
+      - name: Run NUKE SIM tests
+        run: pytest -q tests/test_nuke_sim_smoke.py tests/test_dk_contest_import.py tests/test_dk_export.py

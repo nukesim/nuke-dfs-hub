@@ -4,6 +4,7 @@ from nuke_sim import prepare_slate, simulate_player_matrix, generate_lineups, ev
 from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
 from nuke_portfolio import build_portfolio, portfolio_summary
+from dk_contest_import import parse_payout_upload
 
 st.set_page_config(page_title="NUKE SIM", page_icon="☢️", layout="wide")
 st.title("☢️ NUKE SIM")
@@ -12,11 +13,7 @@ st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE
 with st.sidebar:
     st.header("SIM CONTROL ROOM")
     preset = st.selectbox("Preset", ["QUICK", "STANDARD", "DEEP"], index=1)
-    presets = {
-        "QUICK": (300, 500, 50, 300),
-        "STANDARD": (700, 1500, 75, 750),
-        "DEEP": (1400, 3000, 100, 1500),
-    }
+    presets = {"QUICK": (300, 500, 50, 300), "STANDARD": (700, 1500, 75, 750), "DEEP": (1400, 3000, 100, 1500)}
     candidates, sims, exposure_n, contest_iters = presets[preset]
     min_salary = st.number_input("Minimum salary", 45000, 50000, 49400, 100)
     candidates = st.number_input("Candidate lineups", 100, 5000, candidates, 100)
@@ -38,18 +35,41 @@ with st.sidebar:
     max_overlap = st.slider("Max player overlap", 4, 8, 7, 1)
     path_balance = st.slider("Path diversification", 0.0, 3.0, 1.25, 0.25)
 
-uploaded = st.file_uploader(
+salary_upload = st.file_uploader(
     "Upload DraftKings NFL salary CSV",
     type=["csv"],
-    help="Use the normal DraftKings salary export. Your friend only needs the website and this CSV — no Python or VS Code.",
+    help="Use the normal DraftKings salary export.",
 )
 
-if uploaded is None:
+st.subheader("🏆 Contest Payouts")
+payout_upload = st.file_uploader(
+    "Optional: upload DraftKings payout CSV / Excel",
+    type=["csv", "xlsx", "xls"],
+    help="NUKE looks for a Rank/Place/Position column and a Payout/Prize/Winnings column. Rank ranges such as 11-20 are supported.",
+    key="dk_payout_upload",
+)
+payouts_override = None
+payout_info = None
+if payout_upload is not None:
+    try:
+        payouts_override, payout_info = parse_payout_upload(payout_upload)
+        a, b, c = st.columns(3)
+        a.metric("Imported Paid Places", f"{int(payout_info['paid_places']):,}")
+        b.metric("Imported 1st", f"${float(payout_info['first_prize']):,.0f}")
+        c.metric("Imported Prize Pool", f"${float(payout_info['listed_prize_pool']):,.0f}")
+        st.success("Real payout ladder loaded. Contest SIM will use these payouts instead of the synthetic curve.")
+    except Exception as e:
+        st.error(f"Could not parse payout file: {e}")
+        st.stop()
+else:
+    st.caption("No payout file uploaded — NUKE will use the modeled GPP payout curve.")
+
+if salary_upload is None:
     st.info("Upload a DraftKings NFL salary CSV to start NUKE SIM.")
     st.stop()
 
 try:
-    raw = pd.read_csv(uploaded)
+    raw = pd.read_csv(salary_upload)
     players = prepare_slate(raw)
 except Exception as e:
     st.error(f"Could not read this slate: {e}")
@@ -73,10 +93,7 @@ edited = st.data_editor(
     hide_index=True,
     disabled=["Name", "Position", "Team", "Salary", "Game"],
     column_config={
-        "Role": st.column_config.SelectboxColumn(
-            "Role",
-            options=["AUTO", "QB1", "RB1", "RB2", "RB3", "WR1", "WR2", "WR3", "TE1", "BACKUP"],
-        ),
+        "Role": st.column_config.SelectboxColumn("Role", options=["AUTO", "QB1", "RB1", "RB2", "RB3", "WR1", "WR2", "WR3", "TE1", "BACKUP"]),
         "Usage x": st.column_config.NumberColumn("Usage x", min_value=0.25, max_value=2.25, step=0.05, format="%.2f"),
     },
 )
@@ -108,7 +125,8 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
         exposure = exposure_table(players, results, int(exposure_n))
         pexposure = path_exposure(results, int(exposure_n))
 
-        st.write(f"4/5 · Simulating a {int(field_size):,}-entry tournament...")
+        payout_label = "REAL DK PAYOUTS" if payouts_override is not None else "MODELED PAYOUTS"
+        st.write(f"4/5 · Simulating a {int(field_size):,}-entry tournament · {payout_label}...")
         contest_results, contest_summary = simulate_contest(
             results=results,
             player_matrix=matrix,
@@ -118,15 +136,11 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
             user_lineups=int(user_lineups),
             iterations=int(contest_iters),
             seed=int(seed) + 97,
+            payouts_override=payouts_override,
         )
 
         st.write("5/5 · Building a path-diversified portfolio...")
-        portfolio = build_portfolio(
-            contest_results,
-            size=int(portfolio_size),
-            max_overlap=int(max_overlap),
-            path_balance=float(path_balance),
-        )
+        portfolio = build_portfolio(contest_results, size=int(portfolio_size), max_overlap=int(max_overlap), path_balance=float(path_balance))
         portfolio_paths, portfolio_stats = portfolio_summary(portfolio)
 
         st.session_state["nuke_sim_results"] = results
@@ -149,9 +163,7 @@ portfolio_paths = st.session_state.get("nuke_portfolio_paths")
 portfolio_stats = st.session_state.get("nuke_portfolio_stats", {})
 
 if results is not None and not results.empty:
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🏆 CONTEST SIM", "🧬 PORTFOLIO", "☢️ NUKEM LINEUPS", "🧭 PATHS", "👤 EXPOSURE", "🧠 MODEL NOTES"
-    ])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏆 CONTEST SIM", "🧬 PORTFOLIO", "☢️ NUKEM LINEUPS", "🧭 PATHS", "👤 EXPOSURE", "🧠 MODEL NOTES"])
 
     with tab1:
         if contest_results is None or contest_results.empty:
@@ -162,13 +174,12 @@ if results is not None and not results.empty:
             m2.metric("Entry", f"${float(contest_summary.get('entry_fee', 0)):,.2f}")
             m3.metric("Paid Places", f"{int(contest_summary.get('paid_places', 0)):,}")
             m4.metric("Contest Sims", f"{int(contest_summary.get('iterations', 0)):,}")
-            m5.metric("Candidates", f"{int(contest_summary.get('candidate_pool', 0)):,}")
-            st.caption("ROI and finish rates are simulated estimates. Field and payout modeling are still estimated until direct DraftKings contest import is added.")
-            preferred = [
-                "Contest Rank", "Sim ROI %", "1st %", "Top 0.1%", "Top 1%", "Cash %", "Avg Finish",
-                "Expected Duplicates", "Avg Payout", "Strongest Path", "Path Score", "Lineup Thesis",
-                "NUKE Score", "Ceiling 95", "Salary", "Stack", "QB", "RB", "WR", "TE", "DST",
-            ]
+            m5.metric("Payout Model", str(contest_summary.get("payout_model", "")))
+            if contest_summary.get("payout_model") == "Imported DraftKings payout ladder":
+                st.success("These ROI / payout metrics are using your imported payout ladder.")
+            else:
+                st.caption("No payout file was supplied, so payout metrics use the modeled GPP curve.")
+            preferred = ["Contest Rank", "Sim ROI %", "1st %", "Top 0.1%", "Top 1%", "Cash %", "Avg Finish", "Expected Duplicates", "Avg Payout", "Strongest Path", "Path Score", "Lineup Thesis", "NUKE Score", "Ceiling 95", "Salary", "Stack", "QB", "RB", "WR", "TE", "DST"]
             contest_show = contest_results[[c for c in preferred if c in contest_results.columns]].copy()
             st.dataframe(contest_show, use_container_width=True, hide_index=True)
             st.download_button("Download Contest SIM CSV", contest_show.to_csv(index=False).encode(), "nuke_contest_sim.csv", "text/csv")
@@ -185,10 +196,7 @@ if results is not None and not results.empty:
             st.caption("NUKE balances contest quality, path coverage, and lineup uniqueness instead of blindly taking ranks 1 through N.")
             if portfolio_paths is not None and not portfolio_paths.empty:
                 st.dataframe(portfolio_paths, use_container_width=True, hide_index=True)
-            preferred = [
-                "Portfolio Slot", "Portfolio Reason", "Sim ROI %", "1st %", "Top 1%", "Expected Duplicates",
-                "Strongest Path", "Path Score", "Lineup Thesis", "Salary", "Stack", "QB", "RB", "WR", "TE", "DST",
-            ]
+            preferred = ["Portfolio Slot", "Portfolio Reason", "Sim ROI %", "1st %", "Top 1%", "Expected Duplicates", "Strongest Path", "Path Score", "Lineup Thesis", "Salary", "Stack", "QB", "RB", "WR", "TE", "DST"]
             pshow = portfolio[[c for c in preferred if c in portfolio.columns]].copy()
             st.dataframe(pshow, use_container_width=True, hide_index=True)
             st.download_button("Download NUKE Portfolio CSV", pshow.to_csv(index=False).encode(), "nuke_portfolio.csv", "text/csv")
@@ -216,13 +224,13 @@ if results is not None and not results.empty:
         st.markdown("""
 **NUKEM Lineups** simulate volatile, correlated football outcomes without requiring a traditional fantasy-point projection feed.
 
-**Role / Usage Overrides** let you react to news. Example: if a $4,200 backup becomes the starter, set `Role = RB1` and raise `Usage x` (for example `1.25–1.45`) instead of pretending his old salary still represents his opportunity.
+**Role / Usage Overrides** let you react to injury/news changes before running the slate.
 
-**NUKEM Paths** classify the slate story each lineup is built to win: `PASSING_EXPLOSION`, `RB_DOMINANCE`, `VALUE_ERUPTION`, `STARS_FAIL`, `SHOOTOUT`, `LOW_SCORING`, or `BALANCED`.
+**NUKEM Paths** classify the slate story each lineup is built to win.
 
-**Contest SIM** generates a tournament field and estimates `1st %`, `Top 0.1%`, `Top 1%`, `Cash %`, duplication, payout and ROI.
+**Contest SIM** generates a tournament field and estimates `1st %`, `Top 0.1%`, `Top 1%`, `Cash %`, duplication, payout and ROI. When a payout file is uploaded, the payout and ROI math uses the imported ladder rather than NUKE's synthetic curve.
 
 **Portfolio** selects lineups as a group, balancing contest quality against overlap and path concentration.
 
-Current limitation: the opponent field and payout curve are modeled estimates. Next major additions are direct DraftKings contest/payout import and optional Projection / Hybrid modes.
+Current remaining limitation: the opponent lineups are still a modeled field. The next upgrade is optional ownership/projection input and Projection / Hybrid simulation modes.
         """)

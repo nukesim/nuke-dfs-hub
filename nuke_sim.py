@@ -1,8 +1,20 @@
-import math
 import numpy as np
 import pandas as pd
 
 DK_SLOTS = ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX", "DST"]
+
+ROLE_ADJUST = {
+    "AUTO": 0.00,
+    "QB1": 0.08,
+    "RB1": 0.18,
+    "RB2": -0.05,
+    "RB3": -0.18,
+    "WR1": 0.14,
+    "WR2": 0.04,
+    "WR3": -0.07,
+    "TE1": 0.12,
+    "BACKUP": -0.20,
+}
 
 
 def _norm_pos(v):
@@ -34,6 +46,8 @@ def prepare_slate(df):
     out["ID"] = out["ID"].astype(str)
     out = out[out["Position"].isin(["QB", "RB", "WR", "TE", "DST"]) & (out["Salary"] > 0)].reset_index(drop=True)
     out["market_score"] = out.groupby("Position")["Salary"].rank(pct=True).fillna(.5)
+    out["role_override"] = "AUTO"
+    out["usage_multiplier"] = 1.0
     return out
 
 
@@ -44,13 +58,28 @@ def _sample_points(row, rng, mode="NUKEM"):
     slope = {"QB": .00115, "RB": .00155, "WR": .00145, "TE": .00135, "DST": .00055}[pos]
     mean = base + max(0, salary - 2500) * slope
     sigma = {"QB": 6.2, "RB": 7.2, "WR": 7.8, "TE": 6.5, "DST": 5.5}[pos]
+
+    usage = float(getattr(row, "usage_multiplier", 1.0) or 1.0)
+    usage = float(np.clip(usage, 0.25, 2.25))
+    role = str(getattr(row, "role_override", "AUTO") or "AUTO").upper().strip()
+    role_adj = ROLE_ADJUST.get(role, 0.0)
+
+    # Overrides shift opportunity rather than directly injecting a fantasy projection.
+    if pos != "DST":
+        mean *= usage * (1.0 + role_adj)
+        sigma *= float(np.clip(np.sqrt(usage), .70, 1.45))
+
     if mode == "NUKEM":
-        # Heavy-tailed outcome model: salary is a market/depth signal, not a fantasy projection.
-        boom = rng.random() < (.06 + .12 * float(row.market_score))
-        if boom:
-            mean += rng.gamma(2.2, 4.0)
+        market = float(getattr(row, "market_score", .5))
+        boom_prob = .06 + .12 * market
+        if role in {"RB1", "WR1", "TE1", "QB1"}:
+            boom_prob += .03
+        boom_prob *= float(np.clip(.8 + .2 * usage, .65, 1.30))
+        if rng.random() < min(.32, boom_prob):
+            mean += rng.gamma(2.2, 4.0) * float(np.clip(usage, .7, 1.5))
         if rng.random() < .055:
             mean *= rng.uniform(.05, .45)
+
     return max(-4.0 if pos == "DST" else 0.0, rng.normal(mean, sigma))
 
 
@@ -61,12 +90,13 @@ def simulate_player_matrix(players, n_sims=1500, seed=26, mode="NUKEM"):
     game_keys = players["Game"].fillna("").astype(str).tolist()
     team_keys = players["Team"].fillna("").astype(str).tolist()
     unique_games = sorted(set(game_keys))
+    unique_teams = sorted(set(team_keys))
+
     for s in range(n_sims):
         game_factor = {g: rng.normal(0, 2.8) for g in unique_games}
-        team_factor = {t: rng.normal(0, 1.8) for t in set(team_keys)}
+        team_factor = {t: rng.normal(0, 1.8) for t in unique_teams}
         for i, row in enumerate(players.itertuples(index=False)):
             pts = _sample_points(row, rng, mode)
-            # Shared game/team shocks create useful correlation without hard-coded projections.
             if row.Position != "DST":
                 pts += .55 * game_factor.get(row.Game, 0) + .35 * team_factor.get(row.Team, 0)
             else:
@@ -83,7 +113,27 @@ def _valid_lineup(indices, p, min_salary, max_salary=50000):
     if sal < min_salary or sal > max_salary:
         return False
     counts = rows.Position.value_counts().to_dict()
-    return counts.get("QB", 0) == 1 and counts.get("RB", 0) >= 2 and counts.get("WR", 0) >= 3 and counts.get("TE", 0) >= 1 and counts.get("DST", 0) == 1
+    return (
+        counts.get("QB", 0) == 1
+        and counts.get("RB", 0) >= 2
+        and counts.get("WR", 0) >= 3
+        and counts.get("TE", 0) >= 1
+        and counts.get("DST", 0) == 1
+    )
+
+
+def _choice(rng, indices, p, size=1, replace=False):
+    if len(indices) < size:
+        raise ValueError("Not enough players at required position")
+    market = p.loc[indices, "market_score"].to_numpy(float)
+    usage = p.loc[indices, "usage_multiplier"].to_numpy(float) if "usage_multiplier" in p.columns else np.ones(len(indices))
+    role = p.loc[indices, "role_override"].astype(str).str.upper()
+    role_bonus = role.map(ROLE_ADJUST).fillna(0).to_numpy(float)
+    weights = (.20 + market) * np.clip(usage, .35, 2.0) * np.clip(1.0 + role_bonus, .45, 1.5)
+    weights = np.clip(weights, .01, None)
+    weights = weights / weights.sum()
+    picked = rng.choice(indices, size=size, replace=replace, p=weights)
+    return picked
 
 
 def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
@@ -93,23 +143,26 @@ def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
     flex = p.index[p.Position.isin(["RB", "WR", "TE"])].to_numpy()
     seen, result = set(), []
     attempts = 0
-    target_attempts = max(25000, n_lineups * 120)
+    target_attempts = max(30000, n_lineups * 150)
+
     while len(result) < n_lineups and attempts < target_attempts:
         attempts += 1
         if any(len(pools[k]) == 0 for k in pools):
             break
-        chosen = [int(rng.choice(pools["QB"]))]
-        chosen += list(map(int, rng.choice(pools["RB"], 2, replace=False)))
-        chosen += list(map(int, rng.choice(pools["WR"], 3, replace=False)))
-        chosen += [int(rng.choice(pools["TE"]))]
-        chosen += [int(rng.choice(pools["DST"]))]
+        try:
+            chosen = [int(_choice(rng, pools["QB"], p, 1)[0])]
+            chosen += list(map(int, _choice(rng, pools["RB"], p, 2)))
+            chosen += list(map(int, _choice(rng, pools["WR"], p, 3)))
+            chosen += [int(_choice(rng, pools["TE"], p, 1)[0])]
+            chosen += [int(_choice(rng, pools["DST"], p, 1)[0])]
+        except ValueError:
+            break
+
         available_flex = np.array([i for i in flex if i not in chosen], dtype=int)
         if len(available_flex) == 0:
             continue
-        # Bias flex toward stronger salary-market signal while retaining randomness.
-        weights = (.25 + p.loc[available_flex, "market_score"].to_numpy()) ** 2
-        weights = weights / weights.sum()
-        chosen += [int(rng.choice(available_flex, p=weights))]
+        chosen += [int(_choice(rng, available_flex, p, 1)[0])]
+
         key = tuple(sorted(chosen))
         if key in seen or not _valid_lineup(chosen, p, min_salary):
             continue
@@ -133,20 +186,16 @@ def evaluate_lineups(players, lineups, player_matrix):
     if not lineups:
         return pd.DataFrame()
     scores = np.stack([player_matrix[:, lu].sum(axis=1) for lu in lineups], axis=1)
-    thresholds = np.quantile(scores, [.50, .90, .99], axis=0)
     rows = []
     for j, lu in enumerate(lineups):
         roster = players.iloc[lu]
         s = scores[:, j]
-        q99 = float(thresholds[2, j])
-        top1 = float((s >= q99).mean() * 100)
         salary = int(roster.Salary.sum())
         rows.append({
             "Rank": 0,
-            "NUKE Score": round(float(np.mean(s) + .65*np.std(s) + .25*np.quantile(s,.95)), 2),
+            "NUKE Score": round(float(np.mean(s) + .65 * np.std(s) + .25 * np.quantile(s, .95)), 2),
             "Median": round(float(np.median(s)), 2),
             "Ceiling 95": round(float(np.quantile(s, .95)), 2),
-            "Top 1% Rate": round(top1, 2),
             "Salary": salary,
             "Stack": _stack_label(roster),
             "QB": " / ".join(roster.loc[roster.Position.eq("QB"), "Name"].tolist()),
@@ -157,12 +206,12 @@ def evaluate_lineups(players, lineups, player_matrix):
             "_indices": lu,
         })
     out = pd.DataFrame(rows).sort_values(["NUKE Score", "Ceiling 95"], ascending=False).reset_index(drop=True)
-    out["Rank"] = np.arange(1, len(out)+1)
+    out["Rank"] = np.arange(1, len(out) + 1)
     return out
 
 
 def exposure_table(players, results, top_n=50):
-    if results.empty:
+    if results is None or results.empty:
         return pd.DataFrame()
     sample = results.head(min(top_n, len(results)))
     counts = {}
@@ -173,5 +222,13 @@ def exposure_table(players, results, top_n=50):
     denom = len(sample)
     for idx, count in counts.items():
         r = players.iloc[idx]
-        rows.append({"Player": r.Name, "Pos": r.Position, "Team": r.Team, "Salary": int(r.Salary), "Exposure %": round(100*count/denom,1)})
+        rows.append({
+            "Player": r.Name,
+            "Pos": r.Position,
+            "Team": r.Team,
+            "Salary": int(r.Salary),
+            "Role": getattr(r, "role_override", "AUTO"),
+            "Usage x": round(float(getattr(r, "usage_multiplier", 1.0)), 2),
+            "Exposure %": round(100 * count / denom, 1),
+        })
     return pd.DataFrame(rows).sort_values(["Exposure %", "Salary"], ascending=[False, False]).reset_index(drop=True)

@@ -1,5 +1,10 @@
 # NUKE NFL DFS HUB v20 — Correlation Builder
 
+## 🚀 Live App
+**Open NUKE DFS Hub:** https://nuke-dfs-app.streamlit.app/
+
+The Streamlit deployment tracks the `main` branch of this repository, so merged updates should appear in the live app after Streamlit redeploys.
+
 ## New in BUILD
 - Multi-row player selection.
 - Select two WRs, three RB/WR/TE options, etc. and add them in one action.

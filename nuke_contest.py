@@ -57,14 +57,19 @@ def simulate_contest(
     field_size=470,
     entry_fee=25.0,
     first_prize=2500.0,
-    user_lineups=50,
+    user_lineups=None,
     iterations=1000,
     seed=2026,
     rake=0.15,
     cash_rate=0.20,
     payouts_override=None,
 ):
-    """Simulate lineups against a generated field using synthetic or imported payouts."""
+    """Simulate every generated candidate lineup against the modeled contest field.
+
+    `user_lineups` is retained only for backwards compatibility and is intentionally
+    ignored. Contest ranking now evaluates the complete candidate pool so a lineup
+    cannot be discarded before tournament-level ROI/leverage/duplication are measured.
+    """
     if results is None or results.empty:
         return pd.DataFrame(), {}
 
@@ -77,8 +82,6 @@ def simulate_contest(
     field_size = max(2, int(field_size))
     opp_n = field_size - 1
     iterations = max(50, int(iterations))
-    user_n = max(1, min(int(user_lineups), n_candidates))
-    user_idx = np.arange(user_n)
     rng = np.random.default_rng(int(seed))
     weights = _field_weights(r)
 
@@ -98,45 +101,49 @@ def simulate_contest(
     top01_cut = max(1, int(np.ceil(field_size * 0.001)))
     top1_cut = max(1, int(np.ceil(field_size * 0.01)))
 
-    wins = np.zeros(user_n, dtype=float)
-    top01 = np.zeros(user_n, dtype=float)
-    top1 = np.zeros(user_n, dtype=float)
-    cash = np.zeros(user_n, dtype=float)
-    payout_sum = np.zeros(user_n, dtype=float)
-    rank_sum = np.zeros(user_n, dtype=float)
-    dup_sum = np.zeros(user_n, dtype=float)
+    wins = np.zeros(n_candidates, dtype=float)
+    top01 = np.zeros(n_candidates, dtype=float)
+    top1 = np.zeros(n_candidates, dtype=float)
+    cash = np.zeros(n_candidates, dtype=float)
+    payout_sum = np.zeros(n_candidates, dtype=float)
+    rank_sum = np.zeros(n_candidates, dtype=float)
+    dup_sum = np.zeros(n_candidates, dtype=float)
+
+    payout_cum = np.concatenate(([0.0], np.cumsum(payouts, dtype=float)))
+    payout_len = len(payouts)
 
     for _ in range(iterations):
         sim_row = int(rng.integers(0, n_sims))
         scores = score_mat[sim_row]
         sampled = rng.choice(n_candidates, size=opp_n, replace=True, p=weights)
-        field_scores = scores[sampled]
+        field_scores = np.sort(scores[sampled])
         sampled_counts = np.bincount(sampled, minlength=n_candidates)
 
-        for j, idx in enumerate(user_idx):
-            s = scores[idx]
-            better = int(np.sum(field_scores > s))
-            tied_other = int(np.sum(field_scores == s))
-            rank_low = better + 1
-            rank_high = better + tied_other + 1
-            rank_sum[j] += (rank_low + rank_high) / 2.0
-            if rank_low == 1:
-                wins[j] += 1.0 / (tied_other + 1.0)
-            if rank_low <= top01_cut:
-                top01[j] += 1
-            if rank_low <= top1_cut:
-                top1[j] += 1
-            if rank_low <= paid_places:
-                cash[j] += 1
+        # Vectorized tournament ranking for the entire candidate pool.
+        left = np.searchsorted(field_scores, scores, side="left")
+        right = np.searchsorted(field_scores, scores, side="right")
+        tied_other = right - left
+        better = opp_n - right
+        rank_low = better + 1
+        rank_high = better + tied_other + 1
+        tie_size = tied_other + 1
 
-            lo = max(1, rank_low)
-            hi = min(len(payouts), rank_high)
-            if lo <= hi:
-                prize_slice = payouts[lo - 1:hi]
-                payout_sum[j] += float(prize_slice.sum()) / float(tied_other + 1)
-            dup_sum[j] += sampled_counts[idx]
+        rank_sum += (rank_low + rank_high) / 2.0
+        wins += np.where(rank_low == 1, 1.0 / tie_size, 0.0)
+        top01 += rank_low <= top01_cut
+        top1 += rank_low <= top1_cut
+        cash += rank_low <= paid_places
+        dup_sum += sampled_counts
 
-    out = r.iloc[:user_n].copy()
+        # Split all prizes covered by a tie across the tied entries.
+        lo = np.clip(rank_low - 1, 0, payout_len)
+        hi = np.clip(rank_high, 0, payout_len)
+        valid = hi > lo
+        prizes = np.zeros(n_candidates, dtype=float)
+        prizes[valid] = (payout_cum[hi[valid]] - payout_cum[lo[valid]]) / tie_size[valid]
+        payout_sum += prizes
+
+    out = r.copy()
     out["1st %"] = np.round(100 * wins / iterations, 3)
     out["Top 0.1%"] = np.round(100 * top01 / iterations, 2)
     out["Top 1%"] = np.round(100 * top1 / iterations, 2)
@@ -145,9 +152,13 @@ def simulate_contest(
     out["Expected Duplicates"] = np.round(dup_sum / iterations, 2)
     out["Avg Payout"] = np.round(payout_sum / iterations, 2)
     out["Sim ROI %"] = np.round(100 * ((payout_sum / iterations) - entry_fee) / entry_fee, 1)
-    out["Field Popularity"] = np.round(100 * weights[user_idx], 3)
+    out["Field Popularity"] = np.round(100 * weights, 3)
 
-    contest_score = out["Sim ROI %"].to_numpy(float) + 12.0 * out["1st %"].to_numpy(float) + 0.35 * out["Top 1%"].to_numpy(float)
+    contest_score = (
+        out["Sim ROI %"].to_numpy(float)
+        + 12.0 * out["1st %"].to_numpy(float)
+        + 0.35 * out["Top 1%"].to_numpy(float)
+    )
     order = np.argsort(-contest_score)
     out = out.iloc[order].reset_index(drop=True)
     out.insert(0, "Contest Rank", np.arange(1, len(out) + 1))
@@ -161,5 +172,6 @@ def simulate_contest(
         "field_model": "Projection-free generated field",
         "payout_model": payout_model,
         "candidate_pool": n_candidates,
+        "contest_simmed_lineups": n_candidates,
     }
     return out, summary

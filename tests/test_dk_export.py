@@ -1,6 +1,6 @@
 import pandas as pd
 
-from dk_export import build_lineup_only_csv, fill_entries_csv, lineup_to_dk_slots
+from dk_export import build_lineup_only_csv, fill_entries_csv, lineup_to_dk_slots, add_dk_roster_columns
 
 
 def _players():
@@ -19,12 +19,16 @@ def _players():
 
 
 def _results():
-    return pd.DataFrame({"_indices": [list(range(9))]})
+    return pd.DataFrame({
+        "_indices": [list(range(9))],
+        "QB": ["QB One"], "RB": ["RB One / RB Two / RB Flex"],
+        "WR": ["WR One / WR Two / WR Three"], "TE": ["TE One"], "DST": ["DST One"],
+        "FLEX Pos": ["RB"], "Contest Rank": [1], "Sim ROI %": [12.3],
+    })
 
 
 def test_lineup_to_dk_slots_and_entries_fill():
-    players = _players()
-    results = _results()
+    players = _players(); results = _results()
     slots = lineup_to_dk_slots(players, results.iloc[0]["_indices"])
     assert len(slots) == 9
     assert slots[0] == "QB One (1)"
@@ -44,3 +48,11 @@ def test_lineup_to_dk_slots_and_entries_fill():
     assert "QB One (1)" in out
     assert "RB Flex (4)" in out
     assert info["entries_filled"] == 1
+
+
+def test_analysis_export_has_unique_columns_and_dk_slots_left():
+    analysis = add_dk_roster_columns(_players(), _results())
+    assert not analysis.columns.duplicated().any()
+    assert list(analysis.columns[:10]) == ["QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX","DST","FLEX Pos"]
+    assert analysis.loc[0, "FLEX Pos"] == "RB"
+    assert analysis.loc[0, "QB"] == "QB One (1)"

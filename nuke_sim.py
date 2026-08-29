@@ -140,7 +140,9 @@ def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
     usage = p["usage_multiplier"].to_numpy(float) if "usage_multiplier" in p.columns else np.ones(len(p))
     roles = p["role_override"].astype(str).str.upper().map(ROLE_ADJUST).fillna(0).to_numpy(float) if "role_override" in p.columns else np.zeros(len(p))
 
-    base_w = np.power(.08 + market, 6.0)
+    # Moderate market weighting keeps strong players favored without pushing every
+    # random lineup over the $50k cap. The previous exponent (6.0) was too steep.
+    base_w = np.power(.08 + market, 3.0)
     base_w *= np.clip(usage, .35, 2.25)
     base_w *= np.clip(1.0 + roles, .45, 1.55)
     base_w = np.clip(base_w, 1e-8, None)
@@ -162,7 +164,7 @@ def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
 
     seen, result = set(), []
     attempts = 0
-    target_attempts = max(20000, int(n_lineups) * 110)
+    target_attempts = max(30000, int(n_lineups) * 180)
 
     while len(result) < int(n_lineups) and attempts < target_attempts:
         attempts += 1

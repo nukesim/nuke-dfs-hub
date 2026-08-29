@@ -3,6 +3,7 @@ import pandas as pd
 from nuke_sim import prepare_slate, simulate_player_matrix, generate_lineups, evaluate_lineups, exposure_table
 from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
+from nuke_portfolio import build_portfolio, portfolio_summary
 
 st.set_page_config(page_title="NUKE SIM", page_icon="☢️", layout="wide")
 st.title("☢️ NUKE SIM")
@@ -16,11 +17,11 @@ with st.sidebar:
         "STANDARD": (700, 1500, 75, 750),
         "DEEP": (1400, 3000, 100, 1500),
     }
-    candidates, sims, portfolio_n, contest_iters = presets[preset]
+    candidates, sims, exposure_n, contest_iters = presets[preset]
     min_salary = st.number_input("Minimum salary", 45000, 50000, 49400, 100)
     candidates = st.number_input("Candidate lineups", 100, 5000, candidates, 100)
     sims = st.number_input("Football universes", 250, 10000, sims, 250)
-    portfolio_n = st.number_input("Exposure portfolio", 10, 150, portfolio_n, 10)
+    exposure_n = st.number_input("Exposure sample", 10, 150, exposure_n, 10)
     seed = st.number_input("Random seed", 1, 999999, 26, 1)
 
     st.divider()
@@ -30,6 +31,12 @@ with st.sidebar:
     first_prize = st.number_input("1st prize ($)", 1.0, 10000000.0, 2500.0, 100.0)
     user_lineups = st.number_input("Lineups to contest-sim", 1, 150, 50, 1)
     contest_iters = st.number_input("Contest iterations", 50, 5000, contest_iters, 50)
+
+    st.divider()
+    st.subheader("Portfolio")
+    portfolio_size = st.number_input("Portfolio size", 1, 150, 20, 1)
+    max_overlap = st.slider("Max player overlap", 4, 8, 7, 1)
+    path_balance = st.slider("Path diversification", 0.0, 3.0, 1.25, 0.25)
 
 uploaded = st.file_uploader(
     "Upload DraftKings NFL salary CSV",
@@ -73,7 +80,7 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
         st.stop()
 
     with st.status("NUKE SIM is running...", expanded=True) as status:
-        st.write("1/4 · Generating legal DraftKings candidate lineups...")
+        st.write("1/5 · Generating legal DraftKings candidate lineups...")
         lineups = generate_lineups(players, int(candidates), int(min_salary), int(seed))
         if not lineups:
             status.update(label="No legal lineups found", state="error")
@@ -81,16 +88,16 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
             st.stop()
         st.write(f"Generated {len(lineups):,} unique candidates.")
 
-        st.write(f"2/4 · Simulating {int(sims):,} correlated football universes...")
+        st.write(f"2/5 · Simulating {int(sims):,} correlated football universes...")
         matrix = simulate_player_matrix(players, int(sims), int(seed), "NUKEM")
 
-        st.write("3/4 · Ranking lineup outcomes and assigning NUKEM paths...")
+        st.write("3/5 · Ranking lineup outcomes and assigning NUKEM paths...")
         results = evaluate_lineups(players, lineups, matrix)
         results = attach_path_labels(players, results)
-        exposure = exposure_table(players, results, int(portfolio_n))
-        pexposure = path_exposure(results, int(portfolio_n))
+        exposure = exposure_table(players, results, int(exposure_n))
+        pexposure = path_exposure(results, int(exposure_n))
 
-        st.write(f"4/4 · Simulating a {int(field_size):,}-entry tournament...")
+        st.write(f"4/5 · Simulating a {int(field_size):,}-entry tournament...")
         contest_results, contest_summary = simulate_contest(
             results=results,
             player_matrix=matrix,
@@ -102,11 +109,23 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
             seed=int(seed) + 97,
         )
 
+        st.write("5/5 · Building a path-diversified portfolio...")
+        portfolio = build_portfolio(
+            contest_results,
+            size=int(portfolio_size),
+            max_overlap=int(max_overlap),
+            path_balance=float(path_balance),
+        )
+        portfolio_paths, portfolio_stats = portfolio_summary(portfolio)
+
         st.session_state["nuke_sim_results"] = results
         st.session_state["nuke_sim_exposure"] = exposure
         st.session_state["nuke_path_exposure"] = pexposure
         st.session_state["nuke_contest_results"] = contest_results
         st.session_state["nuke_contest_summary"] = contest_summary
+        st.session_state["nuke_portfolio"] = portfolio
+        st.session_state["nuke_portfolio_paths"] = portfolio_paths
+        st.session_state["nuke_portfolio_stats"] = portfolio_stats
         status.update(label="NUKE SIM complete", state="complete")
 
 results = st.session_state.get("nuke_sim_results")
@@ -114,10 +133,14 @@ exposure = st.session_state.get("nuke_sim_exposure")
 pexposure = st.session_state.get("nuke_path_exposure")
 contest_results = st.session_state.get("nuke_contest_results")
 contest_summary = st.session_state.get("nuke_contest_summary", {})
+portfolio = st.session_state.get("nuke_portfolio")
+portfolio_paths = st.session_state.get("nuke_portfolio_paths")
+portfolio_stats = st.session_state.get("nuke_portfolio_stats", {})
 
 if results is not None and not results.empty:
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🏆 CONTEST SIM",
+        "🧬 PORTFOLIO",
         "☢️ NUKEM LINEUPS",
         "🧭 PATHS",
         "👤 EXPOSURE",
@@ -148,14 +171,30 @@ if results is not None and not results.empty:
             cols = [c for c in preferred if c in contest_results.columns]
             contest_show = contest_results[cols].copy()
             st.dataframe(contest_show, use_container_width=True, hide_index=True)
-            st.download_button(
-                "Download Contest SIM CSV",
-                contest_show.to_csv(index=False).encode(),
-                "nuke_contest_sim.csv",
-                "text/csv",
-            )
+            st.download_button("Download Contest SIM CSV", contest_show.to_csv(index=False).encode(), "nuke_contest_sim.csv", "text/csv")
 
     with tab2:
+        if portfolio is None or portfolio.empty:
+            st.info("Run NUKE SIM to build a portfolio.")
+        else:
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Lineups", int(portfolio_stats.get("lineups", 0)))
+            p2.metric("Paths Covered", int(portfolio_stats.get("paths", 0)))
+            p3.metric("Avg Sim ROI", f"{float(portfolio_stats.get('avg_roi', 0)):.1f}%")
+            p4.metric("Avg Duplicates", f"{float(portfolio_stats.get('avg_dup', 0)):.2f}")
+            st.caption("This is not simply the top-N contest ranking. NUKE rewards path coverage and lineup uniqueness while preserving contest quality.")
+            if portfolio_paths is not None and not portfolio_paths.empty:
+                st.dataframe(portfolio_paths, use_container_width=True, hide_index=True)
+            preferred = [
+                "Portfolio Slot", "Portfolio Reason", "Sim ROI %", "1st %", "Top 1%", "Expected Duplicates",
+                "Strongest Path", "Path Score", "Lineup Thesis", "Salary", "Stack", "QB", "RB", "WR", "TE", "DST",
+            ]
+            cols = [c for c in preferred if c in portfolio.columns]
+            pshow = portfolio[cols].copy()
+            st.dataframe(pshow, use_container_width=True, hide_index=True)
+            st.download_button("Download NUKE Portfolio CSV", pshow.to_csv(index=False).encode(), "nuke_portfolio.csv", "text/csv")
+
+    with tab3:
         show = results.drop(columns=["_indices"], errors="ignore").copy()
         if "Top 1% Rate" in show.columns:
             show = show.drop(columns=["Top 1% Rate"])
@@ -164,34 +203,31 @@ if results is not None and not results.empty:
         show = show[[c for c in first if c in show.columns] + remaining]
         st.caption("Football-outcome ranking before opponent-field and payout effects are applied.")
         st.dataframe(show.head(150), use_container_width=True, hide_index=True)
-        st.download_button(
-            "Download NUKEM lineup results CSV",
-            show.to_csv(index=False).encode(),
-            "nuke_sim_results.csv",
-            "text/csv",
-        )
+        st.download_button("Download NUKEM lineup results CSV", show.to_csv(index=False).encode(), "nuke_sim_results.csv", "text/csv")
 
-    with tab3:
-        st.subheader("Portfolio Path Coverage")
-        st.caption("Shows how the top NUKEM portfolio is distributed across different ways the slate can break.")
+    with tab4:
+        st.subheader("Path Coverage")
+        st.caption("Shows how the NUKEM-ranked sample is distributed across different ways the slate can break.")
         if pexposure is not None and not pexposure.empty:
             st.dataframe(pexposure, use_container_width=True, hide_index=True)
         cols = [c for c in ["Rank", "Strongest Path", "Secondary Path", "Path Score", "Lineup Thesis", "Stack", "Salary", "QB"] if c in results.columns]
-        st.dataframe(results[cols].head(int(portfolio_n)), use_container_width=True, hide_index=True)
-
-    with tab4:
-        st.caption(f"Player exposure across the top {min(int(portfolio_n), len(results))} NUKEM-ranked lineups.")
-        st.dataframe(exposure, use_container_width=True, hide_index=True)
+        st.dataframe(results[cols].head(int(exposure_n)), use_container_width=True, hide_index=True)
 
     with tab5:
+        st.caption(f"Player exposure across the top {min(int(exposure_n), len(results))} NUKEM-ranked lineups.")
+        st.dataframe(exposure, use_container_width=True, hide_index=True)
+
+    with tab6:
         st.markdown("""
 ### What the layers mean
 
 **NUKEM Lineups** simulates football outcomes first. Salary is used as a market/depth-chart signal rather than as a traditional fantasy projection. Player outcomes are volatile and correlated through shared team/game shocks.
 
-**NUKEM Paths** classify each lineup by the slate story it is structurally positioned to win: `PASSING_EXPLOSION`, `RB_DOMINANCE`, `VALUE_ERUPTION`, `STARS_FAIL`, `SHOOTOUT`, `LOW_SCORING`, or `BALANCED`. Path Score is a relative lineup-path affinity, not a win probability.
+**NUKEM Paths** classify each lineup by the slate story it is structurally positioned to win: `PASSING_EXPLOSION`, `RB_DOMINANCE`, `VALUE_ERUPTION`, `STARS_FAIL`, `SHOOTOUT`, `LOW_SCORING`, or `BALANCED`.
 
 **Contest SIM** places candidate lineups into a generated tournament field and reruns football universes. This produces `1st %`, `Top 0.1%`, `Top 1%`, `Cash %`, `Expected Duplicates`, `Avg Payout`, and `Sim ROI %`.
+
+**Portfolio** selects lineups as a group. It balances contest quality against overlap and path concentration instead of blindly taking ranks 1 through N.
 
 ### Important current limitations
 
@@ -202,6 +238,5 @@ The opponent field is still an **estimated field**, not an imported real DraftKi
 1. Import an actual DraftKings contest/payout structure.
 2. Add optional ownership/projection CSVs for Projection Mode.
 3. Add role/usage overrides for injuries and promoted cheap starters.
-4. Build portfolio selection that deliberately covers different paths instead of simply taking ranks 1–20.
-5. Add Projection vs NUKEM vs Hybrid comparison mode.
+4. Add Projection vs NUKEM vs Hybrid comparison mode.
         """)

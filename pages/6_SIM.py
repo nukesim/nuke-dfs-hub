@@ -5,6 +5,7 @@ from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
 from nuke_portfolio import build_portfolio, portfolio_summary
 from dk_contest_import import parse_payout_upload
+from dk_export import build_lineup_only_csv, fill_entries_csv
 
 st.set_page_config(page_title="NUKE SIM", page_icon="☢️", layout="wide")
 st.title("☢️ NUKE SIM")
@@ -144,6 +145,7 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
         portfolio_paths, portfolio_stats = portfolio_summary(portfolio)
 
         st.session_state["nuke_sim_results"] = results
+        st.session_state["nuke_sim_players"] = players.copy()
         st.session_state["nuke_sim_exposure"] = exposure
         st.session_state["nuke_path_exposure"] = pexposure
         st.session_state["nuke_contest_results"] = contest_results
@@ -154,6 +156,7 @@ if st.button("☢️ RUN NUKE SIM", type="primary", use_container_width=True):
         status.update(label="NUKE SIM complete", state="complete")
 
 results = st.session_state.get("nuke_sim_results")
+sim_players = st.session_state.get("nuke_sim_players")
 exposure = st.session_state.get("nuke_sim_exposure")
 pexposure = st.session_state.get("nuke_path_exposure")
 contest_results = st.session_state.get("nuke_contest_results")
@@ -163,7 +166,9 @@ portfolio_paths = st.session_state.get("nuke_portfolio_paths")
 portfolio_stats = st.session_state.get("nuke_portfolio_stats", {})
 
 if results is not None and not results.empty:
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏆 CONTEST SIM", "🧬 PORTFOLIO", "☢️ NUKEM LINEUPS", "🧭 PATHS", "👤 EXPOSURE", "🧠 MODEL NOTES"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "🏆 CONTEST SIM", "🧬 PORTFOLIO", "☢️ NUKEM LINEUPS", "🧭 PATHS", "👤 EXPOSURE", "📤 DK EXPORT", "🧠 MODEL NOTES"
+    ])
 
     with tab1:
         if contest_results is None or contest_results.empty:
@@ -221,6 +226,66 @@ if results is not None and not results.empty:
         st.dataframe(exposure, use_container_width=True, hide_index=True)
 
     with tab6:
+        st.subheader("📤 DraftKings Lineup Export")
+        st.caption("For direct DraftKings upload, use your downloaded DraftKings Entries CSV below. NUKE preserves the contest/entry columns and fills the roster slots.")
+
+        source_options = ["Portfolio", "Contest-ranked", "NUKEM-ranked"]
+        export_source = st.selectbox("Lineup source", source_options, index=0, key="dk_export_source")
+        if export_source == "Portfolio" and portfolio is not None and not portfolio.empty:
+            export_results = portfolio
+        elif export_source == "Contest-ranked" and contest_results is not None and not contest_results.empty:
+            export_results = contest_results
+        else:
+            export_results = results
+
+        max_export = min(150, len(export_results))
+        default_export = min(20, max_export)
+        export_count = st.number_input("Lineups to export", 1, max_export, default_export, 1, key="dk_export_count")
+
+        if sim_players is None:
+            st.error("Run NUKE SIM again before exporting so the player-ID snapshot is available.")
+        else:
+            lineup_only = build_lineup_only_csv(sim_players, export_results, int(export_count))
+            st.download_button(
+                "Download DK lineup-only CSV",
+                lineup_only,
+                "nuke_dk_lineups.csv",
+                "text/csv",
+                help="Roster columns only. Use the Entries CSV option below for a contest-ready DraftKings re-upload file.",
+            )
+
+            st.divider()
+            st.markdown("**Contest-ready DraftKings Entries CSV**")
+            entries_upload = st.file_uploader(
+                "Upload your DraftKings Entries CSV",
+                type=["csv"],
+                key="dk_entries_upload",
+                help="Download your entries file from DraftKings after entering the contest, then upload it here. NUKE fills QB/RB/RB/WR/WR/WR/TE/FLEX/DST and preserves Entry ID / Contest columns.",
+            )
+            if entries_upload is not None:
+                try:
+                    filled_bytes, export_info = fill_entries_csv(
+                        entries_upload.getvalue(), sim_players, export_results, int(export_count)
+                    )
+                    e1, e2, e3 = st.columns(3)
+                    e1.metric("Entries in File", int(export_info["entries_in_file"]))
+                    e2.metric("Lineups Filled", int(export_info["entries_filled"]))
+                    e3.metric("Lineups Available", int(export_info["lineups_available"]))
+                    if export_info["entries_filled"] < export_info["entries_in_file"]:
+                        st.warning("Only the first entries shown above were filled. Increase 'Lineups to export' if you want to fill more entries.")
+                    else:
+                        st.success("DraftKings entry rows filled. This is the file to upload back to DraftKings.")
+                    st.download_button(
+                        "⬇️ Download DraftKings Upload CSV",
+                        filled_bytes,
+                        "nuke_draftkings_upload.csv",
+                        "text/csv",
+                        type="primary",
+                    )
+                except Exception as e:
+                    st.error(f"Could not build DraftKings upload file: {e}")
+
+    with tab7:
         st.markdown("""
 **NUKEM Lineups** simulate volatile, correlated football outcomes without requiring a traditional fantasy-point projection feed.
 
@@ -229,6 +294,8 @@ if results is not None and not results.empty:
 **NUKEM Paths** classify the slate story each lineup is built to win.
 
 **Contest SIM** generates a tournament field and estimates `1st %`, `Top 0.1%`, `Top 1%`, `Cash %`, duplication, payout and ROI. When a payout file is uploaded, the payout and ROI math uses the imported ladder rather than NUKE's synthetic curve.
+
+**DK Export** can create roster-only CSVs or fill an actual DraftKings Entries CSV for direct re-upload.
 
 **Portfolio** selects lineups as a group, balancing contest quality against overlap and path concentration.
 

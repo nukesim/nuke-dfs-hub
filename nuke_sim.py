@@ -39,13 +39,13 @@ def prepare_slate(df):
     for target, opts in aliases.items():
         col = next((c for c in opts if c in x.columns), None)
         out[target] = x[col] if col else ""
-    out["Name"] = out["Name"].astype(str).str.replace(r"\s*\(\d+\)\s*$", "", regex=True)
+    out["Name"] = out["Name"].fillna("").astype(str).str.replace(r"\s*\(\d+\)\s*$", "", regex=True)
     out["Position"] = out["Position"].map(_norm_pos)
     out["Salary"] = pd.to_numeric(out["Salary"], errors="coerce").fillna(0).astype(int)
-    out["Team"] = out["Team"].astype(str).str.upper().str.strip()
-    out["Game"] = out["Game"].astype(str).str.strip()
-    out["ID"] = out["ID"].astype(str)
-    out["Status"] = out["Status"].astype(str).str.upper().str.strip()
+    out["Team"] = out["Team"].fillna("").astype(str).str.upper().str.strip()
+    out["Game"] = out["Game"].fillna("").astype(str).str.strip()
+    out["ID"] = out["ID"].fillna("").astype(str)
+    out["Status"] = out["Status"].fillna("").astype(str).str.upper().str.strip()
     out = out[out["Position"].isin(["QB", "RB", "WR", "TE", "DST"]) & (out["Salary"] > 0)].reset_index(drop=True)
     out["market_score"] = out.groupby("Position")["Salary"].rank(pct=True).fillna(.5)
     out["role_override"] = "AUTO"
@@ -123,52 +123,70 @@ def _valid_lineup(indices, p, min_salary, max_salary=50000):
     )
 
 
-def _choice(rng, indices, p, size=1, replace=False):
-    if len(indices) < size:
-        raise ValueError("Not enough players at required position")
-    market = p.loc[indices, "market_score"].to_numpy(float)
-    usage = p.loc[indices, "usage_multiplier"].to_numpy(float) if "usage_multiplier" in p.columns else np.ones(len(indices))
-    role = p.loc[indices, "role_override"].astype(str).str.upper()
-    role_bonus = role.map(ROLE_ADJUST).fillna(0).to_numpy(float)
-    weights = (.20 + market) * np.clip(usage, .35, 2.0) * np.clip(1.0 + role_bonus, .45, 1.5)
-    weights = np.clip(weights, .01, None)
-    weights = weights / weights.sum()
-    picked = rng.choice(indices, size=size, replace=replace, p=weights)
-    return picked
-
-
 def generate_lineups(players, n_lineups=600, min_salary=49400, seed=26):
+    """Generate legal DK lineups quickly from a full-slate player pool.
+
+    Weighting is precomputed once rather than recalculated with pandas on every draw.
+    A strong market-rank curve is used because high salary floors otherwise make rejection
+    sampling extremely slow on 500-700 player slates. Injury role/usage overrides still
+    materially change selection probability.
+    """
     rng = np.random.default_rng(seed)
     p = players.reset_index(drop=True)
-    pools = {pos: p.index[p.Position.eq(pos)].to_numpy() for pos in ["QB", "RB", "WR", "TE", "DST"]}
-    flex = p.index[p.Position.isin(["RB", "WR", "TE"])].to_numpy()
+    if p.empty:
+        return []
+
+    pos_arr = p["Position"].astype(str).to_numpy()
+    salaries = p["Salary"].to_numpy(int)
+    market = p["market_score"].to_numpy(float)
+    usage = p["usage_multiplier"].to_numpy(float) if "usage_multiplier" in p.columns else np.ones(len(p))
+    roles = p["role_override"].astype(str).str.upper().map(ROLE_ADJUST).fillna(0).to_numpy(float) if "role_override" in p.columns else np.zeros(len(p))
+
+    # Steeper weighting keeps high-salary-floor lineup generation practical while still
+    # allowing promoted value plays to enter via usage/role boosts.
+    base_w = np.power(.08 + market, 6.0)
+    base_w *= np.clip(usage, .35, 2.25)
+    base_w *= np.clip(1.0 + roles, .45, 1.55)
+    base_w = np.clip(base_w, 1e-8, None)
+
+    pools = {pos: np.where(pos_arr == pos)[0] for pos in ["QB", "RB", "WR", "TE", "DST"]}
+    if any(len(v) == 0 for v in pools.values()):
+        return []
+    flex = np.where(np.isin(pos_arr, ["RB", "WR", "TE"]))[0]
+
+    pool_probs = {}
+    for pos, ids in pools.items():
+        w = base_w[ids]
+        pool_probs[pos] = w / w.sum()
+
     seen, result = set(), []
     attempts = 0
-    target_attempts = max(30000, n_lineups * 150)
+    target_attempts = max(15000, int(n_lineups) * 65)
 
-    while len(result) < n_lineups and attempts < target_attempts:
+    while len(result) < int(n_lineups) and attempts < target_attempts:
         attempts += 1
-        if any(len(pools[k]) == 0 for k in pools):
-            break
-        try:
-            chosen = [int(_choice(rng, pools["QB"], p, 1)[0])]
-            chosen += list(map(int, _choice(rng, pools["RB"], p, 2)))
-            chosen += list(map(int, _choice(rng, pools["WR"], p, 3)))
-            chosen += [int(_choice(rng, pools["TE"], p, 1)[0])]
-            chosen += [int(_choice(rng, pools["DST"], p, 1)[0])]
-        except ValueError:
-            break
+        chosen = [int(rng.choice(pools["QB"], p=pool_probs["QB"]))]
+        chosen += list(map(int, rng.choice(pools["RB"], 2, replace=False, p=pool_probs["RB"])))
+        chosen += list(map(int, rng.choice(pools["WR"], 3, replace=False, p=pool_probs["WR"])))
+        chosen += [int(rng.choice(pools["TE"], p=pool_probs["TE"]))]
+        chosen += [int(rng.choice(pools["DST"], p=pool_probs["DST"]))]
 
-        available_flex = np.array([i for i in flex if i not in chosen], dtype=int)
+        available_flex = flex[~np.isin(flex, np.asarray(chosen, dtype=int))]
         if len(available_flex) == 0:
             continue
-        chosen += [int(_choice(rng, available_flex, p, 1)[0])]
+        fw = base_w[available_flex]
+        fw = fw / fw.sum()
+        chosen += [int(rng.choice(available_flex, p=fw))]
 
+        salary = int(salaries[np.asarray(chosen, dtype=int)].sum())
+        if salary < int(min_salary) or salary > 50000:
+            continue
         key = tuple(sorted(chosen))
-        if key in seen or not _valid_lineup(chosen, p, min_salary):
+        if key in seen:
             continue
         seen.add(key)
         result.append(chosen)
+
     return result
 
 

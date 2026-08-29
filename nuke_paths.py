@@ -26,19 +26,14 @@ def _lineup_features(players, lu):
     pass_spend = float(r.loc[r.Position.isin(["QB", "WR", "TE"]), "Salary"].sum())
     same_game = int((r.Game.eq(qb_game)).sum()) if qb_game else 0
     return {
-        "pass_mates": len(pass_mates),
-        "bringbacks": len(bringbacks),
-        "star_count": star_count,
-        "value_count": value_count,
-        "rb_spend": rb_spend,
-        "pass_spend": pass_spend,
-        "same_game": same_game,
-        "salary": float(r.Salary.sum()),
+        "pass_mates": len(pass_mates), "bringbacks": len(bringbacks),
+        "star_count": star_count, "value_count": value_count,
+        "rb_spend": rb_spend, "pass_spend": pass_spend,
+        "same_game": same_game, "salary": float(r.Salary.sum()),
     }
 
 
 def _scores(f):
-    # These are structural path affinities, not probabilities.
     return {
         "PASSING_EXPLOSION": 1.8*f["pass_mates"] + .8*f["bringbacks"] + .00008*f["pass_spend"],
         "RB_DOMINANCE": .00019*f["rb_spend"] + .7*max(0, 2-f["pass_mates"]),
@@ -54,34 +49,24 @@ def attach_path_labels(players, results):
     if results is None or results.empty or "_indices" not in results.columns:
         return results
     out = results.copy()
-    strongest = []
-    second = []
-    affinities = []
-    theses = []
+    strongest, second, affinities, theses = [], [], [], []
     for lu in out["_indices"]:
         f = _lineup_features(players, lu)
         s = _scores(f)
         ordered = sorted(s.items(), key=lambda kv: kv[1], reverse=True)
         top, runner = ordered[0][0], ordered[1][0]
         vals = np.array([v for _, v in ordered], dtype=float)
-        # Percentile-like 0-100 relative confidence within this lineup's path profile.
         spread = max(.25, float(vals.max() - vals.min()))
         path_score = 50.0 + 45.0 * float((ordered[0][1] - np.median(vals)) / spread)
         path_score = float(np.clip(path_score, 5, 99))
-        strongest.append(top)
-        second.append(runner)
-        affinities.append(round(path_score, 1))
+        strongest.append(top); second.append(runner); affinities.append(round(path_score, 1))
         parts = []
-        if f["pass_mates"] >= 2:
-            parts.append("DOUBLE STACK")
-        elif f["pass_mates"] == 1:
-            parts.append("QB STACK")
-        else:
-            parts.append("NAKED / NONSTANDARD QB")
+        parts.append("DOUBLE STACK" if f["pass_mates"] >= 2 else "QB STACK" if f["pass_mates"] == 1 else "NAKED / NONSTANDARD QB")
         parts.append(top.replace("_", " "))
         if f["bringbacks"]:
             parts.append(f"{f['bringbacks']} BRING-BACK" + ("S" if f["bringbacks"] > 1 else ""))
-        theses.append(" · ".join(parts))
+        # ASCII delimiter prevents the UTF-8 middle-dot mojibake Excel can display as 'Â'.
+        theses.append(" | ".join(parts))
     out["Strongest Path"] = strongest
     out["Secondary Path"] = second
     out["Path Score"] = affinities
@@ -94,8 +79,4 @@ def path_exposure(results, top_n=50):
         return pd.DataFrame()
     x = results.head(min(int(top_n), len(results)))
     counts = x["Strongest Path"].value_counts()
-    return pd.DataFrame({
-        "Path": counts.index,
-        "Lineups": counts.values,
-        "Exposure %": np.round(100 * counts.values / len(x), 1),
-    }).reset_index(drop=True)
+    return pd.DataFrame({"Path": counts.index, "Lineups": counts.values, "Exposure %": np.round(100 * counts.values / len(x), 1)}).reset_index(drop=True)

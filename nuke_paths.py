@@ -22,26 +22,75 @@ def _lineup_features(players, lu):
     skill = r[r.Position.ne("DST")]
     star_count = int((skill.Salary >= 7000).sum())
     value_count = int((skill.Salary <= 5000).sum())
-    rb_spend = float(r.loc[r.Position.eq("RB"), "Salary"].sum())
+    rb_rows = r[r.Position.eq("RB")]
+    rb_spend = float(rb_rows["Salary"].sum())
+    expensive_rbs = int((rb_rows.Salary >= 7000).sum())
     pass_spend = float(r.loc[r.Position.isin(["QB", "WR", "TE"]), "Salary"].sum())
     same_game = int((r.Game.eq(qb_game)).sum()) if qb_game else 0
     return {
         "pass_mates": len(pass_mates), "bringbacks": len(bringbacks),
         "star_count": star_count, "value_count": value_count,
-        "rb_spend": rb_spend, "pass_spend": pass_spend,
-        "same_game": same_game, "salary": float(r.Salary.sum()),
+        "rb_spend": rb_spend, "expensive_rbs": expensive_rbs,
+        "pass_spend": pass_spend, "same_game": same_game,
+        "salary": float(r.Salary.sum()),
     }
 
 
 def _scores(f):
+    """Structural path affinities.
+
+    The scores are deliberately balanced so a normal QB stack does not automatically become a
+    PASSING_EXPLOSION lineup. Passing Explosion now requires real pass concentration, while
+    Shootout rewards game concentration/bring-backs, RB Dominance rewards actual RB spend, and
+    the remaining paths are driven by roster construction rather than being buried by one large
+    coefficient.
+    """
+    pass_mates = f["pass_mates"]
+    bring = f["bringbacks"]
+    same_game = f["same_game"]
+    stars = f["star_count"]
+    values = f["value_count"]
+    rb_spend = f["rb_spend"]
+
     return {
-        "PASSING_EXPLOSION": 1.8*f["pass_mates"] + .8*f["bringbacks"] + .00008*f["pass_spend"],
-        "RB_DOMINANCE": .00019*f["rb_spend"] + .7*max(0, 2-f["pass_mates"]),
-        "VALUE_ERUPTION": 1.15*f["value_count"] + .35*f["star_count"],
-        "STARS_FAIL": 1.0*f["value_count"] - .55*f["star_count"] + .4*max(0, 2-f["pass_mates"]),
-        "SHOOTOUT": 1.2*f["pass_mates"] + 1.0*f["bringbacks"] + .45*max(0, f["same_game"]-3),
-        "LOW_SCORING": .9*max(0, 2-f["pass_mates"]) + .5*max(0, 1-f["bringbacks"]) + .00005*f["rb_spend"],
-        "BALANCED": 3.5 - .45*abs(f["star_count"]-2) - .35*abs(f["value_count"]-3) - .35*abs(f["pass_mates"]-1),
+        "PASSING_EXPLOSION": (
+            1.55*max(0, pass_mates-1)
+            + .45*bring
+            + .000035*max(0, f["pass_spend"]-22000)
+        ),
+        "RB_DOMINANCE": (
+            .00022*rb_spend
+            + .70*f["expensive_rbs"]
+            + .45*max(0, 2-pass_mates)
+        ),
+        "VALUE_ERUPTION": (
+            .85*values
+            + .28*stars
+            + .35*max(0, values-3)
+        ),
+        "STARS_FAIL": (
+            .75*values
+            + .80*max(0, 2-stars)
+            + .30*max(0, 2-pass_mates)
+        ),
+        "SHOOTOUT": (
+            .70*pass_mates
+            + 1.15*bring
+            + .75*max(0, same_game-3)
+        ),
+        "LOW_SCORING": (
+            .65*max(0, 2-pass_mates)
+            + .50*max(0, 1-bring)
+            + .00008*rb_spend
+            + .35*max(0, 2-stars)
+        ),
+        "BALANCED": (
+            4.35
+            - .42*abs(stars-2)
+            - .30*abs(values-3)
+            - .38*abs(pass_mates-1)
+            - .25*max(0, same_game-4)
+        ),
     }
 
 
@@ -59,13 +108,14 @@ def attach_path_labels(players, results):
         spread = max(.25, float(vals.max() - vals.min()))
         path_score = 50.0 + 45.0 * float((ordered[0][1] - np.median(vals)) / spread)
         path_score = float(np.clip(path_score, 5, 99))
-        strongest.append(top); second.append(runner); affinities.append(round(path_score, 1))
+        strongest.append(top)
+        second.append(runner)
+        affinities.append(round(path_score, 1))
         parts = []
         parts.append("DOUBLE STACK" if f["pass_mates"] >= 2 else "QB STACK" if f["pass_mates"] == 1 else "NAKED / NONSTANDARD QB")
         parts.append(top.replace("_", " "))
         if f["bringbacks"]:
             parts.append(f"{f['bringbacks']} BRING-BACK" + ("S" if f["bringbacks"] > 1 else ""))
-        # ASCII delimiter prevents the UTF-8 middle-dot mojibake Excel can display as 'Â'.
         theses.append(" | ".join(parts))
     out["Strongest Path"] = strongest
     out["Secondary Path"] = second
@@ -79,4 +129,8 @@ def path_exposure(results, top_n=50):
         return pd.DataFrame()
     x = results.head(min(int(top_n), len(results)))
     counts = x["Strongest Path"].value_counts()
-    return pd.DataFrame({"Path": counts.index, "Lineups": counts.values, "Exposure %": np.round(100 * counts.values / len(x), 1)}).reset_index(drop=True)
+    return pd.DataFrame({
+        "Path": counts.index,
+        "Lineups": counts.values,
+        "Exposure %": np.round(100 * counts.values / len(x), 1),
+    }).reset_index(drop=True)

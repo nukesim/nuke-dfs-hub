@@ -29,21 +29,15 @@ jobs:
           s=s.replace(
           'portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0);',
           'portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0,players=players,max_team_exposure=float(max_team_exp)/100.0,max_game_exposure=float(max_game_exp)/100.0);')
-          s=s.replace(
-          'pc1,pc2,pc3,pc4,pc5=st.columns(5)',
-          'pc1,pc2,pc3,pc4,pc5,pc6,pc7=st.columns(7)')
+          s=s.replace('pc1,pc2,pc3,pc4,pc5=st.columns(5)','pc1,pc2,pc3,pc4,pc5,pc6,pc7=st.columns(7)')
           s=s.replace(
           'manage_path=pc5.slider("Path diversity",0.0,3.0,float(path_balance),0.25,key="manage_path_balance")',
           'manage_path=pc5.slider("Path diversity",0.0,3.0,float(path_balance),0.25,key="manage_path_balance")\n            manage_team=pc6.slider("Max team %",10,100,int(round(100*float(portfolio_stats.get("max_team_exposure",.80)))),5,key="manage_team_exp")\n            manage_game=pc7.slider("Max game %",10,100,int(round(100*float(portfolio_stats.get("max_game_exposure",.70)))),5,key="manage_game_exp")')
           s=s.replace(
           'new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences)',
           'new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences,players=sim_players,max_team_exposure=float(manage_team)/100.0,max_game_exposure=float(manage_game)/100.0)')
-          old='''            st.markdown("#### Portfolio Exposure")
-            pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)
-            st.markdown("#### Path Mix"); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True)
-            st.markdown("#### Selected Lineups")'''
-          new='''            st.markdown("#### Portfolio Exposure")
-            pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)
+          anchor='            pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)\n'
+          addition='''            pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)
             st.markdown("#### Team / Game Exposure")
             team_e,game_e=portfolio_team_game_exposure(sim_players,portfolio); tg1,tg2=st.columns(2); tg1.dataframe(team_e,use_container_width=True,hide_index=True,height=360); tg2.dataframe(game_e,use_container_width=True,hide_index=True,height=360)
             st.markdown("#### QB Stack Exposure")
@@ -56,11 +50,10 @@ jobs:
             st.caption(f"Tracked {int(health.get('core_count',0)):,} distinct 3-player cores across the portfolio.")
             core_df=health.get("top_core")
             if core_df is not None and not core_df.empty: st.dataframe(core_df.head(20),use_container_width=True,hide_index=True,height=340)
-            st.markdown("#### Path Mix"); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True)
-            st.markdown("#### Selected Lineups")'''
-          if old not in s:
-              raise SystemExit('Exposure block not found')
-          s=s.replace(old,new)
+'''
+          if anchor not in s:
+              raise SystemExit('Portfolio exposure anchor not found')
+          s=s.replace(anchor,addition,1)
           s=s.replace(
           '**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes are portfolio-only preferences: Boost does not alter simulated player outcomes, while per-player minimum and maximum exposures shape the final MME portfolio. Duplication is not part of portfolio selection.',
           '**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only. V5 adds team/game exposure caps, QB-stack exposure reporting, and Portfolio Health concentration diagnostics. Duplication is not part of portfolio selection.')

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'tools/fanduel_parity_patch.py'
+      - 'tools/fanduel_repo_autoload_patch.py'
   workflow_dispatch:
 
 permissions:
@@ -22,12 +23,14 @@ jobs:
           python-version: '3.12'
       - name: Apply FanDuel parity patch
         run: python tools/fanduel_parity_patch.py
+      - name: Enable repository-backed FanDuel slate
+        run: python tools/fanduel_repo_autoload_patch.py
       - name: Compile changed Python files
-        run: python -m py_compile dfs_platform.py fd_export.py dfs_export.py nuke_sim.py nuke_football_v2.py nuke_football_v21.py pages/6_SIM.py app.py
+        run: python -m py_compile dfs_platform.py fanduel_slate.py fd_export.py dfs_export.py nuke_sim.py nuke_football_v2.py nuke_football_v21.py pages/5_FANDUEL.py pages/6_SIM.py app.py
       - name: Commit changes
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add nuke_sim.py nuke_football_v2.py nuke_football_v21.py pages/6_SIM.py app.py
-          git diff --cached --quiet || git commit -m "Add FanDuel NFL parity"
+          git diff --cached --quiet || git commit -m "Complete FanDuel NFL parity shell"
           git push

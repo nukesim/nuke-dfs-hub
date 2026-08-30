@@ -1,0 +1,42 @@
+name: Add Combo Analysis
+on:
+  push:
+    paths:
+      - '.combos-trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch combo tab
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pages/6_SIM.py'); s=p.read_text()
+          anchor='from nuke_football_v2 import simulate_player_matrix_v2\n'
+          s=s.replace(anchor,anchor+'from nuke_combos import combo_exposure_table\n',1)
+          old='tab1,tab2,tab3,tab4,tab5,tab6,tab7=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","📤 DK EXPORT","🧠 MODEL NOTES"])'
+          new='tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","🔗 COMBOS","📤 DK EXPORT","🧠 MODEL NOTES"])'
+          if old not in s: raise SystemExit('tabs anchor not found')
+          s=s.replace(old,new,1)
+          marker='    with tab6:\n'
+          combo='''    with tab6:\n        st.subheader("Player Combo Exposure")\n        combo_scope=portfolio if portfolio is not None and not portfolio.empty else contest_results\n        if combo_scope is not None and not combo_scope.empty:\n            pairs,qb_pairs=combo_exposure_table(sim_players,combo_scope)\n            st.caption(f"Calculated across {len(combo_scope):,} portfolio lineups." if portfolio is not None and not portfolio.empty else f"Calculated across {len(combo_scope):,} contest-simmed lineups.")\n            if not pairs.empty:\n                c1,c2,c3=st.columns(3)\n                top=pairs.iloc[0]\n                c1.metric("Highest Combo",f"{top['Player 1']} + {top['Player 2']}")\n                c2.metric("Highest Combo %",f"{float(top['Portfolio Combo %']):.1f}%")\n                c3.metric("Combo Lineups",int(top['Combo Lineups']))\n                st.markdown("#### Highest Overall Player Pairs")\n                relation=st.multiselect("Show relationships",["Same Team","Same Game","Non-Stacked"],default=["Same Team","Same Game","Non-Stacked"],key="combo_relation")\n                pair_show=pairs[pairs["Relationship"].isin(relation)].head(75)\n                st.dataframe(pair_show,use_container_width=True,hide_index=True)\n            if not qb_pairs.empty:\n                st.markdown("#### QB-Anchored Combos")\n                st.caption("% of QB Lineups answers: when this QB is used, how often is the other player paired with him?")\n                qb_filter=st.selectbox("QB anchor",["All QBs"]+sorted(qb_pairs.QB.unique().tolist()),key="combo_qb")\n                qshow=qb_pairs if qb_filter=="All QBs" else qb_pairs[qb_pairs.QB.eq(qb_filter)]\n                st.dataframe(qshow.head(100),use_container_width=True,hide_index=True)\n        else:\n            st.info("Run the SIM to generate combo exposure.")\n'''
+          if marker not in s: raise SystemExit('tab6 marker not found')
+          s=s.replace(marker,combo+'    with tab7:\n',1)
+          s=s.replace('    with tab7:\n', '    with tab8:\n', 1)
+          # Restore the combo-created export tab marker from tab8 back to tab7; second model notes occurrence remains tab8.
+          first_combo_end=s.find('    with tab8:\n', s.find('Player Combo Exposure'))
+          if first_combo_end!=-1:
+              s=s[:first_combo_end]+'    with tab7:\n'+s[first_combo_end+15:]
+          p.write_text(s)
+          PY
+          python -m py_compile pages/6_SIM.py nuke_combos.py
+      - name: Commit
+        run: |
+          git config user.name nukesim
+          git config user.email bryson232323@gmail.com
+          git add pages/6_SIM.py
+          git commit -m 'Add portfolio player combo exposure tab'
+          git push

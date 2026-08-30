@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V2"
+
 
 def _z(v):
     v = np.asarray(v, dtype=float)
@@ -9,18 +11,16 @@ def _z(v):
 
 
 def _overlap(a, b):
-    sa, sb = set(a), set(b)
-    return len(sa & sb)
+    return len(set(a) & set(b))
 
 
-def build_portfolio(contest_results, size=20, max_overlap=7, path_balance=1.25, leverage_weight=0.35):
-    """Greedy portfolio selection using contest quality + path diversity + lineup uniqueness.
+def build_portfolio(contest_results, size=20, max_overlap=7, path_balance=1.25, leverage_weight=0.0):
+    """Build an MME portfolio around tournament upside and controlled concentration.
 
-    Path diversification is intentionally *soft*, not a hard equal-allocation rule. The selector
-    still prefers the best simulated lineups, but a path that is already heavily represented
-    receives an increasing saturation penalty while underrepresented viable paths receive a
-    bonus. This keeps one structural archetype from swallowing an MME portfolio simply because
-    its raw contest score is modestly higher.
+    V2 intentionally does not optimize for predicted duplication. Large-field NFL GPP
+    construction is driven by simulated tournament performance, ceiling, correlation,
+    path diversification and portfolio redundancy. Diversification remains soft: strong
+    bets can stay concentrated when their simulated edge warrants it.
     """
     if contest_results is None or contest_results.empty:
         return pd.DataFrame()
@@ -32,93 +32,87 @@ def build_portfolio(contest_results, size=20, max_overlap=7, path_balance=1.25, 
 
     roi = pd.to_numeric(x.get("Sim ROI %", 0), errors="coerce").fillna(0).to_numpy(float)
     win = pd.to_numeric(x.get("1st %", 0), errors="coerce").fillna(0).to_numpy(float)
+    top01 = pd.to_numeric(x.get("Top 0.1%", 0), errors="coerce").fillna(0).to_numpy(float)
     top1 = pd.to_numeric(x.get("Top 1%", 0), errors="coerce").fillna(0).to_numpy(float)
-    dup = pd.to_numeric(x.get("Expected Duplicates", 0), errors="coerce").fillna(0).to_numpy(float)
+    ceiling = pd.to_numeric(x.get("Ceiling 95", 0), errors="coerce").fillna(0).to_numpy(float)
+    nuke = pd.to_numeric(x.get("NUKE Score", 0), errors="coerce").fillna(0).to_numpy(float)
     path_score = pd.to_numeric(x.get("Path Score", 50), errors="coerce").fillna(50).to_numpy(float)
 
-    base = 1.0*_z(roi) + .65*_z(win) + .35*_z(top1) + .20*_z(path_score) - float(leverage_weight)*_z(dup)
+    # Tournament-first quality. ROI is useful but noisy, so extreme-tail finish rates and
+    # football ceiling receive substantial weight rather than letting one metric dominate.
+    base = (
+        0.75 * _z(roi)
+        + 0.90 * _z(win)
+        + 0.75 * _z(top01)
+        + 0.45 * _z(top1)
+        + 0.55 * _z(ceiling)
+        + 0.30 * _z(nuke)
+        + 0.15 * _z(path_score)
+    )
 
-    if "Strongest Path" in x.columns:
-        path_series = x["Strongest Path"].fillna("UNKNOWN").astype(str)
-    else:
-        path_series = pd.Series(["UNKNOWN"] * n)
+    path_series = x.get("Strongest Path", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
+    qb_series = x.get("QB", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
+    stack_series = x.get("Stack", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
 
-    # Only paths with enough candidate support are treated as real portfolio alternatives.
-    # A single weird lineup should not force representation, while a genuine path should.
     support_floor = max(2, int(np.ceil(size * 0.015)))
     path_support = path_series.value_counts().to_dict()
     viable_paths = [p for p, c in path_support.items() if c >= support_floor]
     if not viable_paths:
         viable_paths = list(path_support.keys()) or ["UNKNOWN"]
-
-    # Equal share is only a reference point for the *penalty curve*; it is not a quota.
     target_per_path = max(1.0, size / max(1, len(viable_paths)))
 
-    selected = []
-    path_counts = {}
-    reasons = {}
+    selected, path_counts, qb_counts, stack_counts, reasons = [], {}, {}, {}, {}
 
     for pick in range(size):
         best_i, best_score, best_reason = None, -1e18, ""
         for i in range(n):
             if i in selected:
                 continue
-
             lu = x.loc[i, "_indices"] if "_indices" in x.columns else []
-            path = path_series.iloc[i]
+            path, qb, stack = path_series.iloc[i], qb_series.iloc[i], stack_series.iloc[i]
 
-            overlaps = []
-            for j in selected:
-                other = x.loc[j, "_indices"] if "_indices" in x.columns else []
-                overlaps.append(_overlap(lu, other))
+            overlaps = [_overlap(lu, x.loc[j, "_indices"] if "_indices" in x.columns else []) for j in selected]
             worst_overlap = max(overlaps) if overlaps else 0
             avg_overlap = float(np.mean(overlaps)) if overlaps else 0.0
-
             if overlaps and worst_overlap > max_overlap:
                 continue
 
-            current = path_counts.get(path, 0)
+            current_path = path_counts.get(path, 0)
             if path in viable_paths:
-                saturation = current / target_per_path
-                underrep_bonus = float(path_balance) * max(0.0, 1.0 - saturation)
-                saturation_penalty = float(path_balance) * 1.45 * (saturation ** 2)
-                path_adjustment = underrep_bonus - saturation_penalty
+                saturation = current_path / target_per_path
+                path_adjustment = float(path_balance) * (0.55 * max(0.0, 1.0 - saturation) - 0.42 * max(0.0, saturation - 1.0) ** 2)
             else:
-                # Rare/unsupported paths can still make the portfolio if their raw quality is great,
-                # but they do not receive a diversification subsidy.
                 path_adjustment = 0.0
 
-            uniqueness_bonus = .16 * (9.0 - avg_overlap)
-            score = float(base[i] + path_adjustment + uniqueness_bonus)
+            # Soft concentration controls. They do not impose arbitrary QB/game quotas;
+            # they only make the next lineup clear a slightly higher bar when a bet already
+            # occupies a large share of the portfolio.
+            denom = max(1, len(selected))
+            qb_share = qb_counts.get(qb, 0) / denom
+            stack_share = stack_counts.get(stack, 0) / denom
+            concentration_penalty = 0.35 * max(0.0, qb_share - 0.22) + 0.12 * max(0.0, stack_share - 0.55)
+
+            # Reward genuinely different constructions without forcing weak lineups merely
+            # to be different. A seven-player overlap remains legal when requested.
+            redundancy_penalty = 0.10 * max(0.0, avg_overlap - 5.25) + 0.16 * max(0.0, worst_overlap - 6)
+            score = float(base[i] + path_adjustment - concentration_penalty - redundancy_penalty)
 
             if score > best_score:
-                best_i = i
-                best_score = score
-                best_reason = (
-                    f"{path} | max overlap {worst_overlap} | "
-                    f"path adj {path_adjustment:+.2f}"
-                )
+                best_i, best_score = i, score
+                best_reason = f"GPP upside | {path} | max overlap {worst_overlap} | path adj {path_adjustment:+.2f}"
 
         if best_i is None:
-            # Relax overlap only when the requested portfolio cannot otherwise be filled.
             remaining = [i for i in range(n) if i not in selected]
             if not remaining:
                 break
-
-            def relaxed_score(i):
-                path = path_series.iloc[i]
-                current = path_counts.get(path, 0)
-                if path in viable_paths:
-                    saturation = current / target_per_path
-                    return base[i] - float(path_balance) * 1.45 * (saturation ** 2)
-                return base[i]
-
-            best_i = max(remaining, key=relaxed_score)
-            best_reason = "Overlap constraint relaxed to complete portfolio"
+            best_i = max(remaining, key=lambda i: base[i])
+            best_reason = "Best remaining GPP upside; overlap relaxed to complete portfolio"
 
         selected.append(best_i)
-        path = path_series.iloc[best_i]
+        path, qb, stack = path_series.iloc[best_i], qb_series.iloc[best_i], stack_series.iloc[best_i]
         path_counts[path] = path_counts.get(path, 0) + 1
+        qb_counts[qb] = qb_counts.get(qb, 0) + 1
+        stack_counts[stack] = stack_counts.get(stack, 0) + 1
         reasons[best_i] = best_reason
 
     out = x.iloc[selected].copy().reset_index(drop=True)
@@ -139,7 +133,8 @@ def portfolio_summary(portfolio):
     stats = {
         "lineups": len(portfolio),
         "avg_roi": float(pd.to_numeric(portfolio.get("Sim ROI %", 0), errors="coerce").fillna(0).mean()),
-        "avg_dup": float(pd.to_numeric(portfolio.get("Expected Duplicates", 0), errors="coerce").fillna(0).mean()),
         "paths": int(portfolio.get("Strongest Path", pd.Series(dtype=str)).nunique()),
+        "qbs": int(portfolio.get("QB", pd.Series(dtype=str)).nunique()),
+        "engine": PORTFOLIO_ENGINE_VERSION,
     }
     return path_df, stats

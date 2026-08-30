@@ -63,6 +63,9 @@ def candidate_diagnostics(players,lineups,requested,min_salary):
     median_overlap=float(np.median(overlap_vals)) if overlap_vals else 0.0
     p95_overlap=float(np.percentile(overlap_vals,95)) if overlap_vals else 0.0
     max_overlap_seen=int(max(overlap_vals)) if overlap_vals else 0
+    median_overlap=float(np.median(overlap_vals)) if overlap_vals else 0.0
+    p95_overlap=float(np.percentile(overlap_vals,95)) if overlap_vals else 0.0
+    max_overlap_seen=int(max(overlap_vals)) if overlap_vals else 0
     max_pair=max(pair_counts.values()) if pair_counts else 0
     max_triple=max(triple_counts.values()) if triple_counts else 0
     max_pair_pct=100.0*max_pair/max(1,n)
@@ -331,6 +334,17 @@ stage_times=st.session_state.get("nuke_stage_times",{})
 stage_times=st.session_state.get("nuke_stage_times",{})
 stage_times=st.session_state.get("nuke_stage_times",{})
 stage_times=st.session_state.get("nuke_stage_times",{})
+stage_times=st.session_state.get("nuke_stage_times",{})
+
+if stage_times:
+    st.subheader("⏱️ Run Performance")
+    total=float(st.session_state.get("nuke_sim_runtime",0.0))
+    timing_cols=st.columns(len(stage_times))
+    for col,(name,secs) in zip(timing_cols,stage_times.items()):
+        col.metric(name,f"{float(secs):.1f}s")
+    if total>0:
+        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
+        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
 
 if stage_times:
     st.subheader("⏱️ Run Performance")

@@ -1,0 +1,40 @@
+name: Fix Portfolio Display
+
+on:
+  push:
+    paths:
+      - '.fix-portfolio-display-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fix duplicates metric
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pages/6_SIM.py')
+          s=p.read_text(encoding='utf-8')
+          old='p4.metric("Avg Duplicates",f"{float(portfolio_stats.get(\'avg_dup\',0)):.2f}%")'
+          new='p4.metric("Avg Duplicates",f"{float(portfolio_stats.get(\'avg_dup\',0)):.2f}")'
+          if old not in s:
+              raise SystemExit('duplicates metric pattern not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
+          python -m py_compile pages/6_SIM.py nuke_paths.py nuke_portfolio.py
+      - name: Commit
+        run: |
+          git config user.name "nukesim"
+          git config user.email "bryson232323@gmail.com"
+          git add pages/6_SIM.py
+          git commit -m "Fix portfolio duplicates display"
+          git push

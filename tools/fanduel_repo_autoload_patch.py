@@ -1,3 +1,4 @@
+# deployment trigger: repo-backed FanDuel slate
 from pathlib import Path
 
 p = Path("pages/6_SIM.py")

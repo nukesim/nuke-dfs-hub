@@ -15,6 +15,7 @@ from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
 from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game
+from nuke_portfolio_story import portfolio_story
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
@@ -392,6 +393,55 @@ if results is not None and not results.empty:
         if portfolio is not None and not portfolio.empty:
             st.subheader("Portfolio Manager")
             st.caption("Change these controls and rebuild instantly from the existing contest-simmed candidate pool — no football re-simulation required.")
+
+            story=portfolio_story(sim_players,portfolio)
+            sm=story.get("metrics",{})
+            st.markdown("### 🧠 Portfolio Story")
+            st.caption("What this portfolio is betting on, where it is different from the modeled field, and where concentration risk lives.")
+            s1,s2,s3,s4,s5,s6=st.columns(6)
+            s1.metric("Lineups",f"{int(sm.get('lineups',len(portfolio))):,}")
+            s2.metric("Elite Ceiling",f"{int(sm.get('elite_lineups',0)):,}")
+            s3.metric("Low-Dup Leverage",f"{int(sm.get('leverage_lineups',0)):,}")
+            s4.metric("Top Scenario",str(sm.get('dominant_scenario','UNKNOWN')),delta=f"{float(sm.get('dominant_scenario_pct',0)):.1f}% of portfolio")
+            s5.metric("Top QB",str(sm.get('dominant_qb','UNKNOWN')),delta=f"{float(sm.get('dominant_qb_pct',0)):.1f}% exposure")
+            s6.metric("Top Game",str(sm.get('dominant_game','UNKNOWN')),delta=f"{float(sm.get('dominant_game_pct',0)):.1f}% exposure")
+
+            story_left,story_right=st.columns(2)
+            with story_left:
+                st.markdown("#### Scenario Bets")
+                scenario_df=story.get("scenario_df",pd.DataFrame())
+                if scenario_df is not None and not scenario_df.empty:
+                    st.dataframe(scenario_df.head(12),use_container_width=True,hide_index=True,height=330)
+                else:
+                    st.caption("No scenario labels are available for this portfolio yet.")
+            with story_right:
+                st.markdown("#### Why Lineups Made It")
+                reason_df=story.get("reason_df",pd.DataFrame())
+                if reason_df is not None and not reason_df.empty:
+                    st.dataframe(reason_df,use_container_width=True,hide_index=True,height=330)
+                else:
+                    st.caption("No portfolio-reason labels are available yet.")
+
+            leverage_df=story.get("leverage_df",pd.DataFrame())
+            if leverage_df is not None and not leverage_df.empty:
+                st.markdown("#### ⚡ Portfolio vs Modeled Field")
+                st.caption("Positive leverage = NUKE is using the player more than the projection-free Field Engine ownership prior. Negative leverage = portfolio fade. This is a portfolio stance, not a live ownership projection.")
+                lev1,lev2=st.columns(2)
+                with lev1:
+                    st.markdown("**Largest Overweights**")
+                    st.dataframe(leverage_df.head(12),use_container_width=True,hide_index=True,height=390)
+                with lev2:
+                    st.markdown("**Largest Underweights / Fades**")
+                    st.dataframe(leverage_df.sort_values("Leverage +/-",ascending=True).head(12),use_container_width=True,hide_index=True,height=390)
+
+            story_flags=story.get("flags",[])
+            st.markdown("#### 🚨 Portfolio Risk Check")
+            if story_flags:
+                for flag in story_flags:
+                    st.warning(flag)
+            else:
+                st.success("No major player, team, game, or 3-player-core concentration flags detected.")
+            st.divider()
             pc1,pc2,pc3,pc4,pc5,pc6,pc7=st.columns(7)
             manage_size=pc1.number_input("Portfolio lineups",1,min(150,len(contest_results)),min(int(portfolio_stats.get("requested_lineups",len(portfolio))),min(150,len(contest_results))),1,key="manage_portfolio_size")
             manage_overlap=pc2.slider("Max overlap",4,8,int(max_overlap),1,key="manage_overlap")

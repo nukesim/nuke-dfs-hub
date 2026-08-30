@@ -1,8 +1,12 @@
 """Fast projection-free generative NFL fantasy engine v2.
 
 Static player/team arrays are prepared once, and the hot simulation loop avoids
-pandas row access. The model still simulates team environment -> plays ->
-opportunity -> football stats -> DraftKings points.
+pandas row access. The model simulates team environment -> plays -> opportunity
+-> football stats -> DraftKings points.
+
+When a sportsbook environment is supplied, current consensus team totals, game
+totals, and spreads act as bounded game-context inputs. The DK salary/role model
+remains the player-allocation foundation.
 """
 import numpy as np
 
@@ -15,7 +19,47 @@ def _norm_weights(x):
     return x/s
 
 
-def simulate_player_matrix_v2(players,n_sims=1500,seed=26):
+def _sportsbook_inputs(environment, teams, team_game):
+    """Return bounded team/game market inputs aligned to engine teams.
+
+    Missing/non-sportsbook rows stay neutral so the historical V2 behavior is
+    preserved whenever live consensus is unavailable.
+    """
+    nteams=len(teams)
+    team_total=np.full(nteams,np.nan,dtype=float)
+    game_total=np.full(nteams,np.nan,dtype=float)
+    spread=np.zeros(nteams,dtype=float)
+    live=np.zeros(nteams,dtype=bool)
+    if environment is None or getattr(environment,"empty",True):
+        return team_total,game_total,spread,live
+    required={"Team","Team Total","Game Total","Spread"}
+    if not required.issubset(set(environment.columns)):
+        return team_total,game_total,spread,live
+    for ti,t in enumerate(teams):
+        m=environment[environment["Team"].astype(str).eq(str(t))]
+        if "Game" in environment.columns:
+            gm=m[m["Game"].astype(str).eq(str(team_game[ti]))]
+            if not gm.empty: m=gm
+        if "Source" in environment.columns:
+            book=m[m["Source"].astype(str).eq("Sportsbook Consensus")]
+            if not book.empty: m=book
+            else: continue
+        if m.empty: continue
+        row=m.iloc[0]
+        try:
+            tt=float(row["Team Total"]); gt=float(row["Game Total"]); sp=float(row["Spread"])
+        except Exception:
+            continue
+        if not (np.isfinite(tt) and np.isfinite(gt) and np.isfinite(sp)):
+            continue
+        team_total[ti]=np.clip(tt,12.0,38.0)
+        game_total[ti]=np.clip(gt,32.0,62.0)
+        spread[ti]=np.clip(sp,-14.0,14.0)
+        live[ti]=True
+    return team_total,game_total,spread,live
+
+
+def simulate_player_matrix_v2(players,n_sims=1500,seed=26,game_environment=None):
     rng=np.random.default_rng(int(seed))
     n_sims=int(n_sims); n=len(players)
     mat=np.zeros((n_sims,n),dtype=np.float32)
@@ -28,7 +72,6 @@ def simulate_player_matrix_v2(players,n_sims=1500,seed=26):
     role=players.auto_role_multiplier.astype(float).to_numpy()
 
     teams=np.array(sorted(set(team)))
-    team_to_num={t:i for i,t in enumerate(teams)}
     nteams=len(teams)
     team_idx=[np.where(team==t)[0] for t in teams]
     team_game=np.array([game[idx[0]] if len(idx) else "" for idx in team_idx],dtype=object)
@@ -58,13 +101,34 @@ def simulate_player_matrix_v2(players,n_sims=1500,seed=26):
         talent.append(float(np.mean(np.sort(skill)[-5:])) if len(skill) else .5)
     talent=np.nan_to_num(np.asarray(talent),nan=.5)
 
+    # Live market context. Effects are deliberately bounded: sportsbook data
+    # shapes scoring/game script but does not replace player salary/role signals.
+    sb_tt,sb_gt,sb_sp,sb_live=_sportsbook_inputs(game_environment,teams,team_game)
+    tt_delta=np.where(sb_live,np.clip(sb_tt-22.5,-8.0,10.0),0.0)
+    gt_delta=np.where(sb_live,np.clip(sb_gt-45.0,-10.0,12.0),0.0)
+    # Negative spread = favorite. Positive spread = underdog.
+    script=np.where(sb_live,np.clip(sb_sp,-10.0,10.0),0.0)
+
     # Generate team/game environment for every universe in vectorized blocks.
     game_env=rng.normal(0,1,size=(n_sims,ngames))
     team_env=rng.normal(0,1,size=(n_sims,nteams))
     ge=game_env[:,team_game_num]
-    team_points=np.maximum(3.0,rng.normal(21.5+4.2*ge+3.0*team_env+4.0*(talent[None,:]-.5),7.0))
-    team_plays=np.clip(np.rint(rng.normal(63.5+2.0*ge+1.5*team_env,6.0)),45,82).astype(int)
-    pass_rate=np.clip(rng.normal(.575+.025*ge,.065),.38,.76)
+
+    base_points=21.5+4.2*ge+3.0*team_env+4.0*(talent[None,:]-.5)
+    # Team total is the strongest market signal, but only 65% of its deviation
+    # is imported so the generative model retains uncertainty/independence.
+    base_points=base_points+0.65*tt_delta[None,:]
+    team_points=np.maximum(3.0,rng.normal(base_points,7.0))
+
+    # Higher-total games get a small pace/volume lift. This is intentionally
+    # modest because totals mostly express scoring efficiency, not just plays.
+    play_mu=63.5+2.0*ge+1.5*team_env+0.10*gt_delta[None,:]
+    team_plays=np.clip(np.rint(rng.normal(play_mu,6.0)),45,82).astype(int)
+
+    # Underdogs lean pass; favorites lean rush. High totals add a tiny passing
+    # lift. Effects are capped to avoid turning spread into a projection.
+    pass_mu=.575+.025*ge+0.0030*script[None,:]+0.0008*gt_delta[None,:]
+    pass_rate=np.clip(rng.normal(pass_mu,.065),.38,.76)
     pass_att=np.maximum(12,np.rint(team_plays*pass_rate).astype(int))
     rush_att=np.maximum(10,team_plays-pass_att)
     off_td=np.maximum(0,np.rint(np.maximum(0,team_points-3)/7+rng.normal(0,.55,size=(n_sims,nteams))).astype(int))

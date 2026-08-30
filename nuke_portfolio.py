@@ -2,7 +2,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
-PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V5.1"
+PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V5.2"
 
 
 def _z(v):
@@ -76,7 +76,7 @@ def build_portfolio(
 ):
     """Build an MME portfolio around GPP upside with portfolio-level controls.
 
-    V5 keeps player takes, adds hard team/game lineup-incidence caps, and retains soft
+    V5.2 keeps player/team/game caps and adds soft repeated pair / 3-player core control while retaining soft
     path/concentration penalties. Team/game exposure means the share of portfolio lineups
     containing at least one player from that team/game. These controls shape portfolio
     construction only and do not alter football outcomes.
@@ -135,6 +135,13 @@ def build_portfolio(
 
     selected, path_counts, qb_counts, stack_counts = [], {}, {}, {}
     player_counts, team_counts, game_counts, reasons = {}, {}, {}, {}
+    pair_counts, triple_counts = {}, {}
+
+    def lineup_pairs(lu):
+        return [tuple(sorted(x)) for x in itertools.combinations(sorted(set(lu)), 2)]
+
+    def lineup_triples(lu):
+        return [tuple(sorted(x)) for x in itertools.combinations(sorted(set(lu)), 3)]
 
     def player_max_count(pid):
         return prefs.get(pid, {}).get("max_count", global_max_player_count)
@@ -191,6 +198,22 @@ def build_portfolio(
             concentration_penalty = 0.25 * max(0.0, qb_share - 0.20) + 0.10 * max(0.0, stack_share - 0.55)
             redundancy_penalty = 0.10 * max(0.0, avg_overlap - 5.25) + 0.16 * max(0.0, worst_overlap - 6)
 
+            # V5.2 core diversity: individual exposures can look healthy while the same
+            # 2- and 3-player cores quietly repeat across many lineups. Penalize the
+            # marginal repetition of those cores without hard-banning strong combinations.
+            lu_pairs = lineup_pairs(lu)
+            lu_triples = lineup_triples(lu)
+            max_pair_repeat = max((pair_counts.get(core, 0) for core in lu_pairs), default=0)
+            max_triple_repeat = max((triple_counts.get(core, 0) for core in lu_triples), default=0)
+            pair_repeat_load = sum(max(0, pair_counts.get(core, 0) - 4) for core in lu_pairs)
+            triple_repeat_load = sum(max(0, triple_counts.get(core, 0) - 2) for core in lu_triples)
+            core_penalty = (
+                0.035 * pair_repeat_load
+                + 0.075 * triple_repeat_load
+                + 0.08 * max(0, max_pair_repeat - 10) ** 1.35
+                + 0.16 * max(0, max_triple_repeat - 6) ** 1.45
+            )
+
             min_bonus = 0.0
             for pid in lu:
                 need = max(0, prefs.get(pid, {}).get("min_count", 0) - player_counts.get(pid, 0))
@@ -198,11 +221,11 @@ def build_portfolio(
                     urgency = need / max(1, slots_left_after_pick + 1)
                     min_bonus += 1.10 + 2.40 * urgency
 
-            score = float(base[i] + preference_adjustment[i] + min_bonus + path_adjustment - dominance_penalty - concentration_penalty - redundancy_penalty)
+            score = float(base[i] + preference_adjustment[i] + min_bonus + path_adjustment - dominance_penalty - concentration_penalty - redundancy_penalty - core_penalty)
             if score > best_score:
                 best_i, best_score = i, score
                 takes = sum(1 for pid in lu if abs(prefs.get(pid, {}).get("boost", 0.0)) > 1e-9 or prefs.get(pid, {}).get("min", 0.0) > 0)
-                best_reason = f"GPP upside | {path} | player takes {takes} | max overlap {worst_overlap}"
+                best_reason = f"GPP upside | {path} | player takes {takes} | max overlap {worst_overlap} | pair repeat {max_pair_repeat} | 3-core repeat {max_triple_repeat}"
 
         if best_i is None:
             remaining = [i for i in range(n) if i not in selected and exposure_ok(i)]
@@ -223,6 +246,10 @@ def build_portfolio(
             team_counts[team] = team_counts.get(team, 0) + 1
         for game in lineup_games[best_i]:
             game_counts[game] = game_counts.get(game, 0) + 1
+        for core in lineup_pairs(lineup_ids[best_i]):
+            pair_counts[core] = pair_counts.get(core, 0) + 1
+        for core in lineup_triples(lineup_ids[best_i]):
+            triple_counts[core] = triple_counts.get(core, 0) + 1
         reasons[best_i] = best_reason
 
     out = x.iloc[selected].copy().reset_index(drop=True)
@@ -236,6 +263,8 @@ def build_portfolio(
     out.attrs["max_game_exposure"] = max_game_exposure
     out.attrs["path_soft_cap"] = 0.45
     out.attrs["player_preferences"] = prefs
+    out.attrs["max_pair_repeat"] = max(pair_counts.values(), default=0)
+    out.attrs["max_triple_repeat"] = max(triple_counts.values(), default=0)
     unmet = {}
     for pid, pref in prefs.items():
         actual = player_counts.get(pid, 0)
@@ -270,6 +299,8 @@ def portfolio_summary(portfolio):
         "dominant_path_pct": dominant_path_pct,
         "path_hhi": path_hhi,
         "path_soft_cap": float(portfolio.attrs.get("path_soft_cap", 0.45)),
+        "max_pair_repeat": int(portfolio.attrs.get("max_pair_repeat", 0)),
+        "max_triple_repeat": int(portfolio.attrs.get("max_triple_repeat", 0)),
     }
     return path_df, stats
 

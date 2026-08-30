@@ -54,7 +54,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         stage=time.perf_counter(); st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override,players=players); st.write(f"Contest simulation: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write(f"5/5 · Building {PORTFOLIO_ENGINE_VERSION} portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0); portfolio_paths,portfolio_stats=portfolio_summary(portfolio); pexposure=path_exposure(portfolio,len(portfolio)); st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")
         run_seconds=time.perf_counter()-run_started
-        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds}.items(): st.session_state[k]=v
+        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_player_takes":{}}.items(): st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
     st.success(f"Total run time: {run_seconds:.1f} seconds")
 results=st.session_state.get("nuke_sim_results"); sim_players=st.session_state.get("nuke_sim_players"); exposure=st.session_state.get("nuke_sim_exposure"); pexposure=st.session_state.get("nuke_path_exposure"); contest_results=st.session_state.get("nuke_contest_results"); contest_summary=st.session_state.get("nuke_contest_summary",{}); portfolio=st.session_state.get("nuke_portfolio"); portfolio_paths=st.session_state.get("nuke_portfolio_paths"); portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
@@ -68,20 +68,54 @@ if results is not None and not results.empty:
     with tab2:
         if portfolio is not None and not portfolio.empty:
             st.subheader("Portfolio Manager")
-            st.caption("Change these controls and rebuild the portfolio instantly from the existing contest-simmed candidate pool — no football re-simulation required.")
+            st.caption("Change these controls and rebuild instantly from the existing contest-simmed candidate pool — no football re-simulation required.")
             pc1,pc2,pc3,pc4,pc5=st.columns(5)
             manage_size=pc1.number_input("Portfolio lineups",1,min(150,len(contest_results)),min(int(portfolio_stats.get("requested_lineups",len(portfolio))),min(150,len(contest_results))),1,key="manage_portfolio_size")
             manage_overlap=pc2.slider("Max overlap",4,8,int(max_overlap),1,key="manage_overlap")
             manage_player=pc3.slider("Max player %",10,100,int(round(100*float(portfolio_stats.get("max_player_exposure",.45)))),5,key="manage_player_exp")
             manage_qb=pc4.slider("Max QB %",5,100,int(round(100*float(portfolio_stats.get("max_qb_exposure",.30)))),5,key="manage_qb_exp")
             manage_path=pc5.slider("Path diversity",0.0,3.0,float(path_balance),0.25,key="manage_path_balance")
+
+            st.markdown("#### 🎚️ Player Takes")
+            st.caption("Boost changes only portfolio selection — it does NOT change the player's simulated fantasy points. +1/+2/+3 = Like/Love/Flag Plant; negatives reduce exposure. Min/Max are hard portfolio targets when the candidate pool can support them.")
+            saved_takes=st.session_state.get("nuke_player_takes",{})
+            current_counts={}
+            for lu in portfolio["_indices"]:
+                for pid in lu: current_counts[int(pid)]=current_counts.get(int(pid),0)+1
+            candidate_ids=sorted({int(pid) for lu in contest_results["_indices"] for pid in lu})
+            take_rows=[]
+            for pid in candidate_ids:
+                p=sim_players.iloc[pid]; pref=saved_takes.get(pid,{})
+                take_rows.append({"Player ID":pid,"Player":p.Name,"Pos":p.Position,"Team":p.Team,"Salary":int(p.Salary),"Current %":round(100*current_counts.get(pid,0)/max(1,len(portfolio)),1),"Boost":float(pref.get("boost",0.0)),"Min %":float(100*pref.get("min",0.0)),"Max %":float(100*pref.get("max",float(manage_player)/100.0))})
+            take_df=pd.DataFrame(take_rows).set_index("Player ID")
+            take_filter=st.multiselect("Positions",["QB","RB","WR","TE","DST"],default=["QB","RB","WR","TE","DST"],key="take_pos_filter")
+            edit_base=take_df[take_df.Pos.isin(take_filter)].copy()
+            take_edit=st.data_editor(edit_base,use_container_width=True,hide_index=True,height=430,disabled=["Player","Pos","Team","Salary","Current %"],column_config={"Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f"),"Min %":st.column_config.NumberColumn("Min %",min_value=0.0,max_value=100.0,step=5.0,format="%.0f%%"),"Max %":st.column_config.NumberColumn("Max %",min_value=0.0,max_value=100.0,step=5.0,format="%.0f%%")},key="player_takes_editor")
+
             if st.button("🧬 REBUILD PORTFOLIO",type="primary",use_container_width=True,key="rebuild_portfolio"):
-                new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0)
+                preferences=dict(saved_takes)
+                invalid=[]
+                for pid,row in take_edit.iterrows():
+                    mn=float(row["Min %"])/100.0; mx=float(row["Max %"])/100.0; boost=float(row["Boost"])
+                    if mn>mx: invalid.append(str(row["Player"])); continue
+                    if abs(boost)>1e-9 or mn>0 or abs(mx-float(manage_player)/100.0)>1e-9:
+                        preferences[int(pid)]={"boost":boost,"min":mn,"max":mx}
+                    else:
+                        preferences.pop(int(pid),None)
+                if invalid:
+                    st.error("Min % cannot be greater than Max % for: "+", ".join(invalid)); st.stop()
+                new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences)
                 new_paths,new_stats=portfolio_summary(new_portfolio)
-                st.session_state["nuke_portfolio"]=new_portfolio; st.session_state["nuke_portfolio_paths"]=new_paths; st.session_state["nuke_portfolio_stats"]=new_stats; st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio)); st.rerun()
+                st.session_state["nuke_player_takes"]=preferences; st.session_state["nuke_portfolio"]=new_portfolio; st.session_state["nuke_portfolio_paths"]=new_paths; st.session_state["nuke_portfolio_stats"]=new_stats; st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio)); st.rerun()
 
             requested=int(portfolio_stats.get("requested_lineups",len(portfolio)))
             if len(portfolio)<requested: st.warning(f"Exposure/overlap constraints allowed only {len(portfolio)} of {requested} requested lineups. Raise a cap or overlap limit to fill the portfolio.")
+            unmet=portfolio_stats.get("unmet_minimums",{})
+            if unmet:
+                names=[]
+                for pid,v in unmet.items():
+                    name=sim_players.iloc[int(pid)].Name if int(pid)<len(sim_players) else str(pid); names.append(f"{name}: {v['actual']}/{v['requested']}")
+                st.warning("Candidate pool could not satisfy these minimum exposures: "+" · ".join(names))
             p1,p2,p3,p4=st.columns(4); p1.metric("Lineups",int(portfolio_stats.get("lineups",0))); p2.metric("Paths Covered",int(portfolio_stats.get("paths",0))); p3.metric("QBs Used",int(portfolio_stats.get("qbs",0))); p4.metric("Avg Sim ROI",f"{float(portfolio_stats.get('avg_roi',0)):.1f}%"); st.caption(str(portfolio_stats.get("engine",PORTFOLIO_ENGINE_VERSION)))
             st.markdown("#### Portfolio Exposure")
             pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)
@@ -112,4 +146,4 @@ if results is not None and not results.empty:
                 filled,info=fill_entries_csv(entries_upload.getvalue(),sim_players,export_results,int(export_count)); st.success(f"Filled {info['entries_filled']} DraftKings entries."); st.download_button("⬇️ Download DraftKings Upload CSV",filled,"nuke_draftkings_upload.csv","text/csv",type="primary")
             except Exception as e: st.error(f"Could not build DraftKings upload file: {e}")
     with tab8:
-        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Portfolio selection emphasizes tournament upside, ceiling, correlation, path diversity and controlled concentration. Predicted duplication is not part of portfolio selection. Player/QB exposure caps can be adjusted after a SIM without rerunning the football engine.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes are portfolio-only preferences: Boost does not alter simulated player outcomes, while per-player minimum and maximum exposures shape the final MME portfolio. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")

@@ -11,13 +11,14 @@ from nuke_portfolio import build_portfolio, portfolio_summary, portfolio_player_
 from dk_contest_import import parse_payout_upload
 from dfs_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
-from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION, engine_version
+from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION, engine_version, engine_version
 from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game
 from nuke_portfolio_story import portfolio_story
 from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
 from dfs_platform import get_platform
+from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
@@ -114,8 +115,12 @@ try:
         raw_slate=load_default_slate()
         slate_source=SLATE_LABEL
         st.success(f"Loaded automatically: **{SLATE_LABEL}** · {len(raw_slate):,} players")
+    elif has_fanduel_slate():
+        raw_slate=load_fanduel_slate()
+        slate_source=FD_SLATE_LABEL
+        st.success(f"Loaded automatically: **{FD_SLATE_LABEL}** · {len(raw_slate):,} players")
     else:
-        st.info("FanDuel mode is ready. Upload the FanDuel NFL salary CSV for this slate to use exact FanDuel salaries and player IDs.")
+        st.info("FanDuel mode is ready. Upload the FanDuel NFL salary CSV for this slate. Once we commit it as data/fanduel_nfl_current.csv, FanDuel will auto-load weekly just like DraftKings.")
         st.stop()
 except Exception as e:
     st.error(f"Could not load slate: {e}")

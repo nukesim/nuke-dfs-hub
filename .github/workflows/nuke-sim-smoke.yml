@@ -21,4 +21,4 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
       - name: Run NUKE SIM tests
-        run: pytest -q tests/test_nuke_sim_smoke.py tests/test_dk_contest_import.py tests/test_dk_export.py
+        run: pytest -q tests/test_nuke_sim_smoke.py tests/test_dk_contest_import.py tests/test_dk_export.py tests/test_historical_validation.py

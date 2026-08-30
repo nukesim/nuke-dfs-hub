@@ -9,6 +9,7 @@ import numpy as np
 from itertools import combinations
 from pathlib import Path
 from default_slate import load_default_slate, SLATE_LABEL
+from nuke_bridge import portable_to_hub_lineup
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
 
@@ -331,6 +332,9 @@ def init():
     st.session_state.setdefault("model_errors",[])
     st.session_state.setdefault("projection_overrides",{})
     st.session_state.setdefault("depth_df",None)
+    st.session_state.setdefault("nuke_shared_portfolio_version",0)
+    st.session_state.setdefault("nuke_shared_portfolio_rows",[])
+    st.session_state.setdefault("nuke_hub_imported_portfolio_version",0)
 init()
 
 
@@ -1723,6 +1727,36 @@ if st.session_state.slate is None:
     st.info("The built-in weekly slate could not be loaded. Use the optional sidebar override.")
     st.stop()
 
+# Shared Hub ↔ SIM session bridge. Import is explicit so existing Hub lineups are never overwritten silently.
+shared_rows=st.session_state.get("nuke_shared_portfolio_rows",[])
+shared_ver=int(st.session_state.get("nuke_shared_portfolio_version",0))
+imported_ver=int(st.session_state.get("nuke_hub_imported_portfolio_version",0))
+if shared_rows and shared_ver>0:
+    with st.container(border=True):
+        b1,b2=st.columns([3,1])
+        b1.markdown("#### ☢️ NUKE SIM Portfolio Ready")
+        b1.caption(f"{len(shared_rows)} Portfolio Intelligence lineups are available from NUKE SIM. Import adds them to Saved Lineups and never overwrites your existing saved lineups.")
+        label="Imported" if imported_ver==shared_ver else "IMPORT SIM PORTFOLIO"
+        if b2.button(label,type="primary",use_container_width=True,disabled=(imported_ver==shared_ver),key=f"import_sim_portfolio_{shared_ver}"):
+            valid_ids=set(st.session_state.slate["Name + ID"].astype(str))
+            imported=0
+            skipped=0
+            next_id=next_saved_id()
+            for item in shared_rows:
+                lu=portable_to_hub_lineup(item)
+                if not lu or any(str(v) not in valid_ids for v in lu.values()):
+                    skipped+=1
+                    continue
+                st.session_state.saved_lineups[str(next_id)]=dict(lu)
+                next_id+=1
+                imported+=1
+            st.session_state["nuke_hub_imported_portfolio_version"]=shared_ver
+            if imported:
+                st.success(f"Imported {imported} NUKE SIM lineups into Saved Lineups" + (f" · skipped {skipped} slate mismatches" if skipped else ""))
+            else:
+                st.warning("No SIM lineups matched the Hub slate. Make sure both pages are using the same DraftKings slate.")
+            st.rerun()
+
 hub,modeltab,pooltab,qbplantab,buildtab,savedtab,exptab=st.tabs(["HUB","PLAYER MODEL","PLAYER POOL","QB PLAN","BUILD","SAVED LINEUPS","EXPOSURE & COMBOS"])
 
 with hub:
@@ -2365,7 +2399,7 @@ with pooltab:
 
     if a4.button("Apply Player Pool Changes",type="primary",use_container_width=True):
         st.session_state.pool_ids=set(st.session_state.pending_pool_ids)
-        st.success(f"Player pool updated: {len(st.session_state.pool_ids)} players.")
+        st.success(f"Player pool updated: {len(st.session_state.pool_ids)} players · NUKE SIM will use this committed pool automatically.")
         st.rerun()
 
 

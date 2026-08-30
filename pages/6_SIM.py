@@ -16,6 +16,7 @@ from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game
 from nuke_portfolio_story import portfolio_story
+from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
@@ -160,6 +161,20 @@ if not env.empty:
 
 pool_state=st.session_state.get("nuke_pregame_pool",{})
 editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
+
+# Hub and SIM share Streamlit session state. Pull the committed Hub pool and role adjustments
+# only when those Hub inputs change; later SIM-only edits remain intact until the Hub changes again.
+hub_pool=list(st.session_state.get("pool_ids",[]) or [])
+hub_adjust=dict(st.session_state.get("projection_overrides",{}) or {})
+hub_signature=(tuple(sorted(map(str,hub_pool))),tuple(sorted((str(k),float(v)) for k,v in hub_adjust.items())))
+last_hub_signature=st.session_state.get("nuke_sim_hub_signature")
+if (hub_pool or hub_adjust) and hub_signature!=last_hub_signature:
+    pool_state=sync_hub_pool_to_sim(players,pool_state,hub_pool,hub_adjust)
+    st.session_state["nuke_pregame_pool"]=pool_state
+    st.session_state["nuke_sim_hub_signature"]=hub_signature
+    st.session_state["nuke_pool_editor_version"]=editor_version+1
+    editor_version+=1
+    st.success(f"Synced from Hub · {len(hub_pool) if hub_pool else 'all'} players in committed pool · {len(hub_adjust)} role adjustments")
 
 for _,row in players.iterrows():
     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
@@ -334,6 +349,8 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         run_seconds=time.perf_counter()-run_started
         stage_times["Other / UI Overhead"]=max(0.0,run_seconds-sum(stage_times.values()))
         initial_takes={}
+        st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(players,portfolio)
+        st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
         for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_stage_times":stage_times,"nuke_candidate_diagnostics":candidate_diag,"nuke_player_takes":initial_takes}.items():
             st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
@@ -492,6 +509,8 @@ if results is not None and not results.empty:
                 st.session_state["nuke_portfolio"]=new_portfolio
                 st.session_state["nuke_portfolio_paths"]=new_paths
                 st.session_state["nuke_portfolio_stats"]=new_stats
+                st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(sim_players,new_portfolio)
+                st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
                 st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio))
                 st.rerun()
 

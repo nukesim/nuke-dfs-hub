@@ -9,14 +9,15 @@ from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
 from nuke_portfolio import build_portfolio, portfolio_summary, portfolio_player_exposure, portfolio_qb_exposure, portfolio_team_game_exposure, portfolio_stack_exposure, portfolio_health, PORTFOLIO_ENGINE_VERSION
 from dk_contest_import import parse_payout_upload
-from dk_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
+from dfs_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
-from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
+from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION, engine_version
 from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game
 from nuke_portfolio_story import portfolio_story
 from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
+from dfs_platform import get_platform
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
@@ -67,14 +68,17 @@ def candidate_diagnostics(players,lineups,requested,min_salary):
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide")
 st.title("☢️ NUKE SIM")
-st.caption(f"Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub · {ENGINE_VERSION}.")
+st.caption("Projection-free NFL DFS outcome + contest simulation for DraftKings and FanDuel.")
 
 with st.sidebar:
     st.header("SIM CONTROL ROOM")
+    site=st.segmented_control("Platform",options=["DK","FD"],format_func=lambda x: "DraftKings" if x=="DK" else "FanDuel",default=st.session_state.get("dfs_site","DK"),key="dfs_site") or "DK"
+    cfg=get_platform(site)
+    st.caption(f"{cfg.name} · ${cfg.salary_cap:,} cap · {'1.0 PPR + yardage bonuses' if site=='DK' else '0.5 PPR · no 100/300-yard bonuses'}")
     preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=0)
     presets={"QUICK":(250,350,50,200),"STANDARD":(400,750,75,350),"DEEP":(700,1200,100,500)}
     candidates,sims,exposure_n,contest_iters=presets[preset]
-    min_salary=st.number_input("Minimum salary",45000,50000,49400,100)
+    min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")
     candidates=st.number_input("Candidate lineups",100,5000,candidates,100)
     sims=st.number_input("Football universes",250,10000,sims,250)
     exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10)
@@ -100,22 +104,25 @@ with st.sidebar:
     st.caption(f"{PORTFOLIO_ENGINE_VERSION}: tournament upside + player/team/game concentration controls. Duplication is not used to select your portfolio.")
 
 st.subheader("🏈 Current Slate")
-salary_upload=st.file_uploader("Optional: upload a different DraftKings NFL salary CSV",type=["csv"],help="Leave this empty to use the built-in current weekly slate.")
+salary_upload=st.file_uploader(f"{'Optional: upload a different DraftKings NFL salary CSV' if site=='DK' else 'Upload FanDuel NFL salary CSV'}",type=["csv"],key=f"salary_upload_{site}",help="DraftKings can use the built-in weekly slate. FanDuel currently uses the official FanDuel salary CSV so its player IDs and $60K salaries are exact.")
 try:
     if salary_upload is not None:
         raw_slate=pd.read_csv(salary_upload)
-        slate_source=f"Uploaded override: {salary_upload.name}"
-        st.info(f"Using uploaded slate: **{salary_upload.name}**")
-    else:
+        slate_source=f"{cfg.name} upload: {salary_upload.name}"
+        st.info(f"Using {cfg.name} slate: **{salary_upload.name}**")
+    elif site=="DK":
         raw_slate=load_default_slate()
         slate_source=SLATE_LABEL
         st.success(f"Loaded automatically: **{SLATE_LABEL}** · {len(raw_slate):,} players")
+    else:
+        st.info("FanDuel mode is ready. Upload the FanDuel NFL salary CSV for this slate to use exact FanDuel salaries and player IDs.")
+        st.stop()
 except Exception as e:
     st.error(f"Could not load slate: {e}")
     st.stop()
 
 st.subheader("🏆 Contest Payouts")
-payout_upload=st.file_uploader("Optional: upload DraftKings payout CSV / Excel",type=["csv","xlsx","xls"],key="dk_payout_upload")
+payout_upload=st.file_uploader(f"Optional: upload {cfg.name} payout CSV / Excel",type=["csv","xlsx","xls"],key=f"payout_upload_{site}")
 payouts_override=None
 if payout_upload is not None:
     try:
@@ -132,7 +139,7 @@ else:
     st.caption("No payout file uploaded — NUKE will use the modeled GPP payout curve.")
 
 try:
-    players=prepare_slate(raw_slate)
+    players=prepare_slate(raw_slate,site=site)
 except Exception as e:
     st.error(f"Could not read this slate: {e}")
     st.stop()
@@ -157,7 +164,7 @@ if not env.empty:
         rem_text=f" · {rem} free API credits remaining" if rem is not None else ""
         st.caption(f"Sportsbook consensus is live for {sportsbook_games} slate games. Team totals are implied from consensus spread + game total. Auto-updated throughout the week{rem_text}. Rank 1 = strongest on the slate.")
     else:
-        st.caption("Sportsbook lines are not loaded yet, so NUKE is temporarily using its DK salary-market estimates. Rank 1 = strongest on the slate.")
+        st.caption(f"Sportsbook lines are not loaded yet, so NUKE is temporarily using its {cfg.name} salary-market estimates. Rank 1 = strongest on the slate.")
 
 pool_state=st.session_state.get("nuke_pregame_pool",{})
 editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
@@ -324,7 +331,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         candidate_diag=candidate_diagnostics(players,lineups,int(candidates),int(min_salary))
         st.write(f"Candidate Pool Health: {candidate_diag.get('grade','?')} · {candidate_diag.get('score',0):.0f}/100")
         stage=time.perf_counter()
-        st.write(f"2/5 · Simulating {int(sims):,} correlated football universes with {ENGINE_VERSION}...")
+        st.write(f"2/5 · Simulating {int(sims):,} correlated football universes with {engine_version(site)}...")
         matrix=simulate_player_matrix_v21(players,int(sims),int(seed))
         stage_times["Football Simulation"]=time.perf_counter()-stage
         st.write(f"Football simulation: {stage_times['Football Simulation']:.1f}s")
@@ -634,13 +641,13 @@ if results is not None and not results.empty:
         export_count=st.number_input("Lineups to export",1,max_export,min(150,max_export),1,key="dk_export_count")
         lineup_only=build_lineup_only_csv(sim_players,export_results,int(export_count))
         st.download_button("Download DK lineup-only CSV",lineup_only,"nuke_dk_lineups.csv","text/csv")
-        entries_upload=st.file_uploader("Upload your DraftKings Entries CSV",type=["csv"],key="dk_entries_upload")
+        entries_upload=st.file_uploader("Upload your {cfg.name} Entries CSV",type=["csv"],key="dk_entries_upload")
         if entries_upload is not None:
             try:
                 filled,info=fill_entries_csv(entries_upload.getvalue(),sim_players,export_results,int(export_count))
                 st.success(f"Filled {info['entries_filled']} DraftKings entries.")
                 st.download_button("⬇️ Download DraftKings Upload CSV",filled,"nuke_draftkings_upload.csv","text/csv",type="primary")
             except Exception as e:
-                st.error(f"Could not build DraftKings upload file: {e}")
+                st.error(f"Could not build {cfg.name} upload file: {e}")
     with tab8:
-        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5.1 adds marginal path-value concentration control on top of player/team/game caps, QB-stack exposure reporting, and Portfolio Health diagnostics. Path control is soft rather than a forced quota. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+        st.markdown(f"""**Football engine:** {engine_version(site)}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5.1 adds marginal path-value concentration control on top of player/team/game caps, QB-stack exposure reporting, and Portfolio Health diagnostics. Path control is soft rather than a forced quota. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from dfs_platform import get_platform, player_name_series
 
 DK_SLOTS = ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX", "DST"]
 ROLE_ADJUST = {"AUTO":0.00,"QB1":0.08,"RB1":0.18,"RB2":-0.05,"RB3":-0.18,"WR1":0.14,"WR2":0.04,"WR3":-0.07,"TE1":0.12,"BACKUP":-0.20}
@@ -30,14 +31,19 @@ def _attach_auto_roles(out):
             base={1:.94,2:.78,3:.58}.get(int(row.team_depth_rank),.32); x.at[i,"starter_confidence"]=float(np.clip(.65*base+.35*float(row.salary_vs_team_top),.05,.99))
     return x
 
-def prepare_slate(df):
-    aliases={"Name":["Name","name","Player","player","Name + ID"],"Position":["Position","position","Pos","pos","Roster Position"],"Salary":["Salary","salary"],"Team":["TeamAbbrev","Team","team","team_abbrev"],"Game":["Game Info","Game","game","game_info","game_id","Game ID"],"ID":["ID","Id","id","player_id"],"Status":["Status","status","Injury Status","injury_status"]}
+def prepare_slate(df,site="DK"):
+    aliases={"Name":["Name","name","Nickname","nickname","Player","player","Name + ID"],"Position":["Position","position","Pos","pos","Roster Position"],"Salary":["Salary","salary"],"Team":["TeamAbbrev","Team","team","team_abbrev"],"Game":["Game Info","Game","game","game_info","game_id","Game ID"],"ID":["ID","Id","id","player_id"],"Status":["Status","status","Injury Status","injury_status","Injury Indicator"]}
     out=pd.DataFrame(index=df.index)
     for t,opts in aliases.items():
         c=next((c for c in opts if c in df.columns),None); out[t]=df[c] if c else ""
-    out.Name=out.Name.fillna("").astype(str).str.replace(r"\s*\(\d+\)\s*$","",regex=True); out.Position=out.Position.map(_norm_pos); out.Salary=pd.to_numeric(out.Salary,errors="coerce").fillna(0).astype(int); out.Team=out.Team.fillna("").astype(str).str.upper().str.strip(); out.Game=out.Game.fillna("").astype(str).str.strip(); out.ID=out.ID.fillna("").astype(str); out.Status=out.Status.fillna("").astype(str).str.upper().str.strip()
+    if not out["Name"].astype(str).str.strip().ne("").any():
+        names=player_name_series(df)
+        if names is not None: out["Name"]=names
+    out.Name=out.Name.fillna("").astype(str).str.replace(r"\s*\(\d+\)\s*$","",regex=True); out.Position=out.Position.map(_norm_pos); out.Salary=pd.to_numeric(out.Salary,errors="coerce").fillna(0).astype(int); out.Team=out.Team.fillna("").astype(str).str.upper().str.strip(); out.Game=out.Game.fillna("").astype(str).str.strip(); out.ID=out.ID.fillna("").astype(str); out.Status=out.Status.fillna("").astype(str).str.upper().str.strip().replace({"O":"OUT"})
     out=out[out.Position.isin(["QB","RB","WR","TE","DST"])&(out.Salary>0)].reset_index(drop=True); out=out[~out.Status.isin(INACTIVE_STATUSES)].reset_index(drop=True); out["market_score"]=out.groupby("Position")["Salary"].rank(pct=True).fillna(.5); out["role_override"]="AUTO"; out["usage_multiplier"]=1.0; out["generation_boost"]=0.0
-    return _attach_auto_roles(out).reset_index(drop=True)
+    out=_attach_auto_roles(out).reset_index(drop=True)
+    out.attrs["site"]=get_platform(site).code
+    return out
 
 def _sample_points(row,rng,mode="NUKEM"):
     salary=float(row.Salary); pos=row.Position; base={"QB":13,"RB":8,"WR":7,"TE":5,"DST":5.5}[pos]; slope={"QB":.00115,"RB":.00155,"WR":.00145,"TE":.00135,"DST":.00055}[pos]; mean=base+max(0,salary-2500)*slope; sigma={"QB":6.2,"RB":7.2,"WR":7.8,"TE":6.5,"DST":5.5}[pos]
@@ -57,14 +63,15 @@ def simulate_player_matrix(players,n_sims=1500,seed=26,mode="NUKEM"):
             pts=_sample_points(row,rng,mode); pts += (.72*gf.get(row.Game,0)+.48*tf.get(row.Team,0)) if row.Position!="DST" else -.30*gf.get(row.Game,0); mat[s,i]=max(-6 if row.Position=="DST" else 0,pts)
     return mat
 
-def _valid_lineup(indices,p,min_salary,max_salary=50000):
+def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK"):
+    if max_salary is None: max_salary=get_platform(site).salary_cap
     if len(indices)!=9 or len(set(indices))!=9:return False
     r=p.iloc[indices]; sal=int(r.Salary.sum()); c=r.Position.value_counts().to_dict()
     if sal<min_salary or sal>max_salary:return False
     if not(c.get("QB",0)==1 and c.get("RB",0)>=2 and c.get("WR",0)>=3 and c.get("TE",0)>=1 and c.get("DST",0)==1):return False
     q=r[r.Position.eq("QB")]; return not("auto_qb_eligible" in q.columns and not bool(q.iloc[0].auto_qb_eligible))
 
-def generate_lineups(players,n_lineups=600,min_salary=49400,seed=26):
+def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
     """Candidate Engine V3: salary-aware tournament construction.
 
     Builds the first eight roster spots under the existing stack/profile rules, then solves
@@ -73,7 +80,7 @@ def generate_lineups(players,n_lineups=600,min_salary=49400,seed=26):
     """
     rng=np.random.default_rng(seed); p=players.reset_index(drop=True)
     if p.empty:return []
-    min_salary=max(49400,int(min_salary)); n_lineups=int(n_lineups)
+    cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)
     pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int)
     market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float)
     gen_boost=pd.to_numeric(p.get("generation_boost",0.0),errors="coerce").fillna(0).clip(-3,3).to_numpy(float)
@@ -139,13 +146,13 @@ def generate_lineups(players,n_lineups=600,min_salary=49400,seed=26):
             if not len(ids):break
             # Leave enough salary for a legal final FLEX rather than blindly spending.
             partial=int(sal[np.asarray(chosen,dtype=int)].sum())
-            max_flex_salary=50000-partial
+            max_flex_salary=salary_cap-partial
             ids=ids[sal[ids]<=max_flex_salary]
             if not len(ids):break
             fw=w[ids]; chosen.append(int(rng.choice(ids,p=fw/fw.sum())))
         if len(chosen)!=8:continue
         partial=int(sal[np.asarray(chosen,dtype=int)].sum())
-        lo=min_salary-partial; hi=50000-partial
+        lo=min_salary-partial; hi=salary_cap-partial
         ids=flex[(sal[flex]>=lo)&(sal[flex]<=hi)&(~np.isin(flex,chosen))]
         if not len(ids):continue
         # Prevent final FLEX from creating the DST-vs-multiple-offense conflict.

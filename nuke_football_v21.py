@@ -11,10 +11,14 @@ is intentionally separate from the frozen V2.1 calibration and should not be
 described as historically validated by the V2.1 tests.
 """
 import numpy as np
+from dfs_platform import normalize_site
 
 from nuke_football_v2 import simulate_player_matrix_v2
 
 ENGINE_VERSION = "Football Engine V2.1 + Live Game Environment"
+
+def engine_version(site="DK"):
+    return ENGINE_VERSION if normalize_site(site)=="DK" else "Football Engine V2 + FanDuel Scoring + Live Game Environment"
 CALIBRATION_TRAINING = "2017 Weeks 1-8"
 CALIBRATION_VALIDATION = "2017 Weeks 9-17 holdout + independent 2018-2021"
 
@@ -70,7 +74,7 @@ def _live_environment(players):
         return None
 
 
-def simulate_player_matrix_v21(players, n_sims=1500, seed=26, game_environment=None):
+def simulate_player_matrix_v21(players, n_sims=1500, seed=26, game_environment=None, site="DK"):
     """Run V2 with bounded live market context, then frozen V2.1 calibration.
 
     Pass game_environment explicitly for testing/reproducibility. When omitted,
@@ -82,5 +86,8 @@ def simulate_player_matrix_v21(players, n_sims=1500, seed=26, game_environment=N
         n_sims=n_sims,
         seed=seed,
         game_environment=env,
+        site=site,
     )
-    return apply_v21_calibration(players, original)
+    # V2.1 calibration was validated on DraftKings scoring. FanDuel uses the same
+    # generative football outcomes with FanDuel scoring, without applying DK-only calibration.
+    return apply_v21_calibration(players, original) if normalize_site(site)=="DK" else original

@@ -10,6 +10,7 @@ from itertools import combinations
 from pathlib import Path
 from default_slate import load_default_slate, SLATE_LABEL
 from nuke_bridge import portable_to_hub_lineup
+from dfs_platform import get_platform
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
 
@@ -19,7 +20,8 @@ SLOT_POS = {
     "WR1":["WR"],"WR2":["WR"],"WR3":["WR"],
     "TE":["TE"],"FLEX":["RB","WR","TE"],"DST":["DST"]
 }
-CAP = 50000
+SITE = st.session_state.get("dfs_site","DK")
+CAP = get_platform(SITE).salary_cap
 MAX_LU = 50
 
 st.markdown("""
@@ -336,6 +338,20 @@ def init():
     st.session_state.setdefault("nuke_shared_portfolio_rows",[])
     st.session_state.setdefault("nuke_hub_imported_portfolio_version",0)
 init()
+
+_platform=st.segmented_control("Platform",options=["DK","FD"],format_func=lambda x: "DraftKings" if x=="DK" else "FanDuel",default=st.session_state.get("dfs_site","DK"),key="hub_platform") or "DK"
+if _platform!=st.session_state.get("dfs_site","DK"):
+    st.session_state["dfs_site"]=_platform
+    # Platform salaries and IDs are not interchangeable; clear weekly lineup state on switch.
+    st.session_state["slate"]=None
+    st.session_state["slate_name"]="No slate loaded"
+    st.session_state["pool_ids"]=set()
+    st.session_state["saved_lineups"]=[]
+    st.session_state["lineups"]=[empty_lu() for _ in range(MAX_LU)]
+    st.rerun()
+SITE=st.session_state.get("dfs_site","DK")
+CAP=get_platform(SITE).salary_cap
+st.caption(f"{get_platform(SITE).name} Classic · ${CAP:,} salary cap")
 
 
 TEAM_NAME_MAP = {

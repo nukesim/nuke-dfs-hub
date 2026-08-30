@@ -9,6 +9,7 @@ totals, and spreads act as bounded game-context inputs. The DK salary/role model
 remains the player-allocation foundation.
 """
 import numpy as np
+from dfs_platform import get_platform
 
 
 def _norm_weights(x):
@@ -59,7 +60,8 @@ def _sportsbook_inputs(environment, teams, team_game):
     return team_total,game_total,spread,live
 
 
-def simulate_player_matrix_v2(players,n_sims=1500,seed=26,game_environment=None):
+def simulate_player_matrix_v2(players,n_sims=1500,seed=26,game_environment=None,site="DK"):
+    cfg=get_platform(site)
     rng=np.random.default_rng(int(seed))
     n_sims=int(n_sims); n=len(players)
     mat=np.zeros((n_sims,n),dtype=np.float32)
@@ -162,7 +164,8 @@ def simulate_player_matrix_v2(players,n_sims=1500,seed=26,game_environment=None)
             base_ypc=np.where(sp=="RB",4.25,np.where(sp=="WR",6.2,3.5))
             ypc=base_ypc*(.86+.25*sm)
             rush_y=np.maximum(0,rus[:,js]*rng.normal(ypc[None,:],1.0,size=rec.shape))
-            pts=rec+.1*(rec_y+rush_y)+6*tds[:,js]+3*(rec_y>=100)+3*(rush_y>=100)
+            pts=cfg.reception_points*rec+.1*(rec_y+rush_y)+6*tds[:,js]
+            if cfg.yardage_bonuses: pts=pts+3*(rec_y>=100)+3*(rush_y>=100)
             mat[:,idx[js]]=np.maximum(0,pts).astype(np.float32)
 
         if np.any(qmask):
@@ -173,7 +176,8 @@ def simulate_player_matrix_v2(players,n_sims=1500,seed=26,game_environment=None)
                 pass_td=np.maximum(0,np.rint(off_td[:,ti]*.72+rng.normal(0,.65,size=n_sims)).astype(int))
                 ints=rng.poisson(max(.25,1.05-.45*qm),size=n_sims)
                 ry=np.maximum(0,rus[:,j]*rng.normal(5.0,1.5,size=n_sims)); rtd=np.minimum(tds[:,j],2)
-                pts=.04*py+4*pass_td-ints+.1*ry+6*rtd+3*(py>=300)
+                pts=.04*py+4*pass_td-ints+.1*ry+6*rtd
+                if cfg.yardage_bonuses: pts=pts+3*(py>=300)
                 mat[:,idx[j]]=np.maximum(0,pts).astype(np.float32)
 
         if np.any(dstmask):

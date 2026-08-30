@@ -1,7 +1,8 @@
+import itertools
 import numpy as np
 import pandas as pd
 
-PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V4"
+PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V5"
 
 
 def _z(v):
@@ -39,6 +40,27 @@ def _normalize_player_preferences(player_preferences, size, default_max):
     return prefs
 
 
+def _lineup_team_game_sets(players, lineup_ids):
+    team_sets, game_sets = [], []
+    if players is None or len(players) == 0:
+        return [set() for _ in lineup_ids], [set() for _ in lineup_ids]
+    for lu in lineup_ids:
+        teams, games = set(), set()
+        for pid in lu:
+            if pid < 0 or pid >= len(players):
+                continue
+            p = players.iloc[int(pid)]
+            team = str(getattr(p, "Team", "")).strip()
+            game = str(getattr(p, "Game", "")).strip()
+            if team and team.lower() != "nan":
+                teams.add(team)
+            if game and game.lower() != "nan":
+                games.add(game)
+        team_sets.append(teams)
+        game_sets.append(games)
+    return team_sets, game_sets
+
+
 def build_portfolio(
     contest_results,
     size=20,
@@ -48,13 +70,16 @@ def build_portfolio(
     max_player_exposure=0.45,
     max_qb_exposure=0.30,
     player_preferences=None,
+    players=None,
+    max_team_exposure=1.0,
+    max_game_exposure=1.0,
 ):
-    """Build an MME portfolio around tournament upside with user-controlled takes.
+    """Build an MME portfolio around GPP upside with portfolio-level controls.
 
-    Player takes affect portfolio selection only; they never alter simulated fantasy points.
-    Boost is a soft preference from -3 to +3. Per-player min/max exposures override the
-    global player cap for that player. Minimums are actively prioritized as the portfolio
-    fills, while all maximums remain hard constraints.
+    V5 keeps player takes, adds hard team/game lineup-incidence caps, and retains soft
+    path/concentration penalties. Team/game exposure means the share of portfolio lineups
+    containing at least one player from that team/game. These controls shape portfolio
+    construction only and do not alter football outcomes.
     """
     if contest_results is None or contest_results.empty:
         return pd.DataFrame()
@@ -65,8 +90,12 @@ def build_portfolio(
     max_overlap = int(np.clip(max_overlap, 0, 8))
     max_player_exposure = float(np.clip(max_player_exposure, 0.01, 1.0))
     max_qb_exposure = float(np.clip(max_qb_exposure, 0.01, 1.0))
+    max_team_exposure = float(np.clip(max_team_exposure, 0.01, 1.0))
+    max_game_exposure = float(np.clip(max_game_exposure, 0.01, 1.0))
     global_max_player_count = max(1, int(np.floor(size * max_player_exposure + 1e-9)))
     max_qb_count = max(1, int(np.floor(size * max_qb_exposure + 1e-9)))
+    max_team_count = max(1, int(np.floor(size * max_team_exposure + 1e-9)))
+    max_game_count = max(1, int(np.floor(size * max_game_exposure + 1e-9)))
     prefs = _normalize_player_preferences(player_preferences, size, max_player_exposure)
 
     roi = pd.to_numeric(x.get("Sim ROI %", 0), errors="coerce").fillna(0).to_numpy(float)
@@ -91,8 +120,8 @@ def build_portfolio(
     qb_series = x.get("QB", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
     stack_series = x.get("Stack", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
     lineup_ids = [list(map(int, lu)) for lu in x["_indices"]] if "_indices" in x.columns else [[] for _ in range(n)]
+    lineup_teams, lineup_games = _lineup_team_game_sets(players, lineup_ids)
 
-    # A +1 take is meaningful but does not overpower a clearly better tournament lineup.
     preference_adjustment = np.zeros(n, dtype=float)
     for i, lu in enumerate(lineup_ids):
         preference_adjustment[i] = sum(0.42 * prefs.get(pid, {}).get("boost", 0.0) for pid in lu)
@@ -104,7 +133,8 @@ def build_portfolio(
         viable_paths = list(path_support.keys()) or ["UNKNOWN"]
     target_per_path = max(1.0, size / max(1, len(viable_paths)))
 
-    selected, path_counts, qb_counts, stack_counts, player_counts, reasons = [], {}, {}, {}, {}, {}
+    selected, path_counts, qb_counts, stack_counts = [], {}, {}, {}
+    player_counts, team_counts, game_counts, reasons = {}, {}, {}, {}
 
     def player_max_count(pid):
         return prefs.get(pid, {}).get("max_count", global_max_player_count)
@@ -115,6 +145,10 @@ def build_portfolio(
             return False
         qb = qb_series.iloc[i]
         if qb_counts.get(qb, 0) >= max_qb_count:
+            return False
+        if any(team_counts.get(team, 0) >= max_team_count for team in lineup_teams[i]):
+            return False
+        if any(game_counts.get(game, 0) >= max_game_count for game in lineup_games[i]):
             return False
         return True
 
@@ -146,7 +180,6 @@ def build_portfolio(
             concentration_penalty = 0.25 * max(0.0, qb_share - 0.20) + 0.10 * max(0.0, stack_share - 0.55)
             redundancy_penalty = 0.10 * max(0.0, avg_overlap - 5.25) + 0.16 * max(0.0, worst_overlap - 6)
 
-            # Minimum exposure pressure grows as the remaining number of portfolio slots shrinks.
             min_bonus = 0.0
             for pid in lu:
                 need = max(0, prefs.get(pid, {}).get("min_count", 0) - player_counts.get(pid, 0))
@@ -175,6 +208,10 @@ def build_portfolio(
         stack_counts[stack] = stack_counts.get(stack, 0) + 1
         for pid in lineup_ids[best_i]:
             player_counts[pid] = player_counts.get(pid, 0) + 1
+        for team in lineup_teams[best_i]:
+            team_counts[team] = team_counts.get(team, 0) + 1
+        for game in lineup_games[best_i]:
+            game_counts[game] = game_counts.get(game, 0) + 1
         reasons[best_i] = best_reason
 
     out = x.iloc[selected].copy().reset_index(drop=True)
@@ -184,6 +221,8 @@ def build_portfolio(
     out.attrs["requested_size"] = size
     out.attrs["max_player_exposure"] = max_player_exposure
     out.attrs["max_qb_exposure"] = max_qb_exposure
+    out.attrs["max_team_exposure"] = max_team_exposure
+    out.attrs["max_game_exposure"] = max_game_exposure
     out.attrs["player_preferences"] = prefs
     unmet = {}
     for pid, pref in prefs.items():
@@ -208,6 +247,8 @@ def portfolio_summary(portfolio):
         "engine": PORTFOLIO_ENGINE_VERSION,
         "max_player_exposure": float(portfolio.attrs.get("max_player_exposure", 1.0)),
         "max_qb_exposure": float(portfolio.attrs.get("max_qb_exposure", 1.0)),
+        "max_team_exposure": float(portfolio.attrs.get("max_team_exposure", 1.0)),
+        "max_game_exposure": float(portfolio.attrs.get("max_game_exposure", 1.0)),
         "unmet_minimums": portfolio.attrs.get("unmet_minimums", {}),
     }
     return path_df, stats
@@ -238,3 +279,64 @@ def portfolio_qb_exposure(portfolio):
         return pd.DataFrame()
     c = portfolio["QB"].fillna("UNKNOWN").astype(str).value_counts()
     return pd.DataFrame({"QB": c.index, "Lineups": c.values, "Exposure %": np.round(100.0 * c.values / len(portfolio), 1)}).reset_index(drop=True)
+
+
+def portfolio_team_game_exposure(players, portfolio):
+    if players is None or portfolio is None or portfolio.empty or "_indices" not in portfolio.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    lineup_ids = [list(map(int, lu)) for lu in portfolio["_indices"]]
+    team_sets, game_sets = _lineup_team_game_sets(players, lineup_ids)
+    team_counts, game_counts = {}, {}
+    for teams in team_sets:
+        for team in teams:
+            team_counts[team] = team_counts.get(team, 0) + 1
+    for games in game_sets:
+        for game in games:
+            game_counts[game] = game_counts.get(game, 0) + 1
+    team_df = pd.DataFrame([
+        {"Team": k, "Lineups": v, "Exposure %": round(100.0 * v / len(portfolio), 1)}
+        for k, v in team_counts.items()
+    ]).sort_values(["Exposure %", "Team"], ascending=[False, True]).reset_index(drop=True) if team_counts else pd.DataFrame(columns=["Team", "Lineups", "Exposure %"])
+    game_df = pd.DataFrame([
+        {"Game": k, "Lineups": v, "Exposure %": round(100.0 * v / len(portfolio), 1)}
+        for k, v in game_counts.items()
+    ]).sort_values(["Exposure %", "Game"], ascending=[False, True]).reset_index(drop=True) if game_counts else pd.DataFrame(columns=["Game", "Lineups", "Exposure %"])
+    return team_df, game_df
+
+
+def portfolio_stack_exposure(portfolio):
+    if portfolio is None or portfolio.empty:
+        return pd.DataFrame()
+    qb = portfolio.get("QB", pd.Series(["UNKNOWN"] * len(portfolio))).fillna("UNKNOWN").astype(str)
+    stack = portfolio.get("Stack", pd.Series(["UNKNOWN"] * len(portfolio))).fillna("UNKNOWN").astype(str)
+    d = pd.DataFrame({"QB": qb, "Stack": stack})
+    c = d.value_counts(["QB", "Stack"]).reset_index(name="Lineups")
+    c["Exposure %"] = np.round(100.0 * c["Lineups"] / len(portfolio), 1)
+    return c.sort_values(["Exposure %", "QB"], ascending=[False, True]).reset_index(drop=True)
+
+
+def portfolio_health(players, portfolio):
+    if players is None or portfolio is None or portfolio.empty or "_indices" not in portfolio.columns:
+        return {"flags": [], "top_core": pd.DataFrame(), "core_count": 0}
+    team_df, game_df = portfolio_team_game_exposure(players, portfolio)
+    player_df = portfolio_player_exposure(players, portfolio)
+    lineup_ids = [tuple(sorted(map(int, lu))) for lu in portfolio["_indices"]]
+    core_counts = {}
+    for lu in lineup_ids:
+        for core in itertools.combinations(lu, 3):
+            core_counts[core] = core_counts.get(core, 0) + 1
+    rows = []
+    for core, count in sorted(core_counts.items(), key=lambda kv: kv[1], reverse=True)[:25]:
+        names = [str(players.iloc[pid].Name) for pid in core]
+        rows.append({"3-Player Core": " + ".join(names), "Lineups": count, "Exposure %": round(100.0 * count / len(portfolio), 1)})
+    core_df = pd.DataFrame(rows)
+    flags = []
+    if not player_df.empty and float(player_df.iloc[0]["Exposure %"]) >= 45:
+        flags.append(f"Player concentration: {player_df.iloc[0]['Player']} appears in {player_df.iloc[0]['Exposure %']:.1f}% of lineups.")
+    if not team_df.empty and float(team_df.iloc[0]["Exposure %"]) >= 65:
+        flags.append(f"Team concentration: {team_df.iloc[0]['Team']} appears in {team_df.iloc[0]['Exposure %']:.1f}% of lineups.")
+    if not game_df.empty and float(game_df.iloc[0]["Exposure %"]) >= 55:
+        flags.append(f"Game concentration: {game_df.iloc[0]['Game']} appears in {game_df.iloc[0]['Exposure %']:.1f}% of lineups.")
+    if not core_df.empty and float(core_df.iloc[0]["Exposure %"]) >= 25:
+        flags.append(f"Core concentration: {core_df.iloc[0]['3-Player Core']} appears together in {core_df.iloc[0]['Exposure %']:.1f}% of lineups.")
+    return {"flags": flags, "top_core": core_df, "core_count": len(core_counts)}

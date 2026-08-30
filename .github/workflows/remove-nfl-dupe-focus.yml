@@ -1,0 +1,24 @@
+name: Remove NFL Dupe Focus
+on:
+  push:
+    branches: [main]
+    paths: ['tools/remove_nfl_dupe_focus.py']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python tools/remove_nfl_dupe_focus.py
+          python -m py_compile nuke_portfolio.py nuke_portfolio_story.py pages/6_SIM.py
+      - run: |
+          git config user.name "nukesim"
+          git config user.email "bryson232323@gmail.com"
+          git add nuke_portfolio.py nuke_portfolio_story.py pages/6_SIM.py
+          git commit -m "Remove duplication focus from NFL main-slate portfolio" || exit 0
+          git push

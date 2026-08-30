@@ -1,0 +1,33 @@
+name: Add SIM Runtime
+on:
+  push:
+    paths:
+      - '.runtime-trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch runtime
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pages/6_SIM.py'); s=p.read_text()
+          s=s.replace('import pandas as pd\n','import pandas as pd\nimport time\n',1)
+          s=s.replace('if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):\n','if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):\n    run_started=time.perf_counter()\n',1)
+          old='for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats}.items(): st.session_state[k]=v\n        status.update(label="NUKE SIM complete",state="complete")'
+          new='run_seconds=time.perf_counter()-run_started\n        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds}.items(): st.session_state[k]=v\n        status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")\n    st.success(f"Total run time: {run_seconds:.1f} seconds")'
+          if old not in s: raise SystemExit('runtime insertion point not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          python -m py_compile pages/6_SIM.py
+      - name: Commit
+        run: |
+          git config user.name nukesim
+          git config user.email bryson232323@gmail.com
+          git add pages/6_SIM.py
+          git commit -m 'Show NUKE SIM run time'
+          git push

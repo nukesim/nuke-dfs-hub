@@ -1,0 +1,100 @@
+name: Pregame Player Pool UI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch pregame pool controls
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # ---- nuke_sim.py: add generation-only boost ----
+          p=Path('nuke_sim.py')
+          s=p.read_text()
+          s=s.replace('out["market_score"]=out.groupby("Position")["Salary"].rank(pct=True).fillna(.5); out["role_override"]="AUTO"; out["usage_multiplier"]=1.0',
+                      'out["market_score"]=out.groupby("Position")["Salary"].rank(pct=True).fillna(.5); out["role_override"]="AUTO"; out["usage_multiplier"]=1.0; out["generation_boost"]=0.0')
+          s=s.replace('pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int); market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float)',
+                      'pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int); market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float); gen_boost=pd.to_numeric(p.get("generation_boost",0.0),errors="coerce").fillna(0).clip(-3,3).to_numpy(float)')
+          s=s.replace('w=np.power(.08+market,3)*np.clip(usage,.35,2.25)*np.clip(auto,.18,1.15); w=np.clip(w,1e-8,None)',
+                      'w=np.power(.08+market,3)*np.clip(usage,.35,2.25)*np.clip(auto,.18,1.15)*np.exp(.34*gen_boost); w=np.clip(w,1e-8,None)')
+          p.write_text(s)
+
+          # ---- pages/6_SIM.py: replace flat pre-sim editor with game-by-game pool ----
+          p=Path('pages/6_SIM.py')
+          s=p.read_text()
+          s=s.replace('from nuke_combos import combo_exposure_table',
+                      'from nuke_combos import combo_exposure_table\nfrom nuke_game_pool import game_environment, style_environment')
+          old='''st.subheader("Player / Injury / Role Overrides"); st.caption("NUKE automatically infers depth roles. Manual controls are optional emergency overrides.")
+editor=players[["Name","Position","Team","Salary","Game"]].copy(); editor.insert(0,"Active",True); editor["Role"]="AUTO"; editor["Usage x"]=1.0
+edited=st.data_editor(editor,use_container_width=True,hide_index=True,disabled=["Name","Position","Team","Salary","Game"],column_config={"Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]),"Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f")})
+mask=edited.Active.fillna(False).astype(bool).to_numpy(); players=players.loc[mask].copy().reset_index(drop=True); ae=edited.loc[mask].reset_index(drop=True); players["role_override"]=ae.Role.fillna("AUTO").astype(str).str.upper().values; players["usage_multiplier"]=pd.to_numeric(ae["Usage x"],errors="coerce").fillna(1).clip(.25,2.25).values'''
+          new='''st.subheader("🎮 Game-by-Game Player Pool")
+st.caption("Work the slate one game at a time. Include/remove players and add a personal pre-sim Boost. Boost changes candidate-lineup generation only — it does NOT change the player's simulated fantasy points.")
+env=game_environment(players)
+if not env.empty:
+    st.caption("Team/Game totals below are projection-free DK salary-market estimates until a live sportsbook feed is connected. Rank 1 = strongest on the slate.")
+
+pool_state=st.session_state.get("nuke_pregame_pool",{})
+updated_state={}
+for game in players.Game.drop_duplicates().tolist():
+    gp=players[players.Game.eq(game)].copy()
+    teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
+    label=" vs ".join(teams[:2]) if len(teams)>=2 else str(game)
+    with st.expander(f"🏈 {label}",expanded=False):
+        ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
+        if not ge.empty:
+            env_show=ge[["Team","Opponent","Team Total","Team Total Rank","Game Total","Game Total Rank"]]
+            st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
+        rows=[]
+        for idx,row in gp.iterrows():
+            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+            saved=pool_state.get(key,{})
+            rows.append({"_row":int(idx),"_key":key,"Include":bool(saved.get("include",True)),"Player":row.Name,"Pos":row.Position,"Team":row.Team,"Salary":int(row.Salary),"Auto Role":row.auto_role,"Boost":float(saved.get("boost",0.0)),"Role":str(saved.get("role","AUTO")),"Usage x":float(saved.get("usage",1.0))})
+        edit_df=pd.DataFrame(rows).set_index("_row")
+        edited_game=st.data_editor(edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,disabled=["Player","Pos","Team","Salary","Auto Role"],column_config={"Include":st.column_config.CheckboxColumn("Include"),"Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f",help="Portfolio/generation preference only. Does not alter simulated fantasy points."),"Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]),"Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f",help="Changes the football simulation itself. Leave at 1.00 unless you believe the player's real role/usage changes.")},key=f"game_pool_{str(game)}")
+        for idx,erow in edited_game.iterrows():
+            key=str(edit_df.loc[idx,"_key"])
+            updated_state[key]={"include":bool(erow["Include"]),"boost":float(erow["Boost"]),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+
+st.session_state["nuke_pregame_pool"]=updated_state
+active_rows=[]
+for idx,row in players.iterrows():
+    key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+    cfg=updated_state.get(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
+    if cfg.get("include",True):
+        r=row.copy(); r["generation_boost"]=float(cfg.get("boost",0.0)); r["role_override"]=str(cfg.get("role","AUTO")).upper(); r["usage_multiplier"]=float(cfg.get("usage",1.0)); active_rows.append(r)
+players=pd.DataFrame(active_rows).reset_index(drop=True) if active_rows else players.iloc[0:0].copy()
+if not players.empty:
+    st.caption(f"Active pool: {len(players):,} players · Boosted: {(pd.to_numeric(players.generation_boost,errors='coerce').fillna(0)>0).sum():,} · Reduced/Faded: {(pd.to_numeric(players.generation_boost,errors='coerce').fillna(0)<0).sum():,}")'''
+          if old not in s:
+              raise SystemExit('Old flat player editor block not found')
+          s=s.replace(old,new,1)
+
+          # Preserve pre-sim boosts as starting portfolio takes after a fresh run.
+          old_state='''for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_player_takes":{}}.items(): st.session_state[k]=v'''
+          new_state='''initial_takes={int(i):{"boost":float(b),"min":0.0,"max":float(max_player_exp)/100.0} for i,b in enumerate(pd.to_numeric(players.get("generation_boost",0),errors="coerce").fillna(0)) if abs(float(b))>1e-9}
+        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_player_takes":initial_takes}.items(): st.session_state[k]=v'''
+          if old_state in s:
+              s=s.replace(old_state,new_state,1)
+          p.write_text(s)
+          PY
+          python -m py_compile nuke_sim.py nuke_game_pool.py pages/6_SIM.py
+      - name: Commit patched files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add nuke_sim.py pages/6_SIM.py
+          git diff --cached --quiet && exit 0
+          git commit -m "Add game-by-game pre-sim player pool controls"
+          git push

@@ -1,17 +1,20 @@
-"""Validated Football Engine V2.1.
+"""Validated Football Engine V2.1 + live game-environment layer.
 
 V2.1 preserves the original generative Football Engine V2 and applies the
 position-level mean/spread calibration learned only from 2017 Weeks 1-8.
-Those parameters subsequently passed the untouched 2017 Weeks 9-17 holdout
-and independent 2018-2021 validation.
+Those frozen calibration parameters subsequently passed the untouched 2017
+Weeks 9-17 holdout and independent 2018-2021 validation.
 
-Keeping V2 in a separate module gives NUKE a clean rollback/baseline path.
+On live slates NUKE can additionally apply current sportsbook consensus as a
+bounded game-context layer (team total, game total, spread). That live context
+is intentionally separate from the frozen V2.1 calibration and should not be
+described as historically validated by the V2.1 tests.
 """
 import numpy as np
 
 from nuke_football_v2 import simulate_player_matrix_v2
 
-ENGINE_VERSION = "Football Engine V2.1"
+ENGINE_VERSION = "Football Engine V2.1 + Live Game Environment"
 CALIBRATION_TRAINING = "2017 Weeks 1-8"
 CALIBRATION_VALIDATION = "2017 Weeks 9-17 holdout + independent 2018-2021"
 
@@ -44,7 +47,40 @@ def apply_v21_calibration(players, matrix):
     return out.astype(np.float32)
 
 
-def simulate_player_matrix_v21(players, n_sims=1500, seed=26):
-    """Run generative V2, then apply the frozen validated V2.1 calibration."""
-    original = simulate_player_matrix_v2(players, n_sims=n_sims, seed=seed)
+def _live_environment(players):
+    """Build the current sportsbook environment without making a network call.
+
+    nuke_odds reads the locally cached snapshot maintained by the scheduled
+    GitHub workflow. Any failure simply returns None and V2.1 falls back to its
+    original projection-free behavior.
+    """
+    try:
+        from nuke_odds import load_current_odds
+        from nuke_game_pool import game_environment
+        odds = load_current_odds()
+        if odds is None or odds.empty:
+            return None
+        env = game_environment(players, odds)
+        if env is None or env.empty:
+            return None
+        if "Source" in env.columns and not env["Source"].astype(str).eq("Sportsbook Consensus").any():
+            return None
+        return env
+    except Exception:
+        return None
+
+
+def simulate_player_matrix_v21(players, n_sims=1500, seed=26, game_environment=None):
+    """Run V2 with bounded live market context, then frozen V2.1 calibration.
+
+    Pass game_environment explicitly for testing/reproducibility. When omitted,
+    the engine automatically uses NUKE's latest cached sportsbook snapshot.
+    """
+    env = game_environment if game_environment is not None else _live_environment(players)
+    original = simulate_player_matrix_v2(
+        players,
+        n_sims=n_sims,
+        seed=seed,
+        game_environment=env,
+    )
     return apply_v21_calibration(players, original)

@@ -96,6 +96,9 @@ def style_environment(df):
         return df
     max_team = int(df["Team Total Rank"].max()) if "Team Total Rank" in df else 1
     max_game = int(df["Game Total Rank"].max()) if "Game Total Rank" in df else 1
-    return df.style.map(lambda v: rank_background(v, max_team), subset=["Team Total Rank"]).map(
-        lambda v: rank_background(v, max_game), subset=["Game Total Rank"]
+    return (
+        df.style
+        .format({"Team Total": "{:.1f}", "Game Total": "{:.1f}"})
+        .map(lambda v: rank_background(v, max_team), subset=["Team Total Rank"])
+        .map(lambda v: rank_background(v, max_game), subset=["Game Total Rank"])
     )

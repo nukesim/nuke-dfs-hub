@@ -47,6 +47,9 @@ def candidate_diagnostics(players,lineups,requested,min_salary):
         for j in range(i+1,len(sample)):
             overlap_vals.append(len(a & set(sample[j])))
     avg_overlap=float(sum(overlap_vals)/len(overlap_vals)) if overlap_vals else 0.0
+    median_overlap=float(np.median(overlap_vals)) if overlap_vals else 0.0
+    p95_overlap=float(np.percentile(overlap_vals,95)) if overlap_vals else 0.0
+    max_overlap_seen=int(max(overlap_vals)) if overlap_vals else 0
     max_pair=max(pair_counts.values()) if pair_counts else 0
     max_triple=max(triple_counts.values()) if triple_counts else 0
     max_pair_pct=100.0*max_pair/max(1,n)
@@ -56,7 +59,7 @@ def candidate_diagnostics(players,lineups,requested,min_salary):
     checks=[fill_pct>=95.0,len(qb_names)>=6,len(games)>=6,avg_overlap<=5.5,max_pair_pct<=35.0,max_triple_pct<=20.0]
     score=100.0*sum(checks)/len(checks)
     grade="A" if score>=90 else "B" if score>=80 else "C" if score>=65 else "D" if score>=50 else "F"
-    return {"grade":grade,"score":score,"generated":n,"requested":int(requested),"fill_pct":fill_pct,"unique_qbs":len(qb_names),"games":len(games),"avg_overlap":avg_overlap,"max_pair_repeat":max_pair,"max_pair_pct":max_pair_pct,"max_triple_repeat":max_triple,"max_triple_pct":max_triple_pct,"avg_salary":avg_salary,"min_salary":int(min_salary)}
+    return {"grade":grade,"score":score,"generated":n,"requested":int(requested),"fill_pct":fill_pct,"unique_qbs":len(qb_names),"games":len(games),"avg_overlap":avg_overlap,"median_overlap":median_overlap,"p95_overlap":p95_overlap,"max_overlap_seen":max_overlap_seen,"max_pair_repeat":max_pair,"max_pair_pct":max_pair_pct,"max_triple_repeat":max_triple,"max_triple_pct":max_triple_pct,"avg_salary":avg_salary,"min_salary":int(min_salary)}
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide")
 st.title("☢️ NUKE SIM")
@@ -252,6 +255,7 @@ if not players.empty:
 
 if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     run_started=time.perf_counter()
+    stage_times={}
     seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1
     if len(players)<9:
         st.error("Not enough active players.")
@@ -260,7 +264,8 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         stage=time.perf_counter()
         st.write("1/5 · Generating correlated DraftKings candidates...")
         lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed))
-        st.write(f"Candidate generation: {time.perf_counter()-stage:.1f}s")
+        stage_times["Candidate Generation"]=time.perf_counter()-stage
+        st.write(f"Candidate generation: {stage_times['Candidate Generation']:.1f}s")
         if not lineups:
             status.update(label="No legal lineups found",state="error")
             st.stop()
@@ -270,25 +275,30 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         stage=time.perf_counter()
         st.write(f"2/5 · Simulating {int(sims):,} correlated football universes with {ENGINE_VERSION}...")
         matrix=simulate_player_matrix_v21(players,int(sims),int(seed))
-        st.write(f"Football simulation: {time.perf_counter()-stage:.1f}s")
+        stage_times["Football Simulation"]=time.perf_counter()-stage
+        st.write(f"Football simulation: {stage_times['Football Simulation']:.1f}s")
         stage=time.perf_counter()
         st.write("3/5 · Ranking outcomes and assigning paths...")
         results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix))
         exposure=exposure_table(players,results,int(exposure_n))
-        st.write(f"Ranking + paths: {time.perf_counter()-stage:.1f}s")
+        stage_times["Ranking + Paths"]=time.perf_counter()-stage
+        st.write(f"Ranking + paths: {stage_times['Ranking + Paths']:.1f}s")
         stage=time.perf_counter()
         st.write(f"4/5 · Contest-simming all {len(results):,} candidates...")
         contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override,players=players)
-        st.write(f"Contest simulation: {time.perf_counter()-stage:.1f}s")
+        stage_times["Contest Simulation"]=time.perf_counter()-stage
+        st.write(f"Contest simulation: {stage_times['Contest Simulation']:.1f}s")
         stage=time.perf_counter()
         st.write(f"5/5 · Building {PORTFOLIO_ENGINE_VERSION} portfolio...")
         portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0,players=players,max_team_exposure=float(max_team_exp)/100.0,max_game_exposure=float(max_game_exp)/100.0)
         portfolio_paths,portfolio_stats=portfolio_summary(portfolio)
         pexposure=path_exposure(portfolio,len(portfolio))
-        st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")
+        stage_times["Portfolio Build"]=time.perf_counter()-stage
+        st.write(f"Portfolio build: {stage_times['Portfolio Build']:.1f}s")
         run_seconds=time.perf_counter()-run_started
+        stage_times["Other / UI Overhead"]=max(0.0,run_seconds-sum(stage_times.values()))
         initial_takes={}
-        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_candidate_diagnostics":candidate_diag,"nuke_player_takes":initial_takes}.items():
+        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_stage_times":stage_times,"nuke_candidate_diagnostics":candidate_diag,"nuke_player_takes":initial_takes}.items():
             st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
     st.success(f"Total run time: {run_seconds:.1f} seconds")
@@ -303,6 +313,17 @@ portfolio=st.session_state.get("nuke_portfolio")
 portfolio_paths=st.session_state.get("nuke_portfolio_paths")
 portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
 candidate_diag=st.session_state.get("nuke_candidate_diagnostics",{})
+stage_times=st.session_state.get("nuke_stage_times",{})
+
+if stage_times:
+    st.subheader("⏱️ Run Performance")
+    total=float(st.session_state.get("nuke_sim_runtime",0.0))
+    timing_cols=st.columns(len(stage_times))
+    for col,(name,secs) in zip(timing_cols,stage_times.items()):
+        col.metric(name,f"{float(secs):.1f}s")
+    if total>0:
+        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
+        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
 
 if candidate_diag:
     st.subheader("🩺 Candidate Pool Health")
@@ -310,10 +331,10 @@ if candidate_diag:
     d1.metric("Grade",str(candidate_diag.get("grade","?")))
     d2.metric("Candidates",f"{int(candidate_diag.get('generated',0)):,}")
     d3.metric("Unique QBs",f"{int(candidate_diag.get('unique_qbs',0)):,}")
-    d4.metric("Avg Overlap",f"{float(candidate_diag.get('avg_overlap',0)):.2f}")
+    d4.metric("Avg Shared Players",f"{float(candidate_diag.get('avg_overlap',0)):.2f}",help="Average number of identical players shared by two candidate lineups. This is calculated across candidate-lineup pairs, not against one reference lineup.")
     d5.metric("Max Pair Repeat",f"{float(candidate_diag.get('max_pair_pct',0)):.1f}%")
     d6.metric("Max 3-Core Repeat",f"{float(candidate_diag.get('max_triple_pct',0)):.1f}%")
-    st.caption(f"Generated {float(candidate_diag.get('fill_pct',0)):.1f}% of requested candidates · {int(candidate_diag.get('games',0))} games represented · Avg salary ${float(candidate_diag.get('avg_salary',0)):,.0f}.")
+    st.caption(f"Generated {float(candidate_diag.get('fill_pct',0)):.1f}% of requested candidates · {int(candidate_diag.get('games',0))} games represented · Avg salary ${float(candidate_diag.get('avg_salary',0)):,.0f} · Shared-player overlap: median {float(candidate_diag.get('median_overlap',0)):.1f}, 95th percentile {float(candidate_diag.get('p95_overlap',0)):.1f}, max {int(candidate_diag.get('max_overlap_seen',0))}.")
 
 if results is not None and not results.empty:
     tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","🔗 COMBOS","📤 DK EXPORT","🧠 MODEL NOTES"])

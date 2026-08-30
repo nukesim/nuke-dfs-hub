@@ -330,61 +330,6 @@ portfolio_paths=st.session_state.get("nuke_portfolio_paths")
 portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
 candidate_diag=st.session_state.get("nuke_candidate_diagnostics",{})
 stage_times=st.session_state.get("nuke_stage_times",{})
-stage_times=st.session_state.get("nuke_stage_times",{})
-stage_times=st.session_state.get("nuke_stage_times",{})
-stage_times=st.session_state.get("nuke_stage_times",{})
-stage_times=st.session_state.get("nuke_stage_times",{})
-stage_times=st.session_state.get("nuke_stage_times",{})
-
-if stage_times:
-    st.subheader("⏱️ Run Performance")
-    total=float(st.session_state.get("nuke_sim_runtime",0.0))
-    timing_cols=st.columns(len(stage_times))
-    for col,(name,secs) in zip(timing_cols,stage_times.items()):
-        col.metric(name,f"{float(secs):.1f}s")
-    if total>0:
-        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
-        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
-
-if stage_times:
-    st.subheader("⏱️ Run Performance")
-    total=float(st.session_state.get("nuke_sim_runtime",0.0))
-    timing_cols=st.columns(len(stage_times))
-    for col,(name,secs) in zip(timing_cols,stage_times.items()):
-        col.metric(name,f"{float(secs):.1f}s")
-    if total>0:
-        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
-        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
-
-if stage_times:
-    st.subheader("⏱️ Run Performance")
-    total=float(st.session_state.get("nuke_sim_runtime",0.0))
-    timing_cols=st.columns(len(stage_times))
-    for col,(name,secs) in zip(timing_cols,stage_times.items()):
-        col.metric(name,f"{float(secs):.1f}s")
-    if total>0:
-        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
-        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
-
-if stage_times:
-    st.subheader("⏱️ Run Performance")
-    total=float(st.session_state.get("nuke_sim_runtime",0.0))
-    timing_cols=st.columns(len(stage_times))
-    for col,(name,secs) in zip(timing_cols,stage_times.items()):
-        col.metric(name,f"{float(secs):.1f}s")
-    if total>0:
-        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
-        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
-
-if stage_times:
-    st.subheader("⏱️ Run Performance")
-    total=float(st.session_state.get("nuke_sim_runtime",0.0))
-    timing_cols=st.columns(len(stage_times))
-    for col,(name,secs) in zip(timing_cols,stage_times.items()):
-        col.metric(name,f"{float(secs):.1f}s")
-    if total>0:
-        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
-        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
 
 if stage_times:
     st.subheader("⏱️ Run Performance")

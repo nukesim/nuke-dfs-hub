@@ -2,7 +2,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
-PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V5.2"
+PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V6"
 
 
 def _z(v):
@@ -74,203 +74,151 @@ def build_portfolio(
     max_team_exposure=1.0,
     max_game_exposure=1.0,
 ):
-    """Build an MME portfolio around GPP upside with portfolio-level controls.
+    """Portfolio Engine V6: same portfolio controls, faster execution.
 
-    V5.2 keeps player/team/game caps and adds soft repeated pair / 3-player core control while retaining soft
-    path/concentration penalties. Team/game exposure means the share of portfolio lineups
-    containing at least one player from that team/game. These controls shape portfolio
-    construction only and do not alter football outcomes.
+    V6 preserves the player/QB/team/game caps, max-overlap rule, path diversification,
+    soft 45% path concentration line, and repeated pair/3-player-core penalties. The
+    speedup comes from precomputed overlap/core structures and array-backed exposure
+    accounting rather than recalculating lineup relationships on every selection.
     """
     if contest_results is None or contest_results.empty:
         return pd.DataFrame()
 
-    x = contest_results.reset_index(drop=True).copy()
-    n = len(x)
-    size = max(1, min(int(size), n))
-    max_overlap = int(np.clip(max_overlap, 0, 8))
-    max_player_exposure = float(np.clip(max_player_exposure, 0.01, 1.0))
-    max_qb_exposure = float(np.clip(max_qb_exposure, 0.01, 1.0))
-    max_team_exposure = float(np.clip(max_team_exposure, 0.01, 1.0))
-    max_game_exposure = float(np.clip(max_game_exposure, 0.01, 1.0))
-    global_max_player_count = max(1, int(np.floor(size * max_player_exposure + 1e-9)))
-    max_qb_count = max(1, int(np.floor(size * max_qb_exposure + 1e-9)))
-    max_team_count = max(1, int(np.floor(size * max_team_exposure + 1e-9)))
-    max_game_count = max(1, int(np.floor(size * max_game_exposure + 1e-9)))
-    prefs = _normalize_player_preferences(player_preferences, size, max_player_exposure)
+    x=contest_results.reset_index(drop=True).copy(); n=len(x)
+    size=max(1,min(int(size),n)); max_overlap=int(np.clip(max_overlap,0,8))
+    max_player_exposure=float(np.clip(max_player_exposure,.01,1.0)); max_qb_exposure=float(np.clip(max_qb_exposure,.01,1.0))
+    max_team_exposure=float(np.clip(max_team_exposure,.01,1.0)); max_game_exposure=float(np.clip(max_game_exposure,.01,1.0))
+    global_max_player_count=max(1,int(np.floor(size*max_player_exposure+1e-9)))
+    max_qb_count=max(1,int(np.floor(size*max_qb_exposure+1e-9))); max_team_count=max(1,int(np.floor(size*max_team_exposure+1e-9))); max_game_count=max(1,int(np.floor(size*max_game_exposure+1e-9)))
+    prefs=_normalize_player_preferences(player_preferences,size,max_player_exposure)
 
-    roi = pd.to_numeric(x.get("Sim ROI %", 0), errors="coerce").fillna(0).to_numpy(float)
-    win = pd.to_numeric(x.get("1st %", 0), errors="coerce").fillna(0).to_numpy(float)
-    top01 = pd.to_numeric(x.get("Top 0.1%", 0), errors="coerce").fillna(0).to_numpy(float)
-    top1 = pd.to_numeric(x.get("Top 1%", 0), errors="coerce").fillna(0).to_numpy(float)
-    ceiling = pd.to_numeric(x.get("Ceiling 95", 0), errors="coerce").fillna(0).to_numpy(float)
-    nuke = pd.to_numeric(x.get("NUKE Score", 0), errors="coerce").fillna(0).to_numpy(float)
-    path_score = pd.to_numeric(x.get("Path Score", 50), errors="coerce").fillna(50).to_numpy(float)
+    def num(col,default=0):
+        return pd.to_numeric(x.get(col,default),errors="coerce").fillna(default).to_numpy(float)
+    base=.75*_z(num("Sim ROI %"))+.90*_z(num("1st %"))+.75*_z(num("Top 0.1%"))+.45*_z(num("Top 1%"))+.55*_z(num("Ceiling 95"))+.30*_z(num("NUKE Score"))+.15*_z(num("Path Score",50))
+    path_arr=x.get("Strongest Path",pd.Series(["UNKNOWN"]*n)).fillna("UNKNOWN").astype(str).to_numpy()
+    qb_arr=x.get("QB",pd.Series(["UNKNOWN"]*n)).fillna("UNKNOWN").astype(str).to_numpy()
+    stack_arr=x.get("Stack",pd.Series(["UNKNOWN"]*n)).fillna("UNKNOWN").astype(str).to_numpy()
+    lineup_ids=[tuple(map(int,lu)) for lu in x["_indices"]] if "_indices" in x.columns else [tuple() for _ in range(n)]
+    lineup_sets=[set(lu) for lu in lineup_ids]
+    lineup_pairs=[tuple(itertools.combinations(sorted(set(lu)),2)) for lu in lineup_ids]
+    lineup_triples=[tuple(itertools.combinations(sorted(set(lu)),3)) for lu in lineup_ids]
 
-    base = (
-        0.75 * _z(roi)
-        + 0.90 * _z(win)
-        + 0.75 * _z(top01)
-        + 0.45 * _z(top1)
-        + 0.55 * _z(ceiling)
-        + 0.30 * _z(nuke)
-        + 0.15 * _z(path_score)
-    )
+    # Precompute every candidate-to-candidate overlap once (250 candidates => tiny matrix).
+    overlap_matrix=np.zeros((n,n),dtype=np.int8)
+    for i in range(n):
+        si=lineup_sets[i]
+        for j in range(i+1,n):
+            ov=len(si & lineup_sets[j]); overlap_matrix[i,j]=ov; overlap_matrix[j,i]=ov
 
-    path_series = x.get("Strongest Path", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
-    qb_series = x.get("QB", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
-    stack_series = x.get("Stack", pd.Series(["UNKNOWN"] * n)).fillna("UNKNOWN").astype(str)
-    lineup_ids = [list(map(int, lu)) for lu in x["_indices"]] if "_indices" in x.columns else [[] for _ in range(n)]
-    lineup_teams, lineup_games = _lineup_team_game_sets(players, lineup_ids)
+    # Fast team/game incidence from player arrays rather than repeated iloc lookups.
+    if players is not None and len(players):
+        pteam=players.Team.astype(str).to_numpy(); pgame=players.Game.astype(str).to_numpy()
+    else:
+        pteam=np.array([],dtype=str); pgame=np.array([],dtype=str)
+    lineup_teams=[]; lineup_games=[]
+    for lu in lineup_ids:
+        lineup_teams.append(tuple(sorted({pteam[pid] for pid in lu if 0<=pid<len(pteam) and pteam[pid] and pteam[pid].lower()!="nan"})))
+        lineup_games.append(tuple(sorted({pgame[pid] for pid in lu if 0<=pid<len(pgame) and pgame[pid] and pgame[pid].lower()!="nan"})))
 
-    preference_adjustment = np.zeros(n, dtype=float)
-    for i, lu in enumerate(lineup_ids):
-        preference_adjustment[i] = sum(0.42 * prefs.get(pid, {}).get("boost", 0.0) for pid in lu)
+    pref_adj=np.zeros(n,dtype=float)
+    for i,lu in enumerate(lineup_ids): pref_adj[i]=sum(.42*prefs.get(pid,{}).get("boost",0.0) for pid in lu)
+    support_floor=max(2,int(np.ceil(size*.015))); vals,counts=np.unique(path_arr,return_counts=True); support=dict(zip(vals,counts))
+    viable_paths={p for p,c in support.items() if c>=support_floor} or set(support.keys()) or {"UNKNOWN"}; target_per_path=max(1.0,size/max(1,len(viable_paths)))
 
-    support_floor = max(2, int(np.ceil(size * 0.015)))
-    path_support = path_series.value_counts().to_dict()
-    viable_paths = [p for p, c in path_support.items() if c >= support_floor]
-    if not viable_paths:
-        viable_paths = list(path_support.keys()) or ["UNKNOWN"]
-    target_per_path = max(1.0, size / max(1, len(viable_paths)))
-
-    selected, path_counts, qb_counts, stack_counts = [], {}, {}, {}
-    player_counts, team_counts, game_counts, reasons = {}, {}, {}, {}
-    pair_counts, triple_counts = {}, {}
-
-    def lineup_pairs(lu):
-        return [tuple(sorted(x)) for x in itertools.combinations(sorted(set(lu)), 2)]
-
-    def lineup_triples(lu):
-        return [tuple(sorted(x)) for x in itertools.combinations(sorted(set(lu)), 3)]
-
-    def player_max_count(pid):
-        return prefs.get(pid, {}).get("max_count", global_max_player_count)
-
-    def exposure_ok(i):
-        lu = lineup_ids[i]
-        if any(player_counts.get(pid, 0) >= player_max_count(pid) for pid in lu):
-            return False
-        qb = qb_series.iloc[i]
-        if qb_counts.get(qb, 0) >= max_qb_count:
-            return False
-        if any(team_counts.get(team, 0) >= max_team_count for team in lineup_teams[i]):
-            return False
-        if any(game_counts.get(game, 0) >= max_game_count for game in lineup_games[i]):
-            return False
-        return True
+    # Array-backed player exposure counts. Dicts remain for labels whose universe is small.
+    max_pid=max((max(lu) for lu in lineup_ids if lu),default=-1); player_counts=np.zeros(max_pid+1,dtype=np.int16)
+    player_max=np.full(max_pid+1,global_max_player_count,dtype=np.int16)
+    player_min=np.zeros(max_pid+1,dtype=np.int16)
+    for pid,pref in prefs.items():
+        if 0<=pid<=max_pid:
+            player_max[pid]=pref.get("max_count",global_max_player_count); player_min[pid]=pref.get("min_count",0)
+    path_counts={}; qb_counts={}; stack_counts={}; team_counts={}; game_counts={}; pair_counts={}; triple_counts={}; reasons={}
+    selected=[]; selected_mask=np.zeros(n,dtype=bool)
 
     for pick in range(size):
-        best_i, best_score, best_reason = None, -1e18, ""
-        slots_left_after_pick = size - pick - 1
+        best_i=-1; best_score=-1e18; best_meta=None; slots_left=size-pick-1; denom=max(1,len(selected))
+        selected_idx=np.asarray(selected,dtype=int) if selected else None
         for i in range(n):
-            if i in selected or not exposure_ok(i):
-                continue
+            if selected_mask[i]: continue
+            lu=lineup_ids[i]
+            if any(pid<=max_pid and player_counts[pid]>=player_max[pid] for pid in lu): continue
+            qb=qb_arr[i]
+            if qb_counts.get(qb,0)>=max_qb_count: continue
+            if any(team_counts.get(t,0)>=max_team_count for t in lineup_teams[i]): continue
+            if any(game_counts.get(g,0)>=max_game_count for g in lineup_games[i]): continue
 
-            lu = lineup_ids[i]
-            path, qb, stack = path_series.iloc[i], qb_series.iloc[i], stack_series.iloc[i]
-            overlaps = [_overlap(lu, lineup_ids[j]) for j in selected]
-            worst_overlap = max(overlaps) if overlaps else 0
-            avg_overlap = float(np.mean(overlaps)) if overlaps else 0.0
-            if overlaps and worst_overlap > max_overlap:
-                continue
+            if selected_idx is not None:
+                ovs=overlap_matrix[i,selected_idx]; worst=int(ovs.max()); avg=float(ovs.mean())
+                if worst>max_overlap: continue
+            else:
+                worst=0; avg=0.0
 
-            current_path = path_counts.get(path, 0)
+            path=path_arr[i]; stack=stack_arr[i]; current_path=path_counts.get(path,0)
             if path in viable_paths:
-                saturation = current_path / target_per_path
-                path_adjustment = float(path_balance) * (0.55 * max(0.0, 1.0 - saturation) - 0.42 * max(0.0, saturation - 1.0) ** 2)
-            else:
-                path_adjustment = 0.0
+                sat=current_path/target_per_path
+                path_adj=float(path_balance)*(.55*max(0.0,1.0-sat)-.42*max(0.0,sat-1.0)**2)
+            else: path_adj=0.0
+            next_share=(current_path+1)/max(1,len(selected)+1); dom_pen=0.0
+            if path in viable_paths and next_share>.45:
+                ex=(next_share-.45)/.10; dom_pen=float(path_balance)*(.90*ex+.50*ex**2)
+            qb_share=qb_counts.get(qb,0)/denom; stack_share=stack_counts.get(stack,0)/denom
+            conc=.25*max(0.0,qb_share-.20)+.10*max(0.0,stack_share-.55)
+            redundancy=.10*max(0.0,avg-5.25)+.16*max(0.0,worst-6)
 
-            # V5.1 marginal path-value control. This is deliberately a SOFT guard, not a
-            # forced quota: a dominant path can still earn more portfolio slots when its
-            # lineup quality is sufficiently better than alternatives. But after 45% of
-            # the portfolio, every additional lineup from that same path must overcome a
-            # rapidly increasing concentration cost.
-            next_path_share = (current_path + 1) / max(1, len(selected) + 1)
-            dominance_penalty = 0.0
-            if path in viable_paths and next_path_share > 0.45:
-                excess_units = (next_path_share - 0.45) / 0.10
-                dominance_penalty = float(path_balance) * (0.90 * excess_units + 0.50 * excess_units ** 2)
+            prs=lineup_pairs[i]; trs=lineup_triples[i]
+            max_pr=max((pair_counts.get(c,0) for c in prs),default=0); max_tr=max((triple_counts.get(c,0) for c in trs),default=0)
+            pair_load=sum(max(0,pair_counts.get(c,0)-4) for c in prs); triple_load=sum(max(0,triple_counts.get(c,0)-2) for c in trs)
+            core_pen=.035*pair_load+.075*triple_load+.08*max(0,max_pr-10)**1.35+.16*max(0,max_tr-6)**1.45
 
-            denom = max(1, len(selected))
-            qb_share = qb_counts.get(qb, 0) / denom
-            stack_share = stack_counts.get(stack, 0) / denom
-            concentration_penalty = 0.25 * max(0.0, qb_share - 0.20) + 0.10 * max(0.0, stack_share - 0.55)
-            redundancy_penalty = 0.10 * max(0.0, avg_overlap - 5.25) + 0.16 * max(0.0, worst_overlap - 6)
-
-            # V5.2 core diversity: individual exposures can look healthy while the same
-            # 2- and 3-player cores quietly repeat across many lineups. Penalize the
-            # marginal repetition of those cores without hard-banning strong combinations.
-            lu_pairs = lineup_pairs(lu)
-            lu_triples = lineup_triples(lu)
-            max_pair_repeat = max((pair_counts.get(core, 0) for core in lu_pairs), default=0)
-            max_triple_repeat = max((triple_counts.get(core, 0) for core in lu_triples), default=0)
-            pair_repeat_load = sum(max(0, pair_counts.get(core, 0) - 4) for core in lu_pairs)
-            triple_repeat_load = sum(max(0, triple_counts.get(core, 0) - 2) for core in lu_triples)
-            core_penalty = (
-                0.035 * pair_repeat_load
-                + 0.075 * triple_repeat_load
-                + 0.08 * max(0, max_pair_repeat - 10) ** 1.35
-                + 0.16 * max(0, max_triple_repeat - 6) ** 1.45
-            )
-
-            min_bonus = 0.0
+            min_bonus=0.0
             for pid in lu:
-                need = max(0, prefs.get(pid, {}).get("min_count", 0) - player_counts.get(pid, 0))
-                if need:
-                    urgency = need / max(1, slots_left_after_pick + 1)
-                    min_bonus += 1.10 + 2.40 * urgency
+                if 0<=pid<=max_pid:
+                    need=max(0,int(player_min[pid])-int(player_counts[pid]))
+                    if need: min_bonus+=1.10+2.40*(need/max(1,slots_left+1))
+            score=float(base[i]+pref_adj[i]+min_bonus+path_adj-dom_pen-conc-redundancy-core_pen)
+            if score>best_score:
+                best_i=i; best_score=score; best_meta=(path,qb,stack,worst,max_pr,max_tr)
 
-            score = float(base[i] + preference_adjustment[i] + min_bonus + path_adjustment - dominance_penalty - concentration_penalty - redundancy_penalty - core_penalty)
-            if score > best_score:
-                best_i, best_score = i, score
-                takes = sum(1 for pid in lu if abs(prefs.get(pid, {}).get("boost", 0.0)) > 1e-9 or prefs.get(pid, {}).get("min", 0.0) > 0)
-                best_reason = f"GPP upside | {path} | player takes {takes} | max overlap {worst_overlap} | pair repeat {max_pair_repeat} | 3-core repeat {max_triple_repeat}"
+        if best_i<0:
+            # Same V5 behavior: relax overlap only to finish a feasible portfolio.
+            feasible=[]
+            for i in range(n):
+                if selected_mask[i]: continue
+                lu=lineup_ids[i]
+                if any(pid<=max_pid and player_counts[pid]>=player_max[pid] for pid in lu): continue
+                if qb_counts.get(qb_arr[i],0)>=max_qb_count: continue
+                if any(team_counts.get(t,0)>=max_team_count for t in lineup_teams[i]): continue
+                if any(game_counts.get(g,0)>=max_game_count for g in lineup_games[i]): continue
+                feasible.append(i)
+            if not feasible: break
+            best_i=max(feasible,key=lambda i:base[i]+pref_adj[i]); best_meta=(path_arr[best_i],qb_arr[best_i],stack_arr[best_i],0,0,0)
+            reasons[best_i]="Best remaining GPP upside; overlap relaxed to complete portfolio"
+        else:
+            path,qb,stack,worst,max_pr,max_tr=best_meta
+            takes=sum(1 for pid in lineup_ids[best_i] if abs(prefs.get(pid,{}).get("boost",0.0))>1e-9 or prefs.get(pid,{}).get("min",0.0)>0)
+            reasons[best_i]=f"GPP upside | {path} | player takes {takes} | max overlap {worst} | pair repeat {max_pr} | 3-core repeat {max_tr}"
 
-        if best_i is None:
-            remaining = [i for i in range(n) if i not in selected and exposure_ok(i)]
-            if remaining:
-                best_i = max(remaining, key=lambda i: base[i] + preference_adjustment[i])
-                best_reason = "Best remaining GPP upside; overlap relaxed to complete portfolio"
-            else:
-                break
-
-        selected.append(best_i)
-        path, qb, stack = path_series.iloc[best_i], qb_series.iloc[best_i], stack_series.iloc[best_i]
-        path_counts[path] = path_counts.get(path, 0) + 1
-        qb_counts[qb] = qb_counts.get(qb, 0) + 1
-        stack_counts[stack] = stack_counts.get(stack, 0) + 1
+        selected.append(best_i); selected_mask[best_i]=True
+        path,qb,stack=path_arr[best_i],qb_arr[best_i],stack_arr[best_i]
+        path_counts[path]=path_counts.get(path,0)+1; qb_counts[qb]=qb_counts.get(qb,0)+1; stack_counts[stack]=stack_counts.get(stack,0)+1
         for pid in lineup_ids[best_i]:
-            player_counts[pid] = player_counts.get(pid, 0) + 1
-        for team in lineup_teams[best_i]:
-            team_counts[team] = team_counts.get(team, 0) + 1
-        for game in lineup_games[best_i]:
-            game_counts[game] = game_counts.get(game, 0) + 1
-        for core in lineup_pairs(lineup_ids[best_i]):
-            pair_counts[core] = pair_counts.get(core, 0) + 1
-        for core in lineup_triples(lineup_ids[best_i]):
-            triple_counts[core] = triple_counts.get(core, 0) + 1
-        reasons[best_i] = best_reason
+            if 0<=pid<=max_pid: player_counts[pid]+=1
+        for t in lineup_teams[best_i]: team_counts[t]=team_counts.get(t,0)+1
+        for g in lineup_games[best_i]: game_counts[g]=game_counts.get(g,0)+1
+        for c in lineup_pairs[best_i]: pair_counts[c]=pair_counts.get(c,0)+1
+        for c in lineup_triples[best_i]: triple_counts[c]=triple_counts.get(c,0)+1
 
-    out = x.iloc[selected].copy().reset_index(drop=True)
+    out=x.iloc[selected].copy().reset_index(drop=True)
     if not out.empty:
-        out.insert(0, "Portfolio Slot", np.arange(1, len(out) + 1))
-        out["Portfolio Reason"] = [reasons[i] for i in selected]
-    out.attrs["requested_size"] = size
-    out.attrs["max_player_exposure"] = max_player_exposure
-    out.attrs["max_qb_exposure"] = max_qb_exposure
-    out.attrs["max_team_exposure"] = max_team_exposure
-    out.attrs["max_game_exposure"] = max_game_exposure
-    out.attrs["path_soft_cap"] = 0.45
-    out.attrs["player_preferences"] = prefs
-    out.attrs["max_pair_repeat"] = max(pair_counts.values(), default=0)
-    out.attrs["max_triple_repeat"] = max(triple_counts.values(), default=0)
-    unmet = {}
-    for pid, pref in prefs.items():
-        actual = player_counts.get(pid, 0)
-        if actual < pref["min_count"]:
-            unmet[pid] = {"requested": pref["min_count"], "actual": actual}
-    out.attrs["unmet_minimums"] = unmet
+        out.insert(0,"Portfolio Slot",np.arange(1,len(out)+1)); out["Portfolio Reason"]=[reasons[i] for i in selected]
+    out.attrs["requested_size"]=size; out.attrs["max_player_exposure"]=max_player_exposure; out.attrs["max_qb_exposure"]=max_qb_exposure
+    out.attrs["max_team_exposure"]=max_team_exposure; out.attrs["max_game_exposure"]=max_game_exposure; out.attrs["path_soft_cap"]=.45; out.attrs["player_preferences"]=prefs
+    out.attrs["max_pair_repeat"]=max(pair_counts.values(),default=0); out.attrs["max_triple_repeat"]=max(triple_counts.values(),default=0)
+    unmet={}
+    for pid,pref in prefs.items():
+        actual=int(player_counts[pid]) if 0<=pid<=max_pid else 0
+        if actual<pref["min_count"]: unmet[pid]={"requested":pref["min_count"],"actual":actual}
+    out.attrs["unmet_minimums"]=unmet
     return out
 
 

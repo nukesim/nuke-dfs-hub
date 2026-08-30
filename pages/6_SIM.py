@@ -119,7 +119,7 @@ for game in players.Game.drop_duplicates().tolist():
             trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
             with team_col:
                 if trow is not None:
-                    st.markdown(f"### {team} · TT {float(trow['Team Total']):.1f} · Rank #{int(trow['Team Total Rank'])}")
+                    st.markdown(f"### {team} · {float(trow['Team Total']):.1f} · Rank #{int(trow['Team Total Rank'])}")
                 else:
                     st.markdown(f"### {team}")
                 rows=[]

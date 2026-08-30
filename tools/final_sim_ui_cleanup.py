@@ -29,8 +29,3 @@ if pos!=-1:
         s=pre[:first]+perf+post
 
 p.write_text(s,encoding='utf-8')
-
-# Self-disable the one-shot workflow before its commit.
-w=Path('.github/workflows/final-sim-ui-cleanup.yml')
-if w.exists():
-    w.write_text('''name: Final SIM UI Cleanup\non:\n  workflow_dispatch:\njobs:\n  disabled:\n    if: ${{ false }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "SIM UI cleanup completed."\n''',encoding='utf-8')

@@ -2,7 +2,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
-PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V5"
+PORTFOLIO_ENGINE_VERSION = "Portfolio Engine V5.1"
 
 
 def _z(v):
@@ -174,6 +174,17 @@ def build_portfolio(
             else:
                 path_adjustment = 0.0
 
+            # V5.1 marginal path-value control. This is deliberately a SOFT guard, not a
+            # forced quota: a dominant path can still earn more portfolio slots when its
+            # lineup quality is sufficiently better than alternatives. But after 45% of
+            # the portfolio, every additional lineup from that same path must overcome a
+            # rapidly increasing concentration cost.
+            next_path_share = (current_path + 1) / max(1, len(selected) + 1)
+            dominance_penalty = 0.0
+            if path in viable_paths and next_path_share > 0.45:
+                excess_units = (next_path_share - 0.45) / 0.10
+                dominance_penalty = float(path_balance) * (0.90 * excess_units + 0.50 * excess_units ** 2)
+
             denom = max(1, len(selected))
             qb_share = qb_counts.get(qb, 0) / denom
             stack_share = stack_counts.get(stack, 0) / denom
@@ -187,7 +198,7 @@ def build_portfolio(
                     urgency = need / max(1, slots_left_after_pick + 1)
                     min_bonus += 1.10 + 2.40 * urgency
 
-            score = float(base[i] + preference_adjustment[i] + min_bonus + path_adjustment - concentration_penalty - redundancy_penalty)
+            score = float(base[i] + preference_adjustment[i] + min_bonus + path_adjustment - dominance_penalty - concentration_penalty - redundancy_penalty)
             if score > best_score:
                 best_i, best_score = i, score
                 takes = sum(1 for pid in lu if abs(prefs.get(pid, {}).get("boost", 0.0)) > 1e-9 or prefs.get(pid, {}).get("min", 0.0) > 0)
@@ -223,6 +234,7 @@ def build_portfolio(
     out.attrs["max_qb_exposure"] = max_qb_exposure
     out.attrs["max_team_exposure"] = max_team_exposure
     out.attrs["max_game_exposure"] = max_game_exposure
+    out.attrs["path_soft_cap"] = 0.45
     out.attrs["player_preferences"] = prefs
     unmet = {}
     for pid, pref in prefs.items():
@@ -238,6 +250,10 @@ def portfolio_summary(portfolio):
         return pd.DataFrame(), {}
     path = portfolio.get("Strongest Path", pd.Series(["UNKNOWN"] * len(portfolio))).value_counts()
     path_df = pd.DataFrame({"Path": path.index, "Lineups": path.values, "Portfolio %": np.round(100 * path.values / len(portfolio), 1)}).reset_index(drop=True)
+    dominant_path = str(path.index[0]) if len(path) else "UNKNOWN"
+    dominant_path_pct = float(100.0 * path.iloc[0] / len(portfolio)) if len(path) else 0.0
+    shares = path.to_numpy(float) / max(1, len(portfolio))
+    path_hhi = float(np.sum(shares ** 2)) if len(shares) else 0.0
     stats = {
         "lineups": len(portfolio),
         "requested_lineups": int(portfolio.attrs.get("requested_size", len(portfolio))),
@@ -250,6 +266,10 @@ def portfolio_summary(portfolio):
         "max_team_exposure": float(portfolio.attrs.get("max_team_exposure", 1.0)),
         "max_game_exposure": float(portfolio.attrs.get("max_game_exposure", 1.0)),
         "unmet_minimums": portfolio.attrs.get("unmet_minimums", {}),
+        "dominant_path": dominant_path,
+        "dominant_path_pct": dominant_path_pct,
+        "path_hhi": path_hhi,
+        "path_soft_cap": float(portfolio.attrs.get("path_soft_cap", 0.45)),
     }
     return path_df, stats
 

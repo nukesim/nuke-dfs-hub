@@ -363,6 +363,16 @@ if results is not None and not results.empty:
             if core_df is not None and not core_df.empty:
                 st.dataframe(core_df.head(20),use_container_width=True,hide_index=True,height=340)
             st.markdown("#### Path Mix")
+            dominant_path=str(portfolio_stats.get("dominant_path","UNKNOWN"))
+            dominant_pct=float(portfolio_stats.get("dominant_path_pct",0.0))
+            soft_cap_pct=100.0*float(portfolio_stats.get("path_soft_cap",0.45))
+            hhi=float(portfolio_stats.get("path_hhi",0.0))
+            pm1,pm2,pm3=st.columns(3)
+            pm1.metric("Dominant Path",dominant_path)
+            pm2.metric("Dominant Path Exposure",f"{dominant_pct:.1f}%")
+            pm3.metric("Path Concentration",f"{hhi:.3f}")
+            if dominant_pct>soft_cap_pct:
+                st.info(f"{dominant_path} is above the {soft_cap_pct:.0f}% soft concentration line. V5.1 does not hard-cap it; additional lineups must earn their slots by overcoming a rising marginal path penalty.")
             st.dataframe(portfolio_paths,use_container_width=True,hide_index=True)
             st.markdown("#### Selected Lineups")
             portfolio_export=add_dk_roster_columns(sim_players,portfolio).drop(columns=["_indices"],errors="ignore")
@@ -391,7 +401,10 @@ if results is not None and not results.empty:
         fcols=st.columns(3)
         fmap={str(r["FLEX Position"]):r for _,r in flex_table.iterrows()}
         for col,p in zip(fcols,["RB","WR","TE"]):
-            col.metric(f"{p} in FLEX",f"{int(fmap.get(p,{}).get('Lineups',0)):,}",f"{float(fmap.get(p,{}).get('Exposure %',0)):.1f}%")
+            flex_lineups=int(fmap.get(p,{}).get("Lineups",0))
+            flex_pct=float(fmap.get(p,{}).get("Exposure %",0))
+            col.metric(f"{p} in FLEX",f"{flex_lineups:,}")
+            col.caption(f"{flex_pct:.1f}% exposure")
         st.dataframe(flex_table,use_container_width=True,hide_index=True)
         pos_filter=st.selectbox("Position exposure",["ALL","QB","RB","WR","TE","DST"])
         pshow=pos_table if pos_filter=="ALL" else pos_table[pos_table.Position.eq(pos_filter)]
@@ -438,4 +451,4 @@ if results is not None and not results.empty:
             except Exception as e:
                 st.error(f"Could not build DraftKings upload file: {e}")
     with tab8:
-        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5 adds team/game exposure caps, QB-stack exposure reporting, and Portfolio Health concentration diagnostics. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5.1 adds marginal path-value concentration control on top of player/team/game caps, QB-stack exposure reporting, and Portfolio Health diagnostics. Path control is soft rather than a forced quota. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")

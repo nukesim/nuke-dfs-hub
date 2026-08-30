@@ -13,7 +13,7 @@ with st.sidebar:
     st.header("SIM CONTROL ROOM"); preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=1); presets={"QUICK":(300,500,50,300),"STANDARD":(700,1500,75,750),"DEEP":(1400,3000,100,1500)}; candidates,sims,exposure_n,contest_iters=presets[preset]
     min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10); seed=st.number_input("Random seed",1,999999,26,1)
     st.divider(); st.subheader("Contest"); field_size=st.number_input("Field size",2,100000,2222,1); entry_fee=st.number_input("Entry fee ($)",.25,10000.,100.,1.); first_prize=st.number_input("1st prize ($)",1.,10000000.,50000.,100.); st.caption("Every generated candidate lineup is contest-simmed automatically."); contest_iters=st.number_input("Contest iterations",50,5000,contest_iters,50)
-    st.divider(); st.subheader("Portfolio"); portfolio_size=st.number_input("Portfolio size",1,150,20,1); max_overlap=st.slider("Max player overlap",4,8,7,1); path_balance=st.slider("Path diversification",0.,3.,1.25,.25)
+    st.divider(); st.subheader("Portfolio"); portfolio_size=st.number_input("Portfolio size",1,150,150,1); max_overlap=st.slider("Max player overlap",4,8,7,1); path_balance=st.slider("Path diversification",0.,3.,1.25,.25)
 
 st.subheader("🏈 Current Slate")
 salary_upload=st.file_uploader("Optional: upload a different DraftKings NFL salary CSV",type=["csv"],help="Leave this empty to use the built-in current weekly slate.")

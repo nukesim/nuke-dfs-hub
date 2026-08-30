@@ -8,10 +8,10 @@ from nuke_portfolio import build_portfolio, portfolio_summary
 from dk_contest_import import parse_payout_upload
 from dk_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
-from nuke_football_v2 import simulate_player_matrix_v2
+from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
 from nuke_combos import combo_exposure_table
 
-st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub.")
+st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption(f"Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub · {ENGINE_VERSION}.")
 with st.sidebar:
     st.header("SIM CONTROL ROOM"); preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=0); presets={"QUICK":(250,350,50,200),"STANDARD":(400,750,75,350),"DEEP":(700,1200,100,500)}; candidates,sims,exposure_n,contest_iters=presets[preset]
     min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10)
@@ -54,7 +54,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     with st.status("NUKE SIM is running...",expanded=True) as status:
         stage=time.perf_counter(); st.write("1/5 · Generating correlated DraftKings candidates..."); lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed)); st.write(f"Candidate generation: {time.perf_counter()-stage:.1f}s")
         if not lineups: status.update(label="No legal lineups found",state="error"); st.stop()
-        st.write(f"Generated {len(lineups):,} unique candidates."); stage=time.perf_counter(); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes..."); matrix=simulate_player_matrix_v2(players,int(sims),int(seed)); st.write(f"Football simulation: {time.perf_counter()-stage:.1f}s")
+        st.write(f"Generated {len(lineups):,} unique candidates."); stage=time.perf_counter(); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes with {ENGINE_VERSION}..."); matrix=simulate_player_matrix_v21(players,int(sims),int(seed)); st.write(f"Football simulation: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write("3/5 · Ranking outcomes and assigning paths..."); results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix)); exposure=exposure_table(players,results,int(exposure_n)); pexposure=path_exposure(results,int(exposure_n)); st.write(f"Ranking + paths: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override); st.write(f"Contest simulation: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write("5/5 · Building path-diversified portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance)); portfolio_paths,portfolio_stats=portfolio_summary(portfolio); st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")

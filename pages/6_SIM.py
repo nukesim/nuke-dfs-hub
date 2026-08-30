@@ -14,6 +14,7 @@ from default_slate import load_default_slate, SLATE_LABEL
 from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
 from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
+from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
@@ -143,9 +144,18 @@ c5.metric("Slate",slate_source)
 
 st.subheader("🎮 Game-by-Game Player Pool")
 st.caption("Work the slate one game at a time. Include/remove players, adjust role if needed, then apply the game once.")
-env=game_environment(players)
+current_odds=load_current_odds()
+odds_history=load_odds_history()
+odds_meta=odds_status(current_odds)
+env=game_environment(players,current_odds)
 if not env.empty:
-    st.caption("Team/Game totals below are projection-free DK salary-market estimates until a live sportsbook feed is connected. Rank 1 = strongest on the slate.")
+    sportsbook_games=int(env[env["Source"].eq("Sportsbook Consensus")]["Game"].nunique()) if "Source" in env.columns else 0
+    if sportsbook_games:
+        rem=odds_meta.get("credits_remaining")
+        rem_text=f" · {rem} free API credits remaining" if rem is not None else ""
+        st.caption(f"Sportsbook consensus is live for {sportsbook_games} slate games. Team totals are implied from consensus spread + game total. Auto-updated throughout the week{rem_text}. Rank 1 = strongest on the slate.")
+    else:
+        st.caption("Sportsbook lines are not loaded yet, so NUKE is temporarily using its DK salary-market estimates. Rank 1 = strongest on the slate.")
 
 pool_state=st.session_state.get("nuke_pregame_pool",{})
 editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
@@ -179,8 +189,32 @@ if selected_game is not None:
     ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
     st.markdown(f"### 🏈 {label}")
     if not ge.empty:
-        env_show=ge[["Team","Opponent","Team Total","Team Total Rank","Game Total","Game Total Rank"]]
+        env_cols=["Team","Opponent","Spread","Team Total","Team Total Rank","Game Total","Game Total Rank","Books","Source"]
+        env_show=ge[[c for c in env_cols if c in ge.columns]]
         st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
+        book_rows=ge[ge["Source"].eq("Sportsbook Consensus")] if "Source" in ge.columns else pd.DataFrame()
+        if not book_rows.empty:
+            last_update=str(book_rows.iloc[0].get("Last Update",""))
+            st.caption(f"Consensus across {int(book_rows['Books'].max()) if 'Books' in book_rows.columns else 0} US sportsbooks · Last odds snapshot: {last_update}")
+            movement=movement_for_game(odds_history,teams)
+            if not movement.empty:
+                with st.expander("📈 Odds movement this week",expanded=False):
+                    chart_cols=[c for c in ["Game Total",f"{teams[0]} Team Total",f"{teams[1]} Team Total"] if c in movement.columns]
+                    if chart_cols:
+                        chart_df=movement[["Timestamp"]+chart_cols].copy().set_index("Timestamp")
+                        st.line_chart(chart_df,use_container_width=True)
+                    first,last=movement.iloc[0],movement.iloc[-1]
+                    m1,m2,m3=st.columns(3)
+                    gt0=float(first.get("Game Total",0)); gt1=float(last.get("Game Total",0))
+                    a_col=f"{teams[0]} Team Total"; b_col=f"{teams[1]} Team Total"
+                    a0=float(first.get(a_col,0)); a1=float(last.get(a_col,0)); b0=float(first.get(b_col,0)); b1=float(last.get(b_col,0))
+                    m1.metric("Game Total",f"{gt1:.1f}",delta=f"{gt1-gt0:+.1f} vs first snapshot")
+                    m2.metric(f"{teams[0]} Team Total",f"{a1:.1f}",delta=f"{a1-a0:+.1f}")
+                    m3.metric(f"{teams[1]} Team Total",f"{b1:.1f}",delta=f"{b1-b0:+.1f}")
+                    spread_cols=[c for c in [f"{teams[0]} Spread",f"{teams[1]} Spread"] if c in movement.columns]
+                    if spread_cols:
+                        st.caption("Spread movement")
+                        st.line_chart(movement[["Timestamp"]+spread_cols].set_index("Timestamp"),use_container_width=True)
     st.caption("Only this game's controls are loaded. Make as many changes as you want, then click Apply changes once.")
     with st.form(key=f"pool_form_{str(game)}_{editor_version}",clear_on_submit=False):
         game_action=st.selectbox("Game bulk action",["No bulk change","✅ Include entire game","🚫 Exclude entire game"],key=f"game_bulk_{str(game)}_{editor_version}")

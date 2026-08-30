@@ -77,7 +77,7 @@ def game_environment(players):
 
 
 def rank_background(value, max_rank):
-    """Return red->yellow->green background for rank 1..N."""
+    """Return green->yellow->red background for rank 1..N across the full slate."""
     try:
         rank = float(value)
         n = max(1.0, float(max_rank))
@@ -91,11 +91,18 @@ def rank_background(value, max_rank):
     return "background-color: rgba(255,93,93,.30); color: white; font-weight: 800"
 
 
-def style_environment(df):
+def style_environment(df, slate_max_team_rank=None, slate_max_game_rank=None):
+    """Style a game slice using slate-wide rank ranges, not the slice's local max.
+
+    A single expanded game contains only two team ranks and one duplicated game rank.
+    Using that tiny slice to choose the color scale incorrectly makes, for example,
+    Game Rank #2 appear red. Callers can pass the full-slate maxima so Rank #2 stays
+    green when it is genuinely the second-best game on the slate.
+    """
     if df is None or df.empty:
         return df
-    max_team = int(df["Team Total Rank"].max()) if "Team Total Rank" in df else 1
-    max_game = int(df["Game Total Rank"].max()) if "Game Total Rank" in df else 1
+    max_team = int(slate_max_team_rank) if slate_max_team_rank is not None else int(df["Team Total Rank"].max()) if "Team Total Rank" in df else 1
+    max_game = int(slate_max_game_rank) if slate_max_game_rank is not None else int(df["Game Total Rank"].max()) if "Game Total Rank" in df else 1
     return (
         df.style
         .format({"Team Total": "{:.1f}", "Game Total": "{:.1f}"})

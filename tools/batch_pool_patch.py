@@ -3,7 +3,7 @@ from pathlib import Path
 p=Path('pages/6_SIM.py')
 s=p.read_text()
 start=s.index('for game in players.Game.drop_duplicates().tolist():')
-end=s.index('st.session_state["nuke_pregame_pool"]=updated_state', start)
+end=s.index('active_rows=[]', start)
 
 new='''for game in players.Game.drop_duplicates().tolist():
     gp=players[players.Game.eq(game)].copy()
@@ -79,6 +79,7 @@ new='''for game in players.Game.drop_duplicates().tolist():
             st.session_state["nuke_pool_editor_version"]=editor_version+1
             st.rerun()
 
+st.session_state["nuke_pregame_pool"]=updated_state
 '''
 
 p.write_text(s[:start]+new+s[end:])

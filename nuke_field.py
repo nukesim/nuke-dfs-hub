@@ -58,8 +58,8 @@ def _lineup_features(results,players=None):
     ceiling=pd.to_numeric(r.get("Ceiling 95",0),errors="coerce").fillna(0).to_numpy(float)
     stack=r.get("Stack",pd.Series([""]*len(r))).astype(str)
     log_own=np.zeros(len(r)); chalk=np.zeros(len(r)); max_own=np.zeros(len(r)); low_owned=np.zeros(len(r)); product_own=np.zeros(len(r)); team_max=np.zeros(len(r)); game_max=np.zeros(len(r))
-    team_arr=players.Team.astype(str).to_numpy() if players is not None and len(players) else None
-    game_arr=players.Game.astype(str).to_numpy() if players is not None and len(players) else None
+    team_arr=players.Team.astype(str).to_numpy() if players is not None and len(players) and "Team" in players.columns else None
+    game_arr=players.Game.astype(str).to_numpy() if players is not None and len(players) and "Game" in players.columns else None
     for j,lu in enumerate(r["_indices"]):
         ids=np.asarray(list(lu),dtype=int); vals=np.clip(own[ids],0.001,0.995)
         log_own[j]=np.sum(np.log(vals)); chalk[j]=np.sum(vals); max_own[j]=np.max(vals); low_owned[j]=np.sum(vals<0.05); product_own[j]=np.exp(np.mean(np.log(vals)))
@@ -86,8 +86,6 @@ def field_weights_v1(results,players=None):
     r=results.reset_index(drop=True)
     if r.empty: return np.array([],dtype=float),{},pd.DataFrame()
     f=_lineup_features(r,players)
-    # Recreational fields overuse obvious salary/chalk; sharper builds correlate more and
-    # tolerate leverage. Balanced lineups sit between those extremes.
     chalk=1.70*f["log_own_z"]+1.10*f["salary_spend"]+0.12*f["stack_bonus"]+0.06*f["nuke_z"]-0.20*f["low_owned"]
     sharp=0.48*f["log_own_z"]+0.52*f["salary_spend"]+1.05*f["stack_bonus"]+0.78*f["ceiling_z"]+0.42*f["nuke_z"]+0.20*f["bringback"]+0.10*f["double_stack"]
     balanced=0.92*f["log_own_z"]+0.72*f["salary_spend"]+0.55*f["stack_bonus"]+0.32*f["ceiling_z"]+0.10*f["bringback"]

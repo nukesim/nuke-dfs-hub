@@ -1,0 +1,31 @@
+name: Integrate V2
+on:
+  push:
+    paths:
+      - '.v2-trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update SIM
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pages/6_SIM.py')
+          s=p.read_text()
+          a='from default_slate import load_default_slate, SLATE_LABEL\n'
+          s=s.replace(a,a+'from nuke_football_v2 import simulate_player_matrix_v2\n',1)
+          s=s.replace('matrix=simulate_player_matrix(players,int(sims),int(seed),"NUKEM")','matrix=simulate_player_matrix_v2(players,int(sims),int(seed))',1)
+          p.write_text(s)
+          PY
+          python -m py_compile pages/6_SIM.py nuke_football_v2.py
+      - name: Commit
+        run: |
+          git config user.name nukesim
+          git config user.email bryson232323@gmail.com
+          git add pages/6_SIM.py
+          git commit -m 'Use football engine v2'
+          git push

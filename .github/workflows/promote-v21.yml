@@ -1,0 +1,48 @@
+name: Promote Football Engine V2.1
+
+on:
+  push:
+    branches: [main]
+    paths: [.promote-v21-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Promote live SIM to V2.1
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pages/6_SIM.py')
+          s=p.read_text()
+          old='from nuke_football_v2 import simulate_player_matrix_v2'
+          new='from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION'
+          if old not in s:
+              raise SystemExit('Expected V2 import not found')
+          s=s.replace(old,new,1)
+          old_call='matrix=simulate_player_matrix_v2(players,int(sims),int(seed))'
+          new_call='matrix=simulate_player_matrix_v21(players,int(sims),int(seed))'
+          if old_call not in s:
+              raise SystemExit('Expected V2 simulation call not found')
+          s=s.replace(old_call,new_call,1)
+          old_caption='st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub.")'
+          new_caption='st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption(f"Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub · {ENGINE_VERSION}.")'
+          if old_caption in s:
+              s=s.replace(old_caption,new_caption,1)
+          stage_old='st.write(f"2/5 · Simulating {int(sims):,} correlated football universes...")'
+          stage_new='st.write(f"2/5 · Simulating {int(sims):,} correlated football universes with {ENGINE_VERSION}...")'
+          if stage_old in s:
+              s=s.replace(stage_old,stage_new,1)
+          p.write_text(s)
+          PY
+      - name: Commit promotion
+        run: |
+          git config user.name "nukesim"
+          git config user.email "actions@users.noreply.github.com"
+          git add pages/6_SIM.py
+          git commit -m "Promote live NUKE SIM to Football Engine V2.1"
+          git push

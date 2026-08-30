@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-shot patch trigger for the portfolio story dashboard.
 p=Path("pages/6_SIM.py")
 s=p.read_text(encoding="utf-8")
 

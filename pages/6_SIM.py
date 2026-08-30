@@ -12,28 +12,14 @@ from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
 from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 
-def boost_icon_state(value):
-    try:
-        level=max(-3,min(3,int(round(float(value)))))
-    except Exception:
-        level=0
-    return {
-        "⬇3": level == -3, "⬇2": level == -2, "⬇1": level == -1,
-        "⬆1": level == 1, "⬆2": level == 2, "⬆3": level == 3,
-    }
+BOOST_VALUES=[-3,-2,-1,0,1,2,3]
+BOOST_LABELS={-3:"▼3",-2:"▼2",-1:"▼1",0:"—",1:"▲1",2:"▲2",3:"▲3"}
 
-def icon_state_to_boost(row):
-    # One click is intended. If more than one is checked, strongest magnitude wins.
-    choices=[]
-    for col,val in (("⬇3",-3),("⬇2",-2),("⬇1",-1),("⬆1",1),("⬆2",2),("⬆3",3)):
-        try:
-            if bool(row[col]): choices.append(val)
-        except Exception:
-            pass
-    if not choices:
-        return 0.0
-    choices.sort(key=lambda x:(abs(x),x), reverse=True)
-    return float(choices[0])
+def clean_boost(value):
+    try:
+        return max(-3,min(3,int(round(float(value)))))
+    except Exception:
+        return 0
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide")
 st.title("☢️ NUKE SIM")
@@ -115,7 +101,7 @@ c4.metric("Salary Floor",f"${int(min_salary):,}")
 c5.metric("Slate",slate_source)
 
 st.subheader("🎮 Game-by-Game Player Pool")
-st.caption("Work the slate one game at a time. Include/remove players and click a boost/fade icon up to 3x. These clicks change candidate-lineup generation only — they do NOT change the player's simulated fantasy points.")
+st.caption("Work the slate one game at a time. Include/remove players and use the single Boost control: ▼ fades, ▲ boosts, up to 3x. It changes candidate-lineup generation only — it does NOT change the player's simulated fantasy points.")
 env=game_environment(players)
 if not env.empty:
     st.caption("Team/Game totals below are projection-free DK salary-market estimates until a live sportsbook feed is connected. Rank 1 = strongest on the slate.")
@@ -155,40 +141,46 @@ for game in players.Game.drop_duplicates().tolist():
                 tp["_pos_order"]=tp.Position.map(pos_order).fillna(9)
                 tp=tp.sort_values(["_pos_order","Salary"],ascending=[True,False])
                 trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
-                rows=[]
-                for idx,row in tp.iterrows():
-                    key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-                    cfg=updated_state.get(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
-                    icon_state=boost_icon_state(cfg.get("boost",0.0))
-                    rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Salary":int(row.Salary),"Auto Role":row.auto_role,**icon_state,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
-                edit_df=pd.DataFrame(rows).set_index("_row")
-
                 with team_col:
                     if trow is not None:
                         st.markdown(f"### {team} · {float(trow['Team Total']):.1f} · Rank #{int(trow['Team Total Rank'])}")
                     else:
                         st.markdown(f"### {team}")
                     team_actions[team]=st.selectbox(f"{team} bulk action",["No bulk change","✅ Include all","🚫 Exclude all"],key=f"team_bulk_{str(game)}_{team}_{editor_version}",label_visibility="collapsed")
-                    edited_team=st.data_editor(
-                        edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
-                        disabled=["Pos","Player","Salary","Auto Role"],
-                        column_order=["Include","Pos","Player","Salary","Auto Role","⬇3","⬇2","⬇1","⬆1","⬆2","⬆3","Role","Usage x"],
-                        column_config={
-                            "Include":st.column_config.CheckboxColumn("Include",width="small"),
-                            "Pos":st.column_config.TextColumn("Pos",width="small"),
-                            "Player":st.column_config.TextColumn("Player",width="medium"),
-                            "Salary":st.column_config.NumberColumn("Salary",format="$%d",width="small"),
-                            "Auto Role":st.column_config.TextColumn("Auto Role",width="small"),
-                            "⬇3":st.column_config.CheckboxColumn("⬇3",width="small",help="Hard fade (-3)"),
-                            "⬇2":st.column_config.CheckboxColumn("⬇2",width="small",help="Fade (-2)"),
-                            "⬇1":st.column_config.CheckboxColumn("⬇1",width="small",help="Slight fade (-1)"),
-                            "⬆1":st.column_config.CheckboxColumn("⬆1",width="small",help="Boost (+1)"),
-                            "⬆2":st.column_config.CheckboxColumn("⬆2",width="small",help="Strong boost (+2)"),
-                            "⬆3":st.column_config.CheckboxColumn("⬆3",width="small",help="Maximum boost (+3)"),
-                            "Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small"),
-                            "Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
-                        },key=f"game_pool_{str(game)}_{team}_{editor_version}")
-                    pending_by_team[team]=(edit_df,edited_team)
+
+                    widths=[.7,.6,2.35,.9,.9,3.2,1.15,1.0]
+                    hdr=st.columns(widths)
+                    for col,title in zip(hdr,["Include","Pos","Player","Salary","Auto Role","Boost","Role","Usage x"]):
+                        col.markdown(f"**{title}**")
+
+                    pending_rows=[]
+                    role_options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]
+                    for idx,row in tp.iterrows():
+                        key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+                        cfg=updated_state.get(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
+                        cols=st.columns(widths)
+                        include=cols[0].checkbox("Include",value=bool(cfg.get("include",True)),key=f"inc_{str(game)}_{team}_{idx}_{editor_version}",label_visibility="collapsed")
+                        cols[1].markdown(f"**{row.Position}**")
+                        cols[2].markdown(f"**{row.Name}**")
+                        cols[3].markdown(f"${int(row.Salary):,}")
+                        cols[4].markdown(str(row.auto_role))
+                        boost=cols[5].segmented_control(
+                            "Boost",
+                            options=BOOST_VALUES,
+                            default=clean_boost(cfg.get("boost",0.0)),
+                            format_func=lambda x: BOOST_LABELS[x],
+                            key=f"boost_{str(game)}_{team}_{idx}_{editor_version}",
+                            label_visibility="collapsed",
+                            help="One column, one click: ▼1/2/3 fades; ▲1/2/3 boosts. — is neutral. Candidate generation only."
+                        )
+                        role_value=str(cfg.get("role","AUTO")).upper()
+                        if role_value not in role_options:
+                            role_value="AUTO"
+                        role=cols[6].selectbox("Role",role_options,index=role_options.index(role_value),key=f"role_{str(game)}_{team}_{idx}_{editor_version}",label_visibility="collapsed")
+                        usage=cols[7].number_input("Usage x",min_value=.25,max_value=2.25,value=float(cfg.get("usage",1.0)),step=.05,format="%.2f",key=f"usage_{str(game)}_{team}_{idx}_{editor_version}",label_visibility="collapsed",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes.")
+                        pending_rows.append({"_key":key,"Include":include,"Boost":clean_boost(boost),"Role":role,"Usage x":float(usage)})
+
+                    pending_by_team[team]=pending_rows
                     excluded_count=sum(not bool(updated_state.get(str(r.ID) if str(r.ID) else f"{r.Name}|{r.Team}|{r.Position}|{int(r.Salary)}",{}).get("include",True)) for _,r in tp.iterrows())
                     if excluded_count:
                         st.caption(f"🚫 Currently excluded: {excluded_count} · They stay visible here until you Apply changes, so you can re-check several at once.")
@@ -196,16 +188,16 @@ for game in players.Game.drop_duplicates().tolist():
             apply_changes=st.form_submit_button(f"Apply changes for {label}",type="primary",use_container_width=True)
 
         if apply_changes:
-            for team,(edit_df,edited_team) in pending_by_team.items():
+            for team,pending_rows in pending_by_team.items():
                 action=team_actions.get(team,"No bulk change")
-                for idx,erow in edited_team.iterrows():
-                    key=str(edit_df.loc[idx,"_key"])
+                for erow in pending_rows:
+                    key=str(erow["_key"])
                     include=bool(erow["Include"])
                     if action=="✅ Include all": include=True
                     elif action=="🚫 Exclude all": include=False
                     if game_action=="✅ Include entire game": include=True
                     elif game_action=="🚫 Exclude entire game": include=False
-                    updated_state[key]={"include":include,"boost":icon_state_to_boost(erow),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+                    updated_state[key]={"include":include,"boost":float(erow["Boost"]),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
             st.session_state["nuke_pregame_pool"]=updated_state
             st.session_state["nuke_pool_editor_version"]=editor_version+1
             st.rerun()

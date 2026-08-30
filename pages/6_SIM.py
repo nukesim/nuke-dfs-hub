@@ -12,6 +12,27 @@ from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
 from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 
+TAKE_LEVELS=[
+    "🧊 -3 Hard Fade",
+    "⬇️⬇️ -2 Fade",
+    "⬇️ -1 Slight Fade",
+    "— 0 Neutral",
+    "⬆️ +1 Boost",
+    "⬆️⬆️ +2 Strong Boost",
+    "🚀 +3 Smash",
+]
+TAKE_TO_BOOST={label:float(level) for level,label in zip(range(-3,4),TAKE_LEVELS)}
+
+def boost_to_take(value):
+    try:
+        level=max(-3,min(3,int(round(float(value)))))
+    except Exception:
+        level=0
+    return TAKE_LEVELS[level+3]
+
+def take_to_boost(value):
+    return float(TAKE_TO_BOOST.get(str(value),0.0))
+
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide")
 st.title("☢️ NUKE SIM")
 st.caption(f"Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub · {ENGINE_VERSION}.")
@@ -92,7 +113,7 @@ c4.metric("Salary Floor",f"${int(min_salary):,}")
 c5.metric("Slate",slate_source)
 
 st.subheader("🎮 Game-by-Game Player Pool")
-st.caption("Work the slate one game at a time. Include/remove players and add a personal pre-sim Boost. Boost changes candidate-lineup generation only — it does NOT change the player's simulated fantasy points.")
+st.caption("Work the slate one game at a time. Include/remove players and choose a Take level from Hard Fade to Smash. Takes change candidate-lineup generation only — they do NOT change the player's simulated fantasy points.")
 env=game_environment(players)
 if not env.empty:
     st.caption("Team/Game totals below are projection-free DK salary-market estimates until a live sportsbook feed is connected. Rank 1 = strongest on the slate.")
@@ -136,7 +157,7 @@ for game in players.Game.drop_duplicates().tolist():
                 for idx,row in tp.iterrows():
                     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
                     cfg=updated_state.get(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
-                    rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Salary":int(row.Salary),"Auto Role":row.auto_role,"Boost":float(cfg.get("boost",0.0)),"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
+                    rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Salary":int(row.Salary),"Auto Role":row.auto_role,"Take":boost_to_take(cfg.get("boost",0.0)),"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
                 edit_df=pd.DataFrame(rows).set_index("_row")
 
                 with team_col:
@@ -148,14 +169,14 @@ for game in players.Game.drop_duplicates().tolist():
                     edited_team=st.data_editor(
                         edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
                         disabled=["Pos","Player","Salary","Auto Role"],
-                        column_order=["Include","Pos","Player","Salary","Auto Role","Boost","Role","Usage x"],
+                        column_order=["Include","Pos","Player","Salary","Auto Role","Take","Role","Usage x"],
                         column_config={
                             "Include":st.column_config.CheckboxColumn("Include",width="small"),
                             "Pos":st.column_config.TextColumn("Pos",width="small"),
                             "Player":st.column_config.TextColumn("Player",width="medium"),
                             "Salary":st.column_config.NumberColumn("Salary",format="$%d",width="small"),
                             "Auto Role":st.column_config.TextColumn("Auto Role",width="small"),
-                            "Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f",width="small",help="Personal preference only. Changes candidate generation, not simulated fantasy points."),
+                            "Take":st.column_config.SelectboxColumn("Take",options=TAKE_LEVELS,width="medium",help="Click a level: Hard Fade (-3), Fade (-2), Slight Fade (-1), Neutral, Boost (+1), Strong Boost (+2), or Smash (+3). Changes candidate generation only, not simulated fantasy points."),
                             "Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small"),
                             "Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
                         },key=f"game_pool_{str(game)}_{team}_{editor_version}")
@@ -176,7 +197,7 @@ for game in players.Game.drop_duplicates().tolist():
                     elif action=="🚫 Exclude all": include=False
                     if game_action=="✅ Include entire game": include=True
                     elif game_action=="🚫 Exclude entire game": include=False
-                    updated_state[key]={"include":include,"boost":float(erow["Boost"]),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+                    updated_state[key]={"include":include,"boost":take_to_boost(erow["Take"]),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
             st.session_state["nuke_pregame_pool"]=updated_state
             st.session_state["nuke_pool_editor_version"]=editor_version+1
             st.rerun()

@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import time
 from nuke_sim import prepare_slate, simulate_player_matrix, generate_lineups, evaluate_lineups, exposure_table, position_exposure_table, flex_exposure_table
 from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
@@ -45,6 +46,7 @@ editor=players[["Name","Position","Team","Salary","Game"]].copy(); editor.insert
 edited=st.data_editor(editor,use_container_width=True,hide_index=True,disabled=["Name","Position","Team","Salary","Game"],column_config={"Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]),"Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f")})
 mask=edited.Active.fillna(False).astype(bool).to_numpy(); players=players.loc[mask].copy().reset_index(drop=True); ae=edited.loc[mask].reset_index(drop=True); players["role_override"]=ae.Role.fillna("AUTO").astype(str).str.upper().values; players["usage_multiplier"]=pd.to_numeric(ae["Usage x"],errors="coerce").fillna(1).clip(.25,2.25).values
 if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
+    run_started=time.perf_counter()
     # Public-safe default: each click gets a fresh seed, so identical users do not all receive the same portfolio.
     seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1
     if len(players)<9: st.error("Not enough active players."); st.stop()
@@ -55,8 +57,10 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         st.write("3/5 · Ranking outcomes and assigning paths..."); results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix)); exposure=exposure_table(players,results,int(exposure_n)); pexposure=path_exposure(results,int(exposure_n))
         st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override)
         st.write("5/5 · Building path-diversified portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance)); portfolio_paths,portfolio_stats=portfolio_summary(portfolio)
-        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats}.items(): st.session_state[k]=v
-        status.update(label="NUKE SIM complete",state="complete")
+        run_seconds=time.perf_counter()-run_started
+        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds}.items(): st.session_state[k]=v
+        status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
+    st.success(f"Total run time: {run_seconds:.1f} seconds")
 results=st.session_state.get("nuke_sim_results"); sim_players=st.session_state.get("nuke_sim_players"); exposure=st.session_state.get("nuke_sim_exposure"); pexposure=st.session_state.get("nuke_path_exposure"); contest_results=st.session_state.get("nuke_contest_results"); contest_summary=st.session_state.get("nuke_contest_summary",{}); portfolio=st.session_state.get("nuke_portfolio"); portfolio_paths=st.session_state.get("nuke_portfolio_paths"); portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
 if results is not None and not results.empty:
     tab1,tab2,tab3,tab4,tab5,tab6,tab7=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","📤 DK EXPORT","🧠 MODEL NOTES"])

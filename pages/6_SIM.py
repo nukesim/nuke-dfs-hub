@@ -12,7 +12,7 @@ from nuke_football_v2 import simulate_player_matrix_v2
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub.")
 with st.sidebar:
-    st.header("SIM CONTROL ROOM"); preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=1); presets={"QUICK":(300,500,50,300),"STANDARD":(700,1500,75,750),"DEEP":(1400,3000,100,1500)}; candidates,sims,exposure_n,contest_iters=presets[preset]
+    st.header("SIM CONTROL ROOM"); preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=0); presets={"QUICK":(250,350,50,200),"STANDARD":(400,750,75,350),"DEEP":(700,1200,100,500)}; candidates,sims,exposure_n,contest_iters=presets[preset]
     min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10)
     with st.expander("Advanced settings"):
         fixed_seed=st.checkbox("Use reproducible seed",value=False,help="Off by default: every RUN NUKE SIM click gets a fresh random simulation. Turn this on only when you want to reproduce a specific run.")
@@ -51,12 +51,12 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1
     if len(players)<9: st.error("Not enough active players."); st.stop()
     with st.status("NUKE SIM is running...",expanded=True) as status:
-        st.write("1/5 · Generating correlated DraftKings candidates..."); lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed))
+        stage=time.perf_counter(); st.write("1/5 · Generating correlated DraftKings candidates..."); lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed)); st.write(f"Candidate generation: {time.perf_counter()-stage:.1f}s")
         if not lineups: status.update(label="No legal lineups found",state="error"); st.stop()
-        st.write(f"Generated {len(lineups):,} unique candidates."); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes..."); matrix=simulate_player_matrix_v2(players,int(sims),int(seed))
-        st.write("3/5 · Ranking outcomes and assigning paths..."); results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix)); exposure=exposure_table(players,results,int(exposure_n)); pexposure=path_exposure(results,int(exposure_n))
-        st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override)
-        st.write("5/5 · Building path-diversified portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance)); portfolio_paths,portfolio_stats=portfolio_summary(portfolio)
+        st.write(f"Generated {len(lineups):,} unique candidates."); stage=time.perf_counter(); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes..."); matrix=simulate_player_matrix_v2(players,int(sims),int(seed)); st.write(f"Football simulation: {time.perf_counter()-stage:.1f}s")
+        stage=time.perf_counter(); st.write("3/5 · Ranking outcomes and assigning paths..."); results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix)); exposure=exposure_table(players,results,int(exposure_n)); pexposure=path_exposure(results,int(exposure_n)); st.write(f"Ranking + paths: {time.perf_counter()-stage:.1f}s")
+        stage=time.perf_counter(); st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override); st.write(f"Contest simulation: {time.perf_counter()-stage:.1f}s")
+        stage=time.perf_counter(); st.write("5/5 · Building path-diversified portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance)); portfolio_paths,portfolio_stats=portfolio_summary(portfolio); st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")
         run_seconds=time.perf_counter()-run_started
         for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds}.items(): st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")

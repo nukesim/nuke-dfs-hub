@@ -16,7 +16,6 @@ def patch_app():
         if init_anchor not in s: raise SystemExit('app init anchor missing')
         s=s.replace(init_anchor,init_block,1)
 
-    # Publish role adjustments whenever they are saved or cleared.
     save_anchor='''                st.session_state.model_df=model\n                st.session_state.model_errors=errs\n                st.rerun()\n            if o3.button("REMOVE ALL ROLE ADJUSTMENTS",use_container_width=True):\n'''
     save_block='''                st.session_state.model_df=model\n                st.session_state.model_errors=errs\n                st.session_state["nuke_hub_bridge_ready"]=True\n                st.session_state["nuke_hub_bridge_version"]=int(st.session_state.get("nuke_hub_bridge_version",0))+1\n                st.session_state["nuke_hub_pool_ids"]=list(st.session_state.pool_ids)\n                st.session_state["nuke_hub_role_adjustments"]=dict(st.session_state.projection_overrides)\n                st.rerun()\n            if o3.button("REMOVE ALL ROLE ADJUSTMENTS",use_container_width=True):\n'''
     if 'nuke_hub_role_adjustments"]=dict(st.session_state.projection_overrides)' not in s:
@@ -54,7 +53,7 @@ def patch_sim():
         s=s.replace(imp,imp+add,1)
 
     pool_anchor='''pool_state=st.session_state.get("nuke_pregame_pool",{})\neditor_version=int(st.session_state.get("nuke_pool_editor_version",0))\n\nfor _,row in players.iterrows():\n'''
-    pool_block='''pool_state=st.session_state.get("nuke_pregame_pool",{})\neditor_version=int(st.session_state.get("nuke_pool_editor_version",0))\n\n# Pull committed Hub player-pool and role adjustments only when the Hub version changes.\nhub_bridge_version=int(st.session_state.get("nuke_hub_bridge_version",0))\nlast_hub_version=int(st.session_state.get("nuke_sim_hub_bridge_version",-1))\nif st.session_state.get("nuke_hub_bridge_ready",False) and hub_bridge_version!=last_hub_version:\n    pool_state=sync_hub_pool_to_sim(\n        players,\n        pool_state,\n        st.session_state.get("nuke_hub_pool_ids",[]),\n        st.session_state.get("nuke_hub_role_adjustments",{}),\n    )\n    st.session_state["nuke_pregame_pool"]=pool_state\n    st.session_state["nuke_sim_hub_bridge_version"]=hub_bridge_version\n    st.session_state["nuke_pool_editor_version"]=editor_version+1\n    editor_version+=1\n    hub_pool_n=len(st.session_state.get("nuke_hub_pool_ids",[]))\n    hub_adj_n=len(st.session_state.get("nuke_hub_role_adjustments",{}))\n    st.success(f"Synced from Hub · {hub_pool_n if hub_pool_n else 'all'} players in committed pool · {hub_adj_n} role adjustments")\n\nfor _,row in players.iterrows():\n'''
+    pool_block='''pool_state=st.session_state.get("nuke_pregame_pool",{})\neditor_version=int(st.session_state.get("nuke_pool_editor_version",0))\n\nhub_bridge_version=int(st.session_state.get("nuke_hub_bridge_version",0))\nlast_hub_version=int(st.session_state.get("nuke_sim_hub_bridge_version",-1))\nif st.session_state.get("nuke_hub_bridge_ready",False) and hub_bridge_version!=last_hub_version:\n    pool_state=sync_hub_pool_to_sim(players,pool_state,st.session_state.get("nuke_hub_pool_ids",[]),st.session_state.get("nuke_hub_role_adjustments",{}))\n    st.session_state["nuke_pregame_pool"]=pool_state\n    st.session_state["nuke_sim_hub_bridge_version"]=hub_bridge_version\n    st.session_state["nuke_pool_editor_version"]=editor_version+1\n    editor_version+=1\n    hub_pool_n=len(st.session_state.get("nuke_hub_pool_ids",[]))\n    hub_adj_n=len(st.session_state.get("nuke_hub_role_adjustments",{}))\n    st.success(f"Synced from Hub · {hub_pool_n if hub_pool_n else 'all'} players in committed pool · {hub_adj_n} role adjustments")\n\nfor _,row in players.iterrows():\n'''
     if 'Synced from Hub ·' not in s:
         if pool_anchor not in s: raise SystemExit('sim pool anchor missing')
         s=s.replace(pool_anchor,pool_block,1)
@@ -77,3 +76,4 @@ def patch_sim():
 patch_app()
 patch_sim()
 print('Hub ↔ SIM bridge patched')
+# trigger

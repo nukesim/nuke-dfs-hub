@@ -1,0 +1,34 @@
+name: Refresh NFL Odds
+
+on:
+  push:
+    paths:
+      - '.odds-trigger'
+  schedule:
+    - cron: '15 */6 * * 1-6'
+    - cron: '15 10-23 * * 0'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install pandas requests
+      - name: Fetch current NFL odds
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: python tools/fetch_nfl_odds.py
+      - name: Commit odds snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/nfl_odds_current.csv data/nfl_odds_history.csv
+          git diff --cached --quiet || git commit -m "Refresh NFL sportsbook odds"
+          git push

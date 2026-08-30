@@ -121,11 +121,11 @@ if results is not None and not results.empty:
             pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)
             st.markdown("#### Path Mix"); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True)
             st.markdown("#### Selected Lineups")
-  portfolio_export=add_dk_roster_columns(sim_players,portfolio).drop(columns=["_indices"],errors="ignore")
-  preferred=["Portfolio Slot","QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX","DST","FLEX Pos","Stack","Contest Rank","Sim ROI %","1st %","Top 0.1%","Top 1%","Cash %","Avg Finish","Avg Payout","Strongest Path","Secondary Path","Path Score","Lineup Thesis","NUKE Score","Median","Ceiling 95","Salary","Portfolio Reason"]
-  portfolio_export=portfolio_export[[c for c in preferred if c in portfolio_export.columns]+[c for c in portfolio_export.columns if c not in preferred]]
-  st.dataframe(portfolio_export,use_container_width=True,hide_index=True)
-  st.download_button("⬇️ Download Portfolio + Stats CSV",portfolio_export.to_csv(index=False).encode("utf-8-sig"),"nuke_portfolio_with_stats.csv","text/csv",type="primary",use_container_width=True,key="download_portfolio_stats")
+            portfolio_export=add_dk_roster_columns(sim_players,portfolio).drop(columns=["_indices"],errors="ignore")
+            preferred=["Portfolio Slot","QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX","DST","FLEX Pos","Stack","Contest Rank","Sim ROI %","1st %","Top 0.1%","Top 1%","Cash %","Avg Finish","Avg Payout","Strongest Path","Secondary Path","Path Score","Lineup Thesis","NUKE Score","Median","Ceiling 95","Salary","Portfolio Reason"]
+            portfolio_export=portfolio_export[[c for c in preferred if c in portfolio_export.columns]+[c for c in portfolio_export.columns if c not in preferred]]
+            st.dataframe(portfolio_export,use_container_width=True,hide_index=True)
+            st.download_button("⬇️ Download Portfolio + Stats CSV",portfolio_export.to_csv(index=False).encode("utf-8-sig"),"nuke_portfolio_with_stats.csv","text/csv",type="primary",use_container_width=True,key="download_portfolio_stats")
     with tab3:
         show=results.drop(columns=["_indices"],errors="ignore"); st.dataframe(show.head(150),use_container_width=True,hide_index=True); st.download_button("Download NUKEM lineup results CSV",show.to_csv(index=False).encode("utf-8-sig"),"nuke_sim_results.csv","text/csv")
     with tab4:

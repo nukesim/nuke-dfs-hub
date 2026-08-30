@@ -98,16 +98,42 @@ if not env.empty:
     st.caption("Team/Game totals below are projection-free DK salary-market estimates until a live sportsbook feed is connected. Rank 1 = strongest on the slate.")
 
 pool_state=st.session_state.get("nuke_pregame_pool",{})
-updated_state={}
+editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
+
+for _,row in players.iterrows():
+    key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+    pool_state.setdefault(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
+
+updated_state=dict(pool_state)
+needs_rerun=False
+
 for game in players.Game.drop_duplicates().tolist():
     gp=players[players.Game.eq(game)].copy()
     teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
     label=" vs ".join(teams[:2]) if len(teams)>=2 else str(game)
+    game_keys=[]
+    for _,row in gp.iterrows():
+        game_keys.append(str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}")
+
     with st.expander(f"🏈 {label}",expanded=False):
         ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
         if not ge.empty:
             env_show=ge[["Team","Opponent","Team Total","Team Total Rank","Game Total","Game Total Rank"]]
             st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
+
+        g1,g2,_=st.columns([1,1,5])
+        if g1.button("✅ Include entire game",key=f"include_game_{game}",use_container_width=True):
+            for key in game_keys:
+                updated_state[key]["include"]=True
+            st.session_state["nuke_pregame_pool"]=updated_state
+            st.session_state["nuke_pool_editor_version"]=editor_version+1
+            st.rerun()
+        if g2.button("🚫 Exclude entire game",key=f"exclude_game_{game}",use_container_width=True):
+            for key in game_keys:
+                updated_state[key]["include"]=False
+            st.session_state["nuke_pregame_pool"]=updated_state
+            st.session_state["nuke_pool_editor_version"]=editor_version+1
+            st.rerun()
 
         visible_teams=teams[:2]
         team_cols=st.columns(len(visible_teams)) if visible_teams else [st.container()]
@@ -117,55 +143,96 @@ for game in players.Game.drop_duplicates().tolist():
             tp["_pos_order"]=tp.Position.map(pos_order).fillna(9)
             tp=tp.sort_values(["_pos_order","Salary"],ascending=[True,False])
             trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
+
+            team_records=[]
+            for idx,row in tp.iterrows():
+                key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+                cfg=updated_state.get(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
+                team_records.append((idx,key,row,cfg))
+            included=[x for x in team_records if bool(x[3].get("include",True))]
+            excluded=[x for x in team_records if not bool(x[3].get("include",True))]
+
             with team_col:
                 if trow is not None:
                     st.markdown(f"### {team} · {float(trow['Team Total']):.1f} · Rank #{int(trow['Team Total Rank'])}")
                 else:
                     st.markdown(f"### {team}")
-                rows=[]
-                for idx,row in tp.iterrows():
-                    key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-                    saved=pool_state.get(key,{})
-                    rows.append({
-                        "_row":int(idx),"_key":key,
-                        "Include":bool(saved.get("include",True)),
-                        "Pos":row.Position,
-                        "Player":row.Name,
-                        "Salary":int(row.Salary),
-                        "Auto Role":row.auto_role,
-                        "Boost":float(saved.get("boost",0.0)),
-                        "Role":str(saved.get("role","AUTO")),
-                        "Usage x":float(saved.get("usage",1.0)),
-                    })
-                edit_df=pd.DataFrame(rows).set_index("_row")
-                edited_team=st.data_editor(
-                    edit_df.drop(columns=["_key"]),
-                    use_container_width=True,
-                    hide_index=True,
-                    disabled=["Pos","Player","Salary","Auto Role"],
-                    column_order=["Include","Pos","Player","Salary","Auto Role","Boost","Role","Usage x"],
-                    column_config={
-                        "Include":st.column_config.CheckboxColumn("Include",width="small"),
-                        "Pos":st.column_config.TextColumn("Pos",width="small"),
-                        "Player":st.column_config.TextColumn("Player",width="medium"),
-                        "Salary":st.column_config.NumberColumn("Salary",format="$%d",width="small"),
-                        "Auto Role":st.column_config.TextColumn("Auto Role",width="small"),
-                        "Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f",width="small",help="Personal preference only. Changes candidate generation, not simulated fantasy points."),
-                        "Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small"),
-                        "Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
-                    },
-                    key=f"game_pool_{str(game)}_{team}",
-                )
-                for idx,erow in edited_team.iterrows():
-                    key=str(edit_df.loc[idx,"_key"])
-                    updated_state[key]={
-                        "include":bool(erow["Include"]),
-                        "boost":float(erow["Boost"]),
-                        "role":str(erow["Role"]),
-                        "usage":float(erow["Usage x"]),
-                    }
+
+                b1,b2=st.columns(2)
+                if b1.button("✅ Include all",key=f"include_team_{game}_{team}",use_container_width=True):
+                    for _,key,_,_ in team_records:
+                        updated_state[key]["include"]=True
+                    st.session_state["nuke_pregame_pool"]=updated_state
+                    st.session_state["nuke_pool_editor_version"]=editor_version+1
+                    st.rerun()
+                if b2.button("🚫 Exclude all",key=f"exclude_team_{game}_{team}",use_container_width=True):
+                    for _,key,_,_ in team_records:
+                        updated_state[key]["include"]=False
+                    st.session_state["nuke_pregame_pool"]=updated_state
+                    st.session_state["nuke_pool_editor_version"]=editor_version+1
+                    st.rerun()
+
+                if included:
+                    rows=[]
+                    for idx,key,row,cfg in included:
+                        rows.append({
+                            "_row":int(idx),"_key":key,"Include":True,"Pos":row.Position,"Player":row.Name,
+                            "Salary":int(row.Salary),"Auto Role":row.auto_role,"Boost":float(cfg.get("boost",0.0)),
+                            "Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0)),
+                        })
+                    edit_df=pd.DataFrame(rows).set_index("_row")
+                    edited_team=st.data_editor(
+                        edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
+                        disabled=["Pos","Player","Salary","Auto Role"],
+                        column_order=["Include","Pos","Player","Salary","Auto Role","Boost","Role","Usage x"],
+                        column_config={
+                            "Include":st.column_config.CheckboxColumn("Include",width="small"),
+                            "Pos":st.column_config.TextColumn("Pos",width="small"),
+                            "Player":st.column_config.TextColumn("Player",width="medium"),
+                            "Salary":st.column_config.NumberColumn("Salary",format="$%d",width="small"),
+                            "Auto Role":st.column_config.TextColumn("Auto Role",width="small"),
+                            "Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f",width="small",help="Personal preference only. Changes candidate generation, not simulated fantasy points."),
+                            "Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small"),
+                            "Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
+                        },key=f"game_pool_{str(game)}_{team}_{editor_version}",
+                    )
+                    for idx,erow in edited_team.iterrows():
+                        key=str(edit_df.loc[idx,"_key"])
+                        was_included=bool(updated_state[key].get("include",True))
+                        updated_state[key]={"include":bool(erow["Include"]),"boost":float(erow["Boost"]),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+                        if was_included and not bool(erow["Include"]):
+                            needs_rerun=True
+                else:
+                    st.caption("No included players on this team.")
+
+                if excluded:
+                    with st.expander(f"🚫 Excluded players ({len(excluded)})",expanded=False):
+                        st.caption("Excluded players stay with this team. Check Include to put one straight back into the active roster.")
+                        xrows=[]
+                        for idx,key,row,cfg in excluded:
+                            xrows.append({"_row":int(idx),"_key":key,"Include":False,"Pos":row.Position,"Player":row.Name,"Salary":int(row.Salary),"Boost":float(cfg.get("boost",0.0))})
+                        xdf=pd.DataFrame(xrows).set_index("_row")
+                        xedit=st.data_editor(
+                            xdf.drop(columns=["_key"]),use_container_width=True,hide_index=True,
+                            disabled=["Pos","Player","Salary","Boost"],column_order=["Include","Pos","Player","Salary","Boost"],
+                            column_config={
+                                "Include":st.column_config.CheckboxColumn("Include",width="small"),
+                                "Pos":st.column_config.TextColumn("Pos",width="small"),
+                                "Player":st.column_config.TextColumn("Player",width="medium"),
+                                "Salary":st.column_config.NumberColumn("Salary",format="$%d",width="small"),
+                                "Boost":st.column_config.NumberColumn("Boost",format="%.0f",width="small"),
+                            },key=f"excluded_pool_{str(game)}_{team}_{editor_version}",
+                        )
+                        for idx,erow in xedit.iterrows():
+                            if bool(erow["Include"]):
+                                key=str(xdf.loc[idx,"_key"])
+                                updated_state[key]["include"]=True
+                                needs_rerun=True
 
 st.session_state["nuke_pregame_pool"]=updated_state
+if needs_rerun:
+    st.session_state["nuke_pool_editor_version"]=editor_version+1
+    st.rerun()
 active_rows=[]
 for _,row in players.iterrows():
     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"

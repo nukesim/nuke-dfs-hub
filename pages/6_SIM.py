@@ -9,6 +9,7 @@ from dk_contest_import import parse_payout_upload
 from dk_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
 from nuke_football_v2 import simulate_player_matrix_v2
+from nuke_combos import combo_exposure_table
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub.")
 with st.sidebar:
@@ -63,7 +64,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     st.success(f"Total run time: {run_seconds:.1f} seconds")
 results=st.session_state.get("nuke_sim_results"); sim_players=st.session_state.get("nuke_sim_players"); exposure=st.session_state.get("nuke_sim_exposure"); pexposure=st.session_state.get("nuke_path_exposure"); contest_results=st.session_state.get("nuke_contest_results"); contest_summary=st.session_state.get("nuke_contest_summary",{}); portfolio=st.session_state.get("nuke_portfolio"); portfolio_paths=st.session_state.get("nuke_portfolio_paths"); portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
 if results is not None and not results.empty:
-    tab1,tab2,tab3,tab4,tab5,tab6,tab7=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","📤 DK EXPORT","🧠 MODEL NOTES"])
+    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","🔗 COMBOS","📤 DK EXPORT","🧠 MODEL NOTES"])
     with tab1:
         if contest_results is not None and not contest_results.empty:
             m1,m2,m3,m4,m5,m6=st.columns(6); m1.metric("Field",f"{int(contest_summary.get('field_size',0)):,}"); m2.metric("Entry",f"${float(contest_summary.get('entry_fee',0)):,.2f}"); m3.metric("Paid Places",f"{int(contest_summary.get('paid_places',0)):,}"); m4.metric("Contest Sims",f"{int(contest_summary.get('iterations',0)):,}"); m5.metric("Lineups Simmed",f"{len(contest_results):,}"); m6.metric("Payout Model",str(contest_summary.get("payout_model","")))
@@ -87,6 +88,30 @@ if results is not None and not results.empty:
         st.dataframe(flex_table,use_container_width=True,hide_index=True); pos_filter=st.selectbox("Position exposure",["ALL","QB","RB","WR","TE","DST"]); pshow=pos_table if pos_filter=="ALL" else pos_table[pos_table.Position.eq(pos_filter)]; st.dataframe(pshow,use_container_width=True,hide_index=True)
         st.markdown("**Top-player exposure detail**"); st.dataframe(exposure,use_container_width=True,hide_index=True)
     with tab6:
+        st.subheader("Player Combo Exposure")
+        combo_scope=portfolio if portfolio is not None and not portfolio.empty else contest_results
+        if combo_scope is not None and not combo_scope.empty:
+            pairs,qb_pairs=combo_exposure_table(sim_players,combo_scope)
+            st.caption(f"Calculated across {len(combo_scope):,} portfolio lineups." if portfolio is not None and not portfolio.empty else f"Calculated across {len(combo_scope):,} contest-simmed lineups.")
+            if not pairs.empty:
+                c1,c2,c3=st.columns(3)
+                top=pairs.iloc[0]
+                c1.metric("Highest Combo",f"{top['Player 1']} + {top['Player 2']}")
+                c2.metric("Highest Combo %",f"{float(top['Portfolio Combo %']):.1f}%")
+                c3.metric("Combo Lineups",int(top['Combo Lineups']))
+                st.markdown("#### Highest Overall Player Pairs")
+                relation=st.multiselect("Show relationships",["Same Team","Same Game","Non-Stacked"],default=["Same Team","Same Game","Non-Stacked"],key="combo_relation")
+                pair_show=pairs[pairs["Relationship"].isin(relation)].head(75)
+                st.dataframe(pair_show,use_container_width=True,hide_index=True)
+            if not qb_pairs.empty:
+                st.markdown("#### QB-Anchored Combos")
+                st.caption("% of QB Lineups answers: when this QB is used, how often is the other player paired with him?")
+                qb_filter=st.selectbox("QB anchor",["All QBs"]+sorted(qb_pairs.QB.unique().tolist()),key="combo_qb")
+                qshow=qb_pairs if qb_filter=="All QBs" else qb_pairs[qb_pairs.QB.eq(qb_filter)]
+                st.dataframe(qshow.head(100),use_container_width=True,hide_index=True)
+        else:
+            st.info("Run the SIM to generate combo exposure.")
+    with tab7:
         st.subheader("📤 DraftKings Lineup Export"); source_options=["Portfolio","Contest-ranked","NUKEM-ranked"]; export_source=st.selectbox("Lineup source",source_options,index=1,key="dk_export_source"); export_results=portfolio if export_source=="Portfolio" and portfolio is not None and not portfolio.empty else contest_results if export_source=="Contest-ranked" and contest_results is not None and not contest_results.empty else results; max_export=min(150,len(export_results)); export_count=st.number_input("Lineups to export",1,max_export,min(20,max_export),1,key="dk_export_count")
         lineup_only=build_lineup_only_csv(sim_players,export_results,int(export_count)); st.download_button("Download DK lineup-only CSV",lineup_only,"nuke_dk_lineups.csv","text/csv")
         entries_upload=st.file_uploader("Upload your DraftKings Entries CSV",type=["csv"],key="dk_entries_upload")

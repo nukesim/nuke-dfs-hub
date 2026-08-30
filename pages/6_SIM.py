@@ -4,7 +4,7 @@ import time
 from nuke_sim import prepare_slate, simulate_player_matrix, generate_lineups, evaluate_lineups, exposure_table, position_exposure_table, flex_exposure_table
 from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
-from nuke_portfolio import build_portfolio, portfolio_summary, PORTFOLIO_ENGINE_VERSION
+from nuke_portfolio import build_portfolio, portfolio_summary, portfolio_player_exposure, portfolio_qb_exposure, PORTFOLIO_ENGINE_VERSION
 from dk_contest_import import parse_payout_upload
 from dk_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
@@ -19,7 +19,7 @@ with st.sidebar:
         fixed_seed=st.checkbox("Use reproducible seed",value=False,help="Off by default: every RUN NUKE SIM click gets a fresh random simulation. Turn this on only when you want to reproduce a specific run.")
         manual_seed=st.number_input("Random seed",1,2147483646,26,1,disabled=not fixed_seed)
     st.divider(); st.subheader("Contest"); field_size=st.number_input("Field size",2,100000,2222,1); entry_fee=st.number_input("Entry fee ($)",.25,10000.,100.,1.); first_prize=st.number_input("1st prize ($)",1.,10000000.,50000.,100.); st.caption("Every generated candidate lineup is contest-simmed automatically."); contest_iters=st.number_input("Contest iterations",50,5000,contest_iters,50)
-    st.divider(); st.subheader("Portfolio"); portfolio_size=st.number_input("Portfolio size",1,150,150,1); max_overlap=st.slider("Max player overlap",4,8,7,1); path_balance=st.slider("Path diversification",0.,3.,1.25,.25); st.caption(f"{PORTFOLIO_ENGINE_VERSION}: tournament upside + controlled concentration. Duplication is not used to select your portfolio.")
+    st.divider(); st.subheader("Portfolio"); portfolio_size=st.number_input("Portfolio size",1,150,150,1); max_overlap=st.slider("Max player overlap",4,8,7,1); path_balance=st.slider("Path diversification",0.,3.,1.25,.25); max_player_exp=st.slider("Max player exposure %",10,100,45,5); max_qb_exp=st.slider("Max QB exposure %",5,100,30,5); st.caption(f"{PORTFOLIO_ENGINE_VERSION}: tournament upside + controlled concentration. Duplication is not used to select your portfolio.")
 
 st.subheader("🏈 Current Slate")
 salary_upload=st.file_uploader("Optional: upload a different DraftKings NFL salary CSV",type=["csv"],help="Leave this empty to use the built-in current weekly slate.")
@@ -52,7 +52,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         st.write(f"Generated {len(lineups):,} unique candidates."); stage=time.perf_counter(); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes with {ENGINE_VERSION}..."); matrix=simulate_player_matrix_v21(players,int(sims),int(seed)); st.write(f"Football simulation: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write("3/5 · Ranking outcomes and assigning paths..."); results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix)); exposure=exposure_table(players,results,int(exposure_n)); st.write(f"Ranking + paths: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override,players=players); st.write(f"Contest simulation: {time.perf_counter()-stage:.1f}s")
-        stage=time.perf_counter(); st.write(f"5/5 · Building {PORTFOLIO_ENGINE_VERSION} portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance)); portfolio_paths,portfolio_stats=portfolio_summary(portfolio); pexposure=path_exposure(portfolio,len(portfolio)); st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")
+        stage=time.perf_counter(); st.write(f"5/5 · Building {PORTFOLIO_ENGINE_VERSION} portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0); portfolio_paths,portfolio_stats=portfolio_summary(portfolio); pexposure=path_exposure(portfolio,len(portfolio)); st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")
         run_seconds=time.perf_counter()-run_started
         for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds}.items(): st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
@@ -67,7 +67,26 @@ if results is not None and not results.empty:
             contest_show=contest_dk[[c for c in left+stats if c in contest_dk.columns]].copy(); st.dataframe(contest_show,use_container_width=True,hide_index=True); st.download_button("Download Contest SIM + DK Lineups CSV",contest_show.to_csv(index=False).encode("utf-8-sig"),"nuke_contest_sim_dk_lineups.csv","text/csv")
     with tab2:
         if portfolio is not None and not portfolio.empty:
-            p1,p2,p3,p4=st.columns(4); p1.metric("Lineups",int(portfolio_stats.get("lineups",0))); p2.metric("Paths Covered",int(portfolio_stats.get("paths",0))); p3.metric("QBs Used",int(portfolio_stats.get("qbs",0))); p4.metric("Avg Sim ROI",f"{float(portfolio_stats.get('avg_roi',0)):.1f}%"); st.caption(str(portfolio_stats.get("engine",PORTFOLIO_ENGINE_VERSION))); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True); st.dataframe(portfolio.drop(columns=["_indices"],errors="ignore"),use_container_width=True,hide_index=True)
+            st.subheader("Portfolio Manager")
+            st.caption("Change these controls and rebuild the portfolio instantly from the existing contest-simmed candidate pool — no football re-simulation required.")
+            pc1,pc2,pc3,pc4,pc5=st.columns(5)
+            manage_size=pc1.number_input("Portfolio lineups",1,min(150,len(contest_results)),min(int(portfolio_stats.get("requested_lineups",len(portfolio))),min(150,len(contest_results))),1,key="manage_portfolio_size")
+            manage_overlap=pc2.slider("Max overlap",4,8,int(max_overlap),1,key="manage_overlap")
+            manage_player=pc3.slider("Max player %",10,100,int(round(100*float(portfolio_stats.get("max_player_exposure",.45)))),5,key="manage_player_exp")
+            manage_qb=pc4.slider("Max QB %",5,100,int(round(100*float(portfolio_stats.get("max_qb_exposure",.30)))),5,key="manage_qb_exp")
+            manage_path=pc5.slider("Path diversity",0.0,3.0,float(path_balance),0.25,key="manage_path_balance")
+            if st.button("🧬 REBUILD PORTFOLIO",type="primary",use_container_width=True,key="rebuild_portfolio"):
+                new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0)
+                new_paths,new_stats=portfolio_summary(new_portfolio)
+                st.session_state["nuke_portfolio"]=new_portfolio; st.session_state["nuke_portfolio_paths"]=new_paths; st.session_state["nuke_portfolio_stats"]=new_stats; st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio)); st.rerun()
+
+            requested=int(portfolio_stats.get("requested_lineups",len(portfolio)))
+            if len(portfolio)<requested: st.warning(f"Exposure/overlap constraints allowed only {len(portfolio)} of {requested} requested lineups. Raise a cap or overlap limit to fill the portfolio.")
+            p1,p2,p3,p4=st.columns(4); p1.metric("Lineups",int(portfolio_stats.get("lineups",0))); p2.metric("Paths Covered",int(portfolio_stats.get("paths",0))); p3.metric("QBs Used",int(portfolio_stats.get("qbs",0))); p4.metric("Avg Sim ROI",f"{float(portfolio_stats.get('avg_roi',0)):.1f}%"); st.caption(str(portfolio_stats.get("engine",PORTFOLIO_ENGINE_VERSION)))
+            st.markdown("#### Portfolio Exposure")
+            pe=portfolio_player_exposure(sim_players,portfolio); qe=portfolio_qb_exposure(portfolio); ec1,ec2=st.columns([2,1]); ec1.dataframe(pe,use_container_width=True,hide_index=True,height=420); ec2.dataframe(qe,use_container_width=True,hide_index=True,height=420)
+            st.markdown("#### Path Mix"); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True)
+            st.markdown("#### Selected Lineups"); st.dataframe(portfolio.drop(columns=["_indices"],errors="ignore"),use_container_width=True,hide_index=True)
     with tab3:
         show=results.drop(columns=["_indices"],errors="ignore"); st.dataframe(show.head(150),use_container_width=True,hide_index=True); st.download_button("Download NUKEM lineup results CSV",show.to_csv(index=False).encode("utf-8-sig"),"nuke_sim_results.csv","text/csv")
     with tab4:
@@ -93,4 +112,4 @@ if results is not None and not results.empty:
                 filled,info=fill_entries_csv(entries_upload.getvalue(),sim_players,export_results,int(export_count)); st.success(f"Filled {info['entries_filled']} DraftKings entries."); st.download_button("⬇️ Download DraftKings Upload CSV",filled,"nuke_draftkings_upload.csv","text/csv",type="primary")
             except Exception as e: st.error(f"Could not build DraftKings upload file: {e}")
     with tab8:
-        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Portfolio selection emphasizes tournament upside, ceiling, correlation, path diversity and controlled concentration. Predicted duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Portfolio selection emphasizes tournament upside, ceiling, correlation, path diversity and controlled concentration. Predicted duplication is not part of portfolio selection. Player/QB exposure caps can be adjusted after a SIM without rerunning the football engine.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")

@@ -1,26 +1,9 @@
 name: Batch Player Pool Patch
 on:
-  push:
-    branches: [main]
-permissions:
-  contents: write
+  workflow_dispatch:
 jobs:
-  patch:
-    if: github.actor != 'github-actions[bot]'
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Patch player pool to batch edits
-        run: |
-          python tools/batch_pool_patch.py
-          python -m py_compile pages/6_SIM.py
-      - name: Commit patch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pages/6_SIM.py
-          git diff --cached --quiet || git commit -m "Batch player pool edits before refresh"
-          git push
+      - run: echo "One-shot migration completed."

@@ -10,6 +10,7 @@ from dk_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_col
 from default_slate import load_default_slate, SLATE_LABEL
 from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION
 from nuke_combos import combo_exposure_table
+from nuke_game_pool import game_environment, style_environment
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption(f"Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub · {ENGINE_VERSION}.")
 with st.sidebar:
@@ -39,10 +40,45 @@ else: st.caption("No payout file uploaded — NUKE will use the modeled GPP payo
 try: players=prepare_slate(raw_slate)
 except Exception as e: st.error(f"Could not read this slate: {e}"); st.stop()
 c1,c2,c3,c4,c5=st.columns(5); c1.metric("Players",len(players)); c2.metric("Teams",players.Team.nunique()); c3.metric("Games",players.Game.nunique()); c4.metric("Salary Floor",f"${int(min_salary):,}"); c5.metric("Slate",slate_source)
-st.subheader("Player / Injury / Role Overrides"); st.caption("NUKE automatically infers depth roles. Manual controls are optional emergency overrides.")
-editor=players[["Name","Position","Team","Salary","Game"]].copy(); editor.insert(0,"Active",True); editor["Role"]="AUTO"; editor["Usage x"]=1.0
-edited=st.data_editor(editor,use_container_width=True,hide_index=True,disabled=["Name","Position","Team","Salary","Game"],column_config={"Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]),"Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f")})
-mask=edited.Active.fillna(False).astype(bool).to_numpy(); players=players.loc[mask].copy().reset_index(drop=True); ae=edited.loc[mask].reset_index(drop=True); players["role_override"]=ae.Role.fillna("AUTO").astype(str).str.upper().values; players["usage_multiplier"]=pd.to_numeric(ae["Usage x"],errors="coerce").fillna(1).clip(.25,2.25).values
+
+st.subheader("🎮 Game-by-Game Player Pool")
+st.caption("Work the slate one game at a time. Include/remove players and add a personal pre-sim Boost. Boost changes candidate-lineup generation only — it does NOT change the player's simulated fantasy points.")
+env=game_environment(players)
+if not env.empty:
+    st.caption("Team/Game totals below are projection-free DK salary-market estimates until a live sportsbook feed is connected. Rank 1 = strongest on the slate.")
+pool_state=st.session_state.get("nuke_pregame_pool",{})
+updated_state={}
+for game in players.Game.drop_duplicates().tolist():
+    gp=players[players.Game.eq(game)].copy()
+    teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
+    label=" vs ".join(teams[:2]) if len(teams)>=2 else str(game)
+    with st.expander(f"🏈 {label}",expanded=False):
+        ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
+        if not ge.empty:
+            env_show=ge[["Team","Opponent","Team Total","Team Total Rank","Game Total","Game Total Rank"]]
+            st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
+        rows=[]
+        for idx,row in gp.iterrows():
+            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+            saved=pool_state.get(key,{})
+            rows.append({"_row":int(idx),"_key":key,"Include":bool(saved.get("include",True)),"Player":row.Name,"Pos":row.Position,"Team":row.Team,"Salary":int(row.Salary),"Auto Role":row.auto_role,"Boost":float(saved.get("boost",0.0)),"Role":str(saved.get("role","AUTO")),"Usage x":float(saved.get("usage",1.0))})
+        edit_df=pd.DataFrame(rows).set_index("_row")
+        edited_game=st.data_editor(edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,disabled=["Player","Pos","Team","Salary","Auto Role"],column_config={"Include":st.column_config.CheckboxColumn("Include"),"Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f",help="Personal preference only. Changes how often this player appears in candidate generation, not simulated fantasy points."),"Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]),"Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f",help="Changes the football simulation itself. Leave at 1.00 unless you believe the player's actual role/usage changes.")},key=f"game_pool_{str(game)}")
+        for idx,erow in edited_game.iterrows():
+            key=str(edit_df.loc[idx,"_key"])
+            updated_state[key]={"include":bool(erow["Include"]),"boost":float(erow["Boost"]),"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+st.session_state["nuke_pregame_pool"]=updated_state
+active_rows=[]
+for _,row in players.iterrows():
+    key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+    cfg=updated_state.get(key,{"include":True,"boost":0.0,"role":"AUTO","usage":1.0})
+    if cfg.get("include",True):
+        r=row.copy(); r["generation_boost"]=float(cfg.get("boost",0.0)); r["role_override"]=str(cfg.get("role","AUTO")).upper(); r["usage_multiplier"]=float(cfg.get("usage",1.0)); active_rows.append(r)
+players=pd.DataFrame(active_rows).reset_index(drop=True) if active_rows else players.iloc[0:0].copy()
+if not players.empty:
+    gb=pd.to_numeric(players.generation_boost,errors="coerce").fillna(0)
+    st.caption(f"Active pool: {len(players):,} players · Boosted: {(gb>0).sum():,} · Reduced/Faded: {(gb<0).sum():,}")
+
 if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     run_started=time.perf_counter(); seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1
     if len(players)<9: st.error("Not enough active players."); st.stop()
@@ -54,7 +90,8 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         stage=time.perf_counter(); st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override,players=players); st.write(f"Contest simulation: {time.perf_counter()-stage:.1f}s")
         stage=time.perf_counter(); st.write(f"5/5 · Building {PORTFOLIO_ENGINE_VERSION} portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0,players=players,max_team_exposure=float(max_team_exp)/100.0,max_game_exposure=float(max_game_exp)/100.0); portfolio_paths,portfolio_stats=portfolio_summary(portfolio); pexposure=path_exposure(portfolio,len(portfolio)); st.write(f"Portfolio build: {time.perf_counter()-stage:.1f}s")
         run_seconds=time.perf_counter()-run_started
-        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_player_takes":{}}.items(): st.session_state[k]=v
+        initial_takes={int(i):{"boost":float(b),"min":0.0,"max":float(max_player_exp)/100.0} for i,b in enumerate(pd.to_numeric(players.get("generation_boost",0),errors="coerce").fillna(0)) if abs(float(b))>1e-9}
+        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_player_takes":initial_takes}.items(): st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
     st.success(f"Total run time: {run_seconds:.1f} seconds")
 results=st.session_state.get("nuke_sim_results"); sim_players=st.session_state.get("nuke_sim_players"); exposure=st.session_state.get("nuke_sim_exposure"); pexposure=st.session_state.get("nuke_path_exposure"); contest_results=st.session_state.get("nuke_contest_results"); contest_summary=st.session_state.get("nuke_contest_summary",{}); portfolio=st.session_state.get("nuke_portfolio"); portfolio_paths=st.session_state.get("nuke_portfolio_paths"); portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
@@ -166,4 +203,4 @@ if results is not None and not results.empty:
                 filled,info=fill_entries_csv(entries_upload.getvalue(),sim_players,export_results,int(export_count)); st.success(f"Filled {info['entries_filled']} DraftKings entries."); st.download_button("⬇️ Download DraftKings Upload CSV",filled,"nuke_draftkings_upload.csv","text/csv",type="primary")
             except Exception as e: st.error(f"Could not build DraftKings upload file: {e}")
     with tab8:
-        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only. V5 adds team/game exposure caps, QB-stack exposure reporting, and Portfolio Health concentration diagnostics. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+        st.markdown(f"""**Football engine:** {ENGINE_VERSION}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5 adds team/game exposure caps, QB-stack exposure reporting, and Portfolio Health concentration diagnostics. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")

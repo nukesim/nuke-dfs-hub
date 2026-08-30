@@ -64,7 +64,7 @@ if results is not None and not results.empty:
             st.download_button("Download Contest SIM + DK Lineups CSV",contest_show.to_csv(index=False).encode("utf-8-sig"),"nuke_contest_sim_dk_lineups.csv","text/csv")
     with tab2:
         if portfolio is not None and not portfolio.empty:
-            p1,p2,p3,p4=st.columns(4); p1.metric("Lineups",int(portfolio_stats.get("lineups",0))); p2.metric("Paths Covered",int(portfolio_stats.get("paths",0))); p3.metric("Avg Sim ROI",f"{float(portfolio_stats.get('avg_roi',0)):.1f}%"); p4.metric("Avg Duplicates",f"{float(portfolio_stats.get('avg_dup',0)):.2f}%"); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True); st.dataframe(portfolio.drop(columns=["_indices"],errors="ignore"),use_container_width=True,hide_index=True)
+            p1,p2,p3,p4=st.columns(4); p1.metric("Lineups",int(portfolio_stats.get("lineups",0))); p2.metric("Paths Covered",int(portfolio_stats.get("paths",0))); p3.metric("Avg Sim ROI",f"{float(portfolio_stats.get('avg_roi',0)):.1f}%"); p4.metric("Avg Duplicates",f"{float(portfolio_stats.get('avg_dup',0)):.2f}"); st.dataframe(portfolio_paths,use_container_width=True,hide_index=True); st.dataframe(portfolio.drop(columns=["_indices"],errors="ignore"),use_container_width=True,hide_index=True)
     with tab3:
         show=results.drop(columns=["_indices"],errors="ignore"); st.dataframe(show.head(150),use_container_width=True,hide_index=True); st.download_button("Download NUKEM lineup results CSV",show.to_csv(index=False).encode("utf-8-sig"),"nuke_sim_results.csv","text/csv")
     with tab4:

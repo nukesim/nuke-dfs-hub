@@ -76,36 +76,29 @@ def game_environment(players):
     return out
 
 
-def rank_background(value, max_rank):
-    """Return green->yellow->red background for rank 1..N across the full slate."""
+def rank_background(value, max_rank=None):
+    """Color slate ranks intuitively: elite green, middle yellow, weak red.
+
+    Game cards display only one matchup at a time, so their local maximum rank is not a
+    valid color scale. Using rank bands keeps #1/#2/#3 green even inside a two-row card.
+    """
     try:
-        rank = float(value)
-        n = max(1.0, float(max_rank))
+        rank = int(float(value))
     except Exception:
         return ""
-    pct = 1.0 - (rank - 1.0) / max(1.0, n - 1.0)
-    if pct >= 0.67:
+    if rank <= 3:
         return "background-color: rgba(25,195,125,.35); color: white; font-weight: 800"
-    if pct >= 0.34:
+    if rank <= 7:
         return "background-color: rgba(242,201,76,.28); color: white; font-weight: 800"
     return "background-color: rgba(255,93,93,.30); color: white; font-weight: 800"
 
 
 def style_environment(df, slate_max_team_rank=None, slate_max_game_rank=None):
-    """Style a game slice using slate-wide rank ranges, not the slice's local max.
-
-    A single expanded game contains only two team ranks and one duplicated game rank.
-    Using that tiny slice to choose the color scale incorrectly makes, for example,
-    Game Rank #2 appear red. Callers can pass the full-slate maxima so Rank #2 stays
-    green when it is genuinely the second-best game on the slate.
-    """
     if df is None or df.empty:
         return df
-    max_team = int(slate_max_team_rank) if slate_max_team_rank is not None else int(df["Team Total Rank"].max()) if "Team Total Rank" in df else 1
-    max_game = int(slate_max_game_rank) if slate_max_game_rank is not None else int(df["Game Total Rank"].max()) if "Game Total Rank" in df else 1
     return (
         df.style
         .format({"Team Total": "{:.1f}", "Game Total": "{:.1f}"})
-        .map(lambda v: rank_background(v, max_team), subset=["Team Total Rank"])
-        .map(lambda v: rank_background(v, max_game), subset=["Game Total Rank"])
+        .map(rank_background, subset=["Team Total Rank"])
+        .map(rank_background, subset=["Game Total Rank"])
     )

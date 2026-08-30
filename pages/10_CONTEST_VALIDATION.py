@@ -6,18 +6,19 @@ from nuke_contest_validation import (
     contest_structure, ownership_summary, compare_modeled_ownership,
 )
 from nuke_public_contests import PUBLIC_CONTESTS, load_public_contest
+from nuke_historical_dk import recover_contest_draftables
 
 st.set_page_config(page_title="NUKE Contest Validation",page_icon="🏁",layout="wide")
 st.title("🏁 NUKE CONTEST VALIDATION LAB")
-st.caption("Validate the contest layer against real DraftKings contest exports: field scoring, duplication, ownership, payouts, and eventually NUKE ranking/ROI. Player Engine V2.1 validation is separate and already complete.")
+st.caption("Validate the contest layer against real DraftKings fields, then recover the historical salary slate for blind NUKE backtesting when the archive supports it.")
 
 source_mode=st.radio("Historical contest source",["Built-in public archive","Upload my own CSVs"],horizontal=True)
-
-results=pd.DataFrame(); contests=pd.DataFrame(); ownership=pd.DataFrame(); modeled_file=None; source_note=""
+results=pd.DataFrame(); contests=pd.DataFrame(); ownership=pd.DataFrame(); modeled_file=None; source_note=""; cfg={}
 
 if source_mode=="Built-in public archive":
-    st.info("No files required. NUKE loads preserved public DraftKings standings archives directly from GitHub. These old exports combine the full contest field and player ownership in one CSV.")
-    label=st.selectbox("Archived contest",list(PUBLIC_CONTESTS.keys()),index=1)
+    st.info("No files required. NUKE loads preserved public DraftKings standings archives directly from GitHub.")
+    labels=list(PUBLIC_CONTESTS.keys())
+    label=st.selectbox("Archived contest",labels,index=0)
     if st.button("🏁 LOAD HISTORICAL CONTEST",type="primary",use_container_width=True):
         try:
             with st.spinner("Loading and parsing the archived DraftKings field..."):
@@ -32,10 +33,10 @@ if source_mode=="Built-in public archive":
         results=st.session_state.get("cv_public_results",pd.DataFrame())
         ownership=st.session_state.get("cv_public_ownership",pd.DataFrame())
         cfg=st.session_state.get("cv_public_cfg",{})
-        source_note=f"Public archive · contest {cfg.get('contest_id','')} · {cfg.get('source','')}"
+        source_note=f"Public archive · {cfg.get('name','')} · contest {cfg.get('contest_id','')} · {cfg.get('date','')} · {cfg.get('source','')}"
     modeled_file=st.file_uploader("Optional: NUKE/player modeled ownership CSV",type=["csv"],key="cv_modeled_public")
 else:
-    st.info("Manual mode supports the three CSVs produced by the DraftKings_Scraper format: contests.csv, contestResults.csv, and contestOwnership.csv.")
+    st.info("Manual mode supports contests.csv, contestResults.csv, and contestOwnership.csv.")
     c1,c2,c3=st.columns(3)
     contest_file=c1.file_uploader("contests.csv",type=["csv"],key="cv_contests")
     results_file=c2.file_uploader("contestResults.csv",type=["csv"],key="cv_results")
@@ -70,14 +71,17 @@ if not results.empty:
     f.metric("Duplicate Entries",f"{s.get('duplicate_lineups',0):,}")
 
     if s.get("entries",0)<1000:
-        st.warning("This archive has fewer than 1,000 valid entries. Treat it as a parser/diagnostic contest, not as primary large-field GPP validation.")
+        st.warning("This archive has fewer than 1,000 valid entries. Treat it as a parser/diagnostic contest, not primary large-field validation.")
     else:
-        st.success(f"Large-field archive loaded: {s.get('entries',0):,} valid DraftKings entries. This clears the 1,000-entry minimum for contest-structure testing.")
+        dup_rate=100.0*s.get("duplicate_lineups",0)/max(1,s.get("entries",0))
+        st.success(f"Large-field archive loaded: {s.get('entries',0):,} valid entries. {dup_rate:.1f}% of entries are involved in duplicated lineups.")
 
-    if not meta.empty:
-        st.subheader("Contest Metadata")
-        show_cols=[x for x in ["name","entries","entry_fee","total_prizes","week","year","date"] if x in meta.columns]
-        st.dataframe(meta[show_cols],use_container_width=True,hide_index=True)
+    if cfg:
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Contest",cfg.get("name","Unknown"))
+        m2.metric("Entry Fee",f"${cfg.get('entry_fee',0):,.2f}")
+        m3.metric("Advertised Prizes",f"${cfg.get('advertised_prizes',0):,.0f}")
+        m4.metric("Slate Type",str(cfg.get("season_type","unknown")).title())
 
     st.subheader("Actual Field Results")
     cols=[x for x in ["place","points","payout","lineup","roster_size"] if x in r.columns]
@@ -85,8 +89,7 @@ if not results.empty:
 
     if not o.empty:
         st.subheader("Actual DraftKings Ownership")
-        os=ownership_summary(o)
-        st.dataframe(os,use_container_width=True,hide_index=True)
+        st.dataframe(ownership_summary(o),use_container_width=True,hide_index=True)
         st.dataframe(o.sort_values("drafted",ascending=False)[["player","pos","drafted","points"]].head(150),use_container_width=True,hide_index=True)
 
         if modeled_file is not None:
@@ -101,20 +104,37 @@ if not results.empty:
                     x3.metric("Ownership Bias",f"{summary['bias']:+.2f} pts")
                     x4.metric("Correlation",f"{summary['corr']:.3f}")
                     st.dataframe(detail,use_container_width=True,hide_index=True)
-                else:
-                    st.warning("No player names matched between the modeled file and actual ownership file.")
             except Exception as e:
                 st.error(f"Could not compare modeled ownership: {e}")
 
-    st.subheader("What this validates now")
-    st.markdown("""
-- Actual field score distribution: winner, top-1%, median, and top-20% thresholds.
-- Actual lineup duplication and unique-lineup counts.
-- Actual player ownership by contest and position.
-- Preserved historical lineups for every entry in the archive.
-- Optional ownership-model accuracy against the real DraftKings field.
+    st.divider()
+    st.subheader("🕰️ Historical Slate Reconstruction")
+    st.write("NUKE now attempts to recover the original DraftKings draft group and salary slate directly from DraftKings' public contest/draftables API. We do not fabricate historical salaries if DraftKings no longer retains them.")
 
-**Important:** these archived combined standings files do not preserve the original payout ladder, and contest-structure validation is not the same thing as validating NUKE Sim ROI. The next layer is reconstructing the exact historical salary slate, running V2.1 blind, and testing whether NUKE Score / Contest Rank rank the historically stronger lineups higher.
-""")
+    if st.button("RECOVER ORIGINAL DK SALARY SLATE",use_container_width=True):
+        with st.spinner("Querying DraftKings historical contest and draftables endpoints..."):
+            slate,recovery=recover_contest_draftables(selected)
+        st.session_state[f"cv_recovery_{selected}"]=recovery
+        st.session_state[f"cv_slate_{selected}"]=slate
+
+    recovery=st.session_state.get(f"cv_recovery_{selected}")
+    slate=st.session_state.get(f"cv_slate_{selected}",pd.DataFrame())
+    if recovery:
+        if recovery.get("recovered") and not slate.empty:
+            st.success(f"Recovered the original DraftKings salary slate: {len(slate):,} draftable players. Draft group {recovery.get('draft_group_id','')}.")
+            st.dataframe(slate.sort_values("salary",ascending=False) if "salary" in slate.columns else slate,use_container_width=True,hide_index=True)
+            st.download_button("Download recovered historical slate",slate.to_csv(index=False).encode("utf-8"),f"DKSalaries_{selected}_recovered.csv","text/csv")
+        else:
+            st.warning(f"Exact salary slate could not be recovered from DraftKings: {recovery.get('error','historical data unavailable')}")
+
+    st.subheader("Blind NUKE Backtest Status")
+    if cfg.get("season_type")=="preseason":
+        st.warning("This 15,060-entry archive is PRESEASON (Aug. 11, 2017). It is valid for field structure, ownership, duplication and rank-distribution testing, but Football Engine V2.1 was calibrated/validated on regular-season NFL. I am deliberately NOT calling a V2.1 preseason run a valid model backtest.")
+    elif not slate.empty:
+        st.success("This contest is eligible for the next blind V2.1 backtest because an exact salary slate is available and the slate type is compatible.")
+    else:
+        st.info("Blind V2.1 ranking remains blocked until the exact pregame salary slate is recovered. No actual ownership or final fantasy points will be fed into lineup generation because that would leak the answer into the test.")
+
+    st.caption("Current result: this archive gives NUKE a legitimate 15,060-entry real-field target. The remaining requirement for a true outcome backtest is a regular-season contest with its exact historical DK salary slate. The recovery button above tests whether DraftKings still exposes that slate without inventing missing data.")
 else:
     st.caption("Choose a built-in archive and click LOAD HISTORICAL CONTEST, or switch to manual CSV upload.")

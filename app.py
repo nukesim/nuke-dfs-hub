@@ -8,6 +8,7 @@ import unicodedata
 import numpy as np
 from itertools import combinations
 from pathlib import Path
+from default_slate import load_default_slate, SLATE_LABEL
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
 
@@ -1053,7 +1054,8 @@ def normalize(df):
             if n.lower() in cm:return cm[n.lower()]
         return None
     cp=f("Position","Roster Position"); cnid=f("Name + ID","Name+ID","Name + Id")
-    cn=f("Name"); cid=f("ID","Id"); cs=f("Salary"); cg=f("Game Info","GameInfo")
+    cn=f("Name"); cid=f("ID","Id"); cs=f("Salary"); cg=f("Game Info","GameInfo","game_id","Game","game")
+    co=f("Opponent","Opp","opponent","opp")
     ct=f("TeamAbbrev","Team Abbrev","Team")
     miss=[]
     if not cp:miss.append("Position")
@@ -1074,7 +1076,7 @@ def normalize(df):
     o["Game Info"]=df[cg].fillna("").astype(str) if cg else ""
     o["Start"]=o["Game Info"].map(parse_start_time)
     o["Team"]=df[ct].fillna("").astype(str).str.upper().str.strip()
-    o["Opp"]=[opp_from_game(t,g) for t,g in zip(o["Team"],o["Game Info"])]
+    o["Opp"]=df[co].fillna("").astype(str).str.upper().str.strip().values if co else [opp_from_game(t,g) for t,g in zip(o["Team"],o["Game Info"])]
     o=o[o["Position"].isin(["QB","RB","WR","TE","DST"])]
     return o[o["Salary"]>0].drop_duplicates("Name + ID").reset_index(drop=True)
 
@@ -1660,23 +1662,30 @@ st.caption("Slate Intel • Player Pool • QB Planning • Multi-Lineup Hand Bu
 with st.sidebar:
     st.markdown('<div class="nuke-section-kicker">NUKE CONTROL PANEL</div>',unsafe_allow_html=True)
     st.subheader("Slate")
-    up=st.file_uploader("DraftKings salary CSV",type="csv")
-    if up is not None:
-        # only re-parse when the upload filename changes or no slate exists
-        if st.session_state.slate is None or st.session_state.slate_name!=up.name:
-            try:
-                sl=normalize(pd.read_csv(up))
-                st.session_state.slate=sl;st.session_state.slate_name=up.name
-                valid_ids=set(sl["Name + ID"])
-                st.session_state.pool_ids={x for x in st.session_state.pool_ids if x in valid_ids}
-                st.session_state.pending_pool_ids={x for x in st.session_state.pending_pool_ids if x in valid_ids}
-                for lu in st.session_state.lineups:
-                    for s in SLOTS:
-                        if lu.get(s) not in valid_ids:lu[s]=None
-                if not st.session_state.pending_pool_ids and st.session_state.pool_ids:
-                    st.session_state.pending_pool_ids=set(st.session_state.pool_ids)
-                st.success(f"{len(sl)} players loaded")
-            except Exception as e:st.error(str(e))
+    up=st.file_uploader("Optional: override current weekly DK slate",type="csv",help="Leave empty to use the same built-in weekly slate as NUKE SIM.")
+    try:
+        source_name=up.name if up is not None else SLATE_LABEL
+        should_load=(st.session_state.slate is None or st.session_state.slate_name!=source_name)
+        if should_load:
+            raw=pd.read_csv(up) if up is not None else load_default_slate()
+            sl=normalize(raw)
+            st.session_state.slate=sl
+            st.session_state.slate_name=source_name
+            valid_ids=set(sl["Name + ID"])
+            st.session_state.pool_ids={x for x in st.session_state.pool_ids if x in valid_ids}
+            st.session_state.pending_pool_ids={x for x in st.session_state.pending_pool_ids if x in valid_ids}
+            for lu in st.session_state.lineups:
+                for slot_name in SLOTS:
+                    if lu.get(slot_name) not in valid_ids:
+                        lu[slot_name]=None
+            if not st.session_state.pending_pool_ids and st.session_state.pool_ids:
+                st.session_state.pending_pool_ids=set(st.session_state.pool_ids)
+        if up is None:
+            st.success(f"Auto-loaded {SLATE_LABEL} · {len(st.session_state.slate):,} players")
+        else:
+            st.info(f"Using uploaded override: {up.name} · {len(st.session_state.slate):,} players")
+    except Exception as e:
+        st.error(f"Could not load slate: {e}")
     st.caption(st.session_state.slate_name)
 
     st.divider()
@@ -1711,7 +1720,7 @@ with st.sidebar:
     st.download_button("Save workspace",workspace(),"nuke_workspace.json","application/json",use_container_width=True)
 
 if st.session_state.slate is None:
-    st.info("Upload your DraftKings NFL salary CSV in the sidebar.")
+    st.info("The built-in weekly slate could not be loaded. Use the optional sidebar override.")
     st.stop()
 
 hub,modeltab,pooltab,qbplantab,buildtab,savedtab,exptab=st.tabs(["HUB","PLAYER MODEL","PLAYER POOL","QB PLAN","BUILD","SAVED LINEUPS","EXPOSURE & COMBOS"])
@@ -1805,7 +1814,7 @@ with modeltab:
 
     model=st.session_state.model_df
     if model is None or model.empty:
-        st.info("Click **LOAD / REFRESH MODEL** once after uploading the DraftKings slate. The app will not fetch historical data until you ask it to.")
+        st.info("Click **LOAD / REFRESH MODEL** once after the weekly slate loads. The app will not fetch historical data until you ask it to.")
     else:
         matched=int((model["Hist Games"]>0).sum())
         m1,m2,m3,m4=st.columns(4)

@@ -1,0 +1,21 @@
+from pathlib import Path
+
+p=Path("pages/6_SIM.py")
+s=p.read_text(encoding="utf-8")
+
+import_anchor="from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game\n"
+import_line="from nuke_portfolio_story import portfolio_story\n"
+if import_line not in s:
+    if import_anchor not in s:
+        raise SystemExit("import anchor not found")
+    s=s.replace(import_anchor,import_anchor+import_line,1)
+
+anchor='''            st.subheader("Portfolio Manager")\n            st.caption("Change these controls and rebuild instantly from the existing contest-simmed candidate pool — no football re-simulation required.")\n'''
+block='''            st.subheader("Portfolio Manager")\n            st.caption("Change these controls and rebuild instantly from the existing contest-simmed candidate pool — no football re-simulation required.")\n\n            story=portfolio_story(sim_players,portfolio)\n            sm=story.get("metrics",{})\n            st.markdown("### 🧠 Portfolio Story")\n            st.caption("What this portfolio is betting on, where it is different from the modeled field, and where concentration risk lives.")\n            s1,s2,s3,s4,s5,s6=st.columns(6)\n            s1.metric("Lineups",f"{int(sm.get('lineups',len(portfolio))):,}")\n            s2.metric("Elite Ceiling",f"{int(sm.get('elite_lineups',0)):,}")\n            s3.metric("Low-Dup Leverage",f"{int(sm.get('leverage_lineups',0)):,}")\n            s4.metric("Top Scenario",str(sm.get('dominant_scenario','UNKNOWN')),delta=f"{float(sm.get('dominant_scenario_pct',0)):.1f}% of portfolio")\n            s5.metric("Top QB",str(sm.get('dominant_qb','UNKNOWN')),delta=f"{float(sm.get('dominant_qb_pct',0)):.1f}% exposure")\n            s6.metric("Top Game",str(sm.get('dominant_game','UNKNOWN')),delta=f"{float(sm.get('dominant_game_pct',0)):.1f}% exposure")\n\n            story_left,story_right=st.columns(2)\n            with story_left:\n                st.markdown("#### Scenario Bets")\n                scenario_df=story.get("scenario_df",pd.DataFrame())\n                if scenario_df is not None and not scenario_df.empty:\n                    st.dataframe(scenario_df.head(12),use_container_width=True,hide_index=True,height=330)\n                else:\n                    st.caption("No scenario labels are available for this portfolio yet.")\n            with story_right:\n                st.markdown("#### Why Lineups Made It")\n                reason_df=story.get("reason_df",pd.DataFrame())\n                if reason_df is not None and not reason_df.empty:\n                    st.dataframe(reason_df,use_container_width=True,hide_index=True,height=330)\n                else:\n                    st.caption("No portfolio-reason labels are available yet.")\n\n            leverage_df=story.get("leverage_df",pd.DataFrame())\n            if leverage_df is not None and not leverage_df.empty:\n                st.markdown("#### ⚡ Portfolio vs Modeled Field")\n                st.caption("Positive leverage = NUKE is using the player more than the projection-free Field Engine ownership prior. Negative leverage = portfolio fade. This is a portfolio stance, not a live ownership projection.")\n                lev1,lev2=st.columns(2)\n                with lev1:\n                    st.markdown("**Largest Overweights**")\n                    st.dataframe(leverage_df.head(12),use_container_width=True,hide_index=True,height=390)\n                with lev2:\n                    st.markdown("**Largest Underweights / Fades**")\n                    st.dataframe(leverage_df.sort_values("Leverage +/-",ascending=True).head(12),use_container_width=True,hide_index=True,height=390)\n\n            story_flags=story.get("flags",[])\n            st.markdown("#### 🚨 Portfolio Risk Check")\n            if story_flags:\n                for flag in story_flags:\n                    st.warning(flag)\n            else:\n                st.success("No major player, team, game, or 3-player-core concentration flags detected.")\n            st.divider()\n'''
+if "### 🧠 Portfolio Story" not in s:
+    if anchor not in s:
+        raise SystemExit("portfolio anchor not found")
+    s=s.replace(anchor,block,1)
+
+p.write_text(s,encoding="utf-8")
+print("portfolio story UI patched")

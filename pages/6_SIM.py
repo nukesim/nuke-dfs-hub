@@ -7,6 +7,7 @@ from nuke_portfolio import build_portfolio, portfolio_summary
 from dk_contest_import import parse_payout_upload
 from dk_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
+from nuke_football_v2 import simulate_player_matrix_v2
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub.")
 with st.sidebar:
@@ -50,7 +51,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     with st.status("NUKE SIM is running...",expanded=True) as status:
         st.write("1/5 · Generating correlated DraftKings candidates..."); lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed))
         if not lineups: status.update(label="No legal lineups found",state="error"); st.stop()
-        st.write(f"Generated {len(lineups):,} unique candidates."); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes..."); matrix=simulate_player_matrix(players,int(sims),int(seed),"NUKEM")
+        st.write(f"Generated {len(lineups):,} unique candidates."); st.write(f"2/5 · Simulating {int(sims):,} correlated football universes..."); matrix=simulate_player_matrix_v2(players,int(sims),int(seed))
         st.write("3/5 · Ranking outcomes and assigning paths..."); results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix)); exposure=exposure_table(players,results,int(exposure_n)); pexposure=path_exposure(results,int(exposure_n))
         st.write(f"4/5 · Contest-simming all {len(results):,} candidates..."); contest_results,contest_summary=simulate_contest(results=results,player_matrix=matrix,field_size=int(field_size),entry_fee=float(entry_fee),first_prize=float(first_prize),iterations=int(contest_iters),seed=int(seed)+97,payouts_override=payouts_override)
         st.write("5/5 · Building path-diversified portfolio..."); portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance)); portfolio_paths,portfolio_stats=portfolio_summary(portfolio)

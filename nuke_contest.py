@@ -11,24 +11,6 @@ def lineup_score_matrix(results, player_matrix):
     return np.stack(cols, axis=1).astype(np.float32)
 
 
-def _legacy_field_weights(results):
-    r = results.reset_index(drop=True)
-    salary = pd.to_numeric(r["Salary"], errors="coerce").fillna(49000).to_numpy(float)
-    nuke = pd.to_numeric(r["NUKE Score"], errors="coerce").fillna(0).to_numpy(float)
-    ceiling = pd.to_numeric(r["Ceiling 95"], errors="coerce").fillna(0).to_numpy(float)
-
-    def z(v):
-        sd = np.std(v)
-        return (v - np.mean(v)) / (sd if sd > 1e-9 else 1.0)
-
-    logit = 0.95 * z(salary) + 0.45 * z(nuke) + 0.25 * z(ceiling)
-    stack = r.get("Stack", pd.Series([""] * len(r))).astype(str)
-    logit += np.where(stack.str.startswith("QB + 1"), 0.18, 0.0)
-    logit = np.clip(logit, -6, 6)
-    w = np.exp(logit)
-    return w / w.sum()
-
-
 def _payout_curve(field_size, entry_fee, first_prize=None, rake=0.15, cash_rate=0.20):
     field_size = max(2, int(field_size))
     entry_fee = max(0.01, float(entry_fee))
@@ -67,12 +49,12 @@ def simulate_contest(
     payouts_override=None,
     players=None,
 ):
-    """Simulate every generated candidate lineup against a projection-free modeled field.
+    """Simulate every candidate lineup against Field Engine V1.
 
-    When `players` is supplied, Field Engine V1 models opponent behavior using only
-    DraftKings salary/role information plus lineup construction. No paid ownership
-    or fantasy projections are required. `user_lineups` is retained only for backwards
-    compatibility and is intentionally ignored.
+    Field Engine V1 is projection-free. With a player table it uses salary rank,
+    inferred role and starter confidence directly. Without one it uses the salary/
+    role-driven candidate pool as an ownership proxy, so existing callers remain
+    compatible. `user_lineups` is retained only for backwards compatibility.
     """
     if results is None or results.empty:
         return pd.DataFrame(), {}
@@ -88,14 +70,8 @@ def simulate_contest(
     iterations = max(50, int(iterations))
     rng = np.random.default_rng(int(seed))
 
-    field_detail = pd.DataFrame(index=r.index)
-    field_diag = {}
-    if players is not None and len(players):
-        weights, field_diag, field_detail = field_weights_v1(r, players)
-        field_model = FIELD_ENGINE_VERSION
-    else:
-        weights = _legacy_field_weights(r)
-        field_model = "Legacy projection-free generated field"
+    weights, field_diag, field_detail = field_weights_v1(r, players)
+    field_model = FIELD_ENGINE_VERSION
 
     if payouts_override is not None:
         payouts = np.asarray(payouts_override, dtype=float)
@@ -163,16 +139,10 @@ def simulate_contest(
     out["Avg Payout"] = np.round(payout_sum / iterations, 2)
     out["Sim ROI %"] = np.round(100 * ((payout_sum / iterations) - entry_fee) / entry_fee, 1)
     out["Field Popularity"] = np.round(100 * weights, 3)
+    for c in field_detail.columns:
+        out[c] = field_detail[c].to_numpy()
 
-    if not field_detail.empty:
-        for c in field_detail.columns:
-            out[c] = field_detail[c].to_numpy()
-
-    contest_score = (
-        out["Sim ROI %"].to_numpy(float)
-        + 12.0 * out["1st %"].to_numpy(float)
-        + 0.35 * out["Top 1%"].to_numpy(float)
-    )
+    contest_score = out["Sim ROI %"].to_numpy(float) + 12.0*out["1st %"].to_numpy(float) + 0.35*out["Top 1%"].to_numpy(float)
     order = np.argsort(-contest_score)
     out = out.iloc[order].reset_index(drop=True)
     out.insert(0, "Contest Rank", np.arange(1, len(out) + 1))

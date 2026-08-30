@@ -11,7 +11,10 @@ from default_slate import load_default_slate, SLATE_LABEL
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide"); st.title("☢️ NUKE SIM"); st.caption("Projection-free NFL DFS outcome + contest simulation inside the NUKE DFS Hub.")
 with st.sidebar:
     st.header("SIM CONTROL ROOM"); preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=1); presets={"QUICK":(300,500,50,300),"STANDARD":(700,1500,75,750),"DEEP":(1400,3000,100,1500)}; candidates,sims,exposure_n,contest_iters=presets[preset]
-    min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10); seed=st.number_input("Random seed",1,999999,26,1)
+    min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10)
+    with st.expander("Advanced settings"):
+        fixed_seed=st.checkbox("Use reproducible seed",value=False,help="Off by default: every RUN NUKE SIM click gets a fresh random simulation. Turn this on only when you want to reproduce a specific run.")
+        manual_seed=st.number_input("Random seed",1,2147483646,26,1,disabled=not fixed_seed)
     st.divider(); st.subheader("Contest"); field_size=st.number_input("Field size",2,100000,2222,1); entry_fee=st.number_input("Entry fee ($)",.25,10000.,100.,1.); first_prize=st.number_input("1st prize ($)",1.,10000000.,50000.,100.); st.caption("Every generated candidate lineup is contest-simmed automatically."); contest_iters=st.number_input("Contest iterations",50,5000,contest_iters,50)
     st.divider(); st.subheader("Portfolio"); portfolio_size=st.number_input("Portfolio size",1,150,150,1); max_overlap=st.slider("Max player overlap",4,8,7,1); path_balance=st.slider("Path diversification",0.,3.,1.25,.25)
 
@@ -41,6 +44,8 @@ editor=players[["Name","Position","Team","Salary","Game"]].copy(); editor.insert
 edited=st.data_editor(editor,use_container_width=True,hide_index=True,disabled=["Name","Position","Team","Salary","Game"],column_config={"Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"]),"Usage x":st.column_config.NumberColumn("Usage x",min_value=.25,max_value=2.25,step=.05,format="%.2f")})
 mask=edited.Active.fillna(False).astype(bool).to_numpy(); players=players.loc[mask].copy().reset_index(drop=True); ae=edited.loc[mask].reset_index(drop=True); players["role_override"]=ae.Role.fillna("AUTO").astype(str).str.upper().values; players["usage_multiplier"]=pd.to_numeric(ae["Usage x"],errors="coerce").fillna(1).clip(.25,2.25).values
 if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
+    # Public-safe default: each click gets a fresh seed, so identical users do not all receive the same portfolio.
+    seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1
     if len(players)<9: st.error("Not enough active players."); st.stop()
     with st.status("NUKE SIM is running...",expanded=True) as status:
         st.write("1/5 · Generating correlated DraftKings candidates..."); lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed))

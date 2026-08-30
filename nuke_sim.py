@@ -36,7 +36,7 @@ def prepare_slate(df):
     for t,opts in aliases.items():
         c=next((c for c in opts if c in df.columns),None); out[t]=df[c] if c else ""
     out.Name=out.Name.fillna("").astype(str).str.replace(r"\s*\(\d+\)\s*$","",regex=True); out.Position=out.Position.map(_norm_pos); out.Salary=pd.to_numeric(out.Salary,errors="coerce").fillna(0).astype(int); out.Team=out.Team.fillna("").astype(str).str.upper().str.strip(); out.Game=out.Game.fillna("").astype(str).str.strip(); out.ID=out.ID.fillna("").astype(str); out.Status=out.Status.fillna("").astype(str).str.upper().str.strip()
-    out=out[out.Position.isin(["QB","RB","WR","TE","DST"])&(out.Salary>0)].reset_index(drop=True); out=out[~out.Status.isin(INACTIVE_STATUSES)].reset_index(drop=True); out["market_score"]=out.groupby("Position")["Salary"].rank(pct=True).fillna(.5); out["role_override"]="AUTO"; out["usage_multiplier"]=1.0
+    out=out[out.Position.isin(["QB","RB","WR","TE","DST"])&(out.Salary>0)].reset_index(drop=True); out=out[~out.Status.isin(INACTIVE_STATUSES)].reset_index(drop=True); out["market_score"]=out.groupby("Position")["Salary"].rank(pct=True).fillna(.5); out["role_override"]="AUTO"; out["usage_multiplier"]=1.0; out["generation_boost"]=0.0
     return _attach_auto_roles(out).reset_index(drop=True)
 
 def _sample_points(row,rng,mode="NUKEM"):
@@ -68,13 +68,12 @@ def generate_lineups(players,n_lineups=600,min_salary=49400,seed=26):
     """Generate legal DK lineups with automatic tournament stack diversification."""
     rng=np.random.default_rng(seed); p=players.reset_index(drop=True)
     if p.empty:return []
-    pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int); market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float)
-    w=np.power(.08+market,3)*np.clip(usage,.35,2.25)*np.clip(auto,.18,1.15); w=np.clip(w,1e-8,None)
+    pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int); market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float); gen_boost=pd.to_numeric(p.get("generation_boost",0.0),errors="coerce").fillna(0).clip(-3,3).to_numpy(float)
+    w=np.power(.08+market,3)*np.clip(usage,.35,2.25)*np.clip(auto,.18,1.15)*np.exp(.34*gen_boost); w=np.clip(w,1e-8,None)
     qbmask=pos=="QB"; qbmask &= p.auto_qb_eligible.fillna(False).to_numpy(bool) if "auto_qb_eligible" in p.columns else qbmask
     pools={k:np.where(qbmask if k=="QB" else pos==k)[0] for k in ["QB","RB","WR","TE","DST"]}; flex=np.where(np.isin(pos,["RB","WR","TE"]))[0]
     if any(len(v)==0 for v in pools.values()):return []
     seen=[]; keys=set(); attempts=0; target=max(40000,int(n_lineups)*220)
-    # Tournament mixture: intentionally creates meaningful QB+2 and bring-back exposure.
     stack_shapes=[(1,0),(1,1),(2,0),(2,1),(2,2)]; shape_probs=np.array([.18,.30,.12,.32,.08])
     while len(seen)<int(n_lineups) and attempts<target:
         attempts+=1; qbids=pools["QB"]; qw=w[qbids]/w[qbids].sum(); qb=int(rng.choice(qbids,p=qw)); nmates,nbring=stack_shapes[int(rng.choice(len(stack_shapes),p=shape_probs))]
@@ -85,7 +84,6 @@ def generate_lineups(players,n_lineups=600,min_salary=49400,seed=26):
         mw=w[mates]/w[mates].sum(); chosen+=list(map(int,rng.choice(mates,nmates,replace=False,p=mw)))
         if nbring:
             avail=opp[~np.isin(opp,chosen)]; ow=w[avail]/w[avail].sum(); chosen+=list(map(int,rng.choice(avail,nbring,replace=False,p=ow)))
-        # Fill position minimums after structural stack pieces are locked.
         for k,minimum in [("RB",2),("WR",3),("TE",1),("DST",1)]:
             have=sum(pos[i]==k for i in chosen); need=max(0,minimum-have)
             ids=pools[k][~np.isin(pools[k],chosen)]
@@ -93,9 +91,8 @@ def generate_lineups(players,n_lineups=600,min_salary=49400,seed=26):
             if need:
                 pw=w[ids]/w[ids].sum(); chosen+=list(map(int,rng.choice(ids,need,replace=False,p=pw)))
         if not chosen:continue
-        # Exactly one FLEX remains after minimums; if stack pieces already created an extra, roster is full.
         while len(chosen)<9:
-            ids=flex[~np.isin(flex,chosen)];
+            ids=flex[~np.isin(flex,chosen)]
             if not len(ids):break
             fw=w[ids]/w[ids].sum(); chosen.append(int(rng.choice(ids,p=fw)))
         if len(chosen)!=9:continue

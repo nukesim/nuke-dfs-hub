@@ -26,3 +26,4 @@ if needle in s and '"Status":st.column_config.TextColumn' not in s:
     s=s.replace(needle,needle+'\n                        "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. OUT/inactive players default to excluded; questionable players remain available."),',1)
 p.write_text(s)
 print('patched availability protection into SIM')
+# trigger 2026-08-31

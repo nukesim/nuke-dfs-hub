@@ -325,8 +325,8 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         st.stop()
     with st.status("NUKE SIM is running...",expanded=True) as status:
         stage=time.perf_counter()
-        st.write("1/5 · Generating correlated DraftKings candidates...")
-        lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed))
+        st.write(f"1/5 · Generating correlated {get_platform(site).name} candidates...")
+        lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed),site=site)
         stage_times["Candidate Generation"]=time.perf_counter()-stage
         st.write(f"Candidate generation: {stage_times['Candidate Generation']:.1f}s")
         if not lineups:

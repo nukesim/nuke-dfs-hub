@@ -207,7 +207,7 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
                 fw=w[ids0]; chosen.append(int(rng.choice(ids0,p=fw/fw.sum())))
             if len(chosen)!=9:continue
             arr=np.asarray(chosen,dtype=int); total=int(sal[arr].sum()); key=tuple(sorted(chosen))
-            if total<min_salary or total>50000 or key in keys or not _valid_lineup(chosen,p,min_salary):continue
+            if total<min_salary or total>salary_cap or key in keys or not _valid_lineup(chosen,p,min_salary,max_salary=salary_cap,site=site):continue
             dst_ids=[i for i in chosen if pos[i]=="DST"]
             if dst_ids:
                 d=dst_ids[0]; opposing=sum((game[i]==game[d]) and (team[i]!=team[d]) and pos[i]!="DST" for i in chosen)

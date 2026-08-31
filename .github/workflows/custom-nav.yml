@@ -1,0 +1,25 @@
+name: Custom Navigation
+on:
+  push:
+    paths:
+      - 'tools/custom_nav_patch.py'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/custom_nav_patch.py
+      - run: python -m py_compile app.py pages/6_SIM.py pages/7_VALIDATION.py pages/8_CALIBRATION.py pages/9_GAUNTLET.py pages/10_CONTEST_VALIDATION.py nuke_nav.py
+      - name: Commit navigation changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py pages/6_SIM.py pages/7_VALIDATION.py pages/8_CALIBRATION.py pages/9_GAUNTLET.py pages/10_CONTEST_VALIDATION.py
+          git diff --cached --quiet || git commit -m "Use clean public sidebar navigation"
+          git push

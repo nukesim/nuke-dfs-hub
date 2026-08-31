@@ -20,6 +20,7 @@ from nuke_portfolio_story import portfolio_story
 from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
 from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
+from nuke_availability import availability_status
 from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
@@ -163,6 +164,20 @@ except Exception as e:
     st.error(f"Could not read this slate: {e}")
     st.stop()
 
+# Automated player availability protection. The scheduled feed is joined before the pool editor.
+players,availability_meta=availability_status(players)
+if availability_meta.get("loaded"):
+    red=int(availability_meta.get("red",0)); yellow=int(availability_meta.get("yellow",0))
+    updated=availability_meta.get("updated","")
+    if red:
+        st.warning(f"🚑 Player Availability · {red} OUT/inactive auto-excluded · {yellow} questionable/doubtful kept in pool" + (f" · Updated {updated}" if updated else ""))
+    else:
+        st.success(f"🚑 Player Availability ✓ · 0 OUT/inactive · {yellow} questionable/doubtful" + (f" · Updated {updated}" if updated else ""))
+    for warning in availability_meta.get("qb_warnings",[]):
+        st.warning(f"⚠️ Starting QB alert: {warning}")
+else:
+    st.info("🚑 Player Availability feed not connected yet — no automatic injury exclusions are being applied.")
+
 c1,c2,c3,c4,c5=st.columns(5)
 c1.metric("Players",len(players))
 c2.metric("Teams",players.Team.nunique())
@@ -204,7 +219,8 @@ if (hub_pool or hub_adjust) and hub_signature!=last_hub_signature:
 
 for _,row in players.iterrows():
     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-    pool_state.setdefault(key,{"include":True,"role":"AUTO","usage":1.0})
+    auto_exclude=bool(row.get("Auto Exclude",False))
+    pool_state.setdefault(key,{"include":not auto_exclude,"role":"AUTO","usage":1.0})
 
 updated_state=dict(pool_state)
 needs_rerun=False
@@ -280,16 +296,17 @@ if selected_game is not None:
                 for idx,row in tp.iterrows():
                     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
                     cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
-                    rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Salary":int(row.Salary),"Auto Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
+                    rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":int(row.Salary),"Auto Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
                 edit_df=pd.DataFrame(rows).set_index("_row")
                 edited_team=st.data_editor(
                     edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
-                    disabled=["Pos","Player","Salary","Auto Role"],
-                    column_order=["Include","Pos","Player","Salary","Auto Role","Role","Usage x"],
+                    disabled=["Pos","Player","Status","Salary","Auto Role"],
+                    column_order=["Include","Pos","Player","Status","Salary","Auto Role","Role","Usage x"],
                     column_config={
                         "Include":st.column_config.CheckboxColumn("Include",width="small"),
                         "Pos":st.column_config.TextColumn("Pos",width="small"),
                         "Player":st.column_config.TextColumn("Player",width="medium"),
+                        "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. OUT/inactive players default to excluded; questionable players remain available."),
                         "Salary":st.column_config.NumberColumn("Salary",format="$%d",width="small"),
                         "Auto Role":st.column_config.TextColumn("Auto Role",width="small"),
                         "Role":st.column_config.SelectboxColumn("Role",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small"),

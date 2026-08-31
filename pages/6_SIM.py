@@ -178,6 +178,21 @@ if availability_meta.get("loaded"):
 else:
     st.info("🚑 Player Availability feed not connected yet — no automatic injury exclusions are being applied.")
 
+# One-stop injury review so users do not have to hunt through every game.
+flagged=players[players["Availability"].astype(str).str.lower().ne("available")].copy() if "Availability" in players.columns else players.iloc[0:0].copy()
+if not flagged.empty:
+    st.subheader("🚑 Injuries & Availability")
+    st.caption("OUT/inactive players default to excluded. Questionable/doubtful players stay available but are flagged for review.")
+    flagged["NUKE Action"]=flagged["Auto Exclude"].map(lambda x: "🔴 EXCLUDED" if bool(x) else "🟡 INCLUDED / REVIEW")
+    cols=[c for c in ["Name","Team","Position","Availability","Availability Detail","NUKE Action"] if c in flagged.columns]
+    show=flagged[cols].copy()
+    rename={"Name":"Player","Position":"Pos","Availability":"Status","Availability Detail":"Detail"}
+    show=show.rename(columns=rename)
+    st.dataframe(show,use_container_width=True,hide_index=True)
+else:
+    if availability_meta.get("loaded"):
+        st.caption("🚑 Injuries & Availability · No flagged players on the current slate.")
+
 c1,c2,c3,c4,c5=st.columns(5)
 c1.metric("Players",len(players))
 c2.metric("Teams",players.Team.nunique())

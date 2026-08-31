@@ -12,3 +12,4 @@ else:
 
 p.write_text(s)
 print('SIM platform switch now clears stale platform-specific results')
+# retrigger 2026-08-31

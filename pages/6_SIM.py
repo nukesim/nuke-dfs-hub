@@ -666,7 +666,8 @@ if results is not None and not results.empty:
                 qshow=qb_pairs if qb_filter=="All QBs" else qb_pairs[qb_pairs.QB.eq(qb_filter)]
                 st.dataframe(qshow.head(100),use_container_width=True,hide_index=True)
     with tab7:
-        st.subheader(f"📤 {cfg.name} Lineup Export")
+        export_platform_name="FanDuel" if site=="FD" else "DraftKings"
+        st.subheader(f"📤 {export_platform_name} Lineup Export")
         source_options=["Portfolio","Contest-ranked","NUKEM-ranked"]
         export_source=st.selectbox("Lineup source",source_options,index=0,key=f"export_source_{site}")
         export_results=portfolio if export_source=="Portfolio" and portfolio is not None and not portfolio.empty else contest_results if export_source=="Contest-ranked" and contest_results is not None and not contest_results.empty else results
@@ -674,14 +675,14 @@ if results is not None and not results.empty:
         export_count=st.number_input("Lineups to export",1,max_export,min(150,max_export),1,key=f"export_count_{site}")
         lineup_only=build_lineup_only_csv(sim_players,export_results,int(export_count),site=site)
         short_site="fd" if site=="FD" else "dk"
-        st.download_button(f"Download {cfg.name} lineup-only CSV",lineup_only,f"nuke_{short_site}_lineups.csv","text/csv")
-        entries_upload=st.file_uploader(f"Upload your {cfg.name} Entries CSV",type=["csv"],key=f"entries_upload_{site}")
+        st.download_button(f"Download {export_platform_name} lineup-only CSV",lineup_only,f"nuke_{short_site}_lineups.csv","text/csv")
+        entries_upload=st.file_uploader(f"Upload your {export_platform_name} Entries CSV",type=["csv"],key=f"entries_upload_{site}")
         if entries_upload is not None:
             try:
                 filled,info=fill_entries_csv(entries_upload.getvalue(),sim_players,export_results,int(export_count),site=site)
-                st.success(f"Filled {info['entries_filled']} {cfg.name} entries.")
-                st.download_button(f"⬇️ Download {cfg.name} Upload CSV",filled,f"nuke_{short_site}_upload.csv","text/csv",type="primary")
+                st.success(f"Filled {info['entries_filled']} {export_platform_name} entries.")
+                st.download_button(f"⬇️ Download {export_platform_name} Upload CSV",filled,f"nuke_{short_site}_upload.csv","text/csv",type="primary")
             except Exception as e:
-                st.error(f"Could not build {cfg.name} upload file: {e}")
+                st.error(f"Could not build {export_platform_name} upload file: {e}")
     with tab8:
         st.markdown(f"""**Football engine:** {engine_version(site)}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5.1 adds marginal path-value concentration control on top of player/team/game caps, QB-stack exposure reporting, and Portfolio Health diagnostics. Path control is soft rather than a forced quota. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")

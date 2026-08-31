@@ -20,3 +20,4 @@ else:
 
 p.write_text(s)
 print('Per-platform workspace persistence applied')
+# trigger 2026-08-31

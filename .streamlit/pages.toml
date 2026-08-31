@@ -1,0 +1,29 @@
+[[pages]]
+path = "app.py"
+name = "Lineup Builder"
+icon = "🏈"
+
+[[pages]]
+path = "pages/6_SIM.py"
+name = "NUKE Sim"
+icon = "☢️"
+
+[[pages]]
+path = "pages/7_VALIDATION.py"
+name = "Model Performance"
+icon = "📊"
+
+[[pages]]
+path = "pages/8_CALIBRATION.py"
+name = "Model Lab"
+icon = "🧠"
+
+[[pages]]
+path = "pages/9_GAUNTLET.py"
+name = "Historical Testing"
+icon = "🧪"
+
+[[pages]]
+path = "pages/10_CONTEST_VALIDATION.py"
+name = "Contest Testing"
+icon = "🏆"

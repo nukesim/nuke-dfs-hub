@@ -1,5 +1,6 @@
 
 import streamlit as st
+from nuke_nav import render_nav
 import pandas as pd
 import json
 import re
@@ -14,6 +15,7 @@ from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, FD_SLATE_LABEL
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
+render_nav()
 
 SLOTS = ["QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX","DST"]
 SLOT_POS = {

@@ -1,6 +1,7 @@
 import time
 import pandas as pd
 import streamlit as st
+from nuke_nav import render_nav
 
 from nuke_sim import prepare_slate
 from nuke_football_v2 import simulate_player_matrix_v2
@@ -9,6 +10,7 @@ from nuke_historical_data import load_nfldfs_2017, available_weeks, historical_w
 from nuke_calibration import fit_position_calibration, apply_position_calibration, summary_comparison, promotion_gate
 
 st.set_page_config(page_title="NUKE Calibration Lab",page_icon="🧬",layout="wide")
+render_nav()
 st.title("🧬 NUKE V2 → V2.1 CALIBRATION LAB")
 st.caption("Train on one block of historical weeks, then judge the candidate only on untouched holdout weeks. The live SIM remains on Football Engine V2 unless the candidate earns promotion after broader validation.")
 

@@ -1,6 +1,7 @@
 import time
 import pandas as pd
 import streamlit as st
+from nuke_nav import render_nav
 
 from nuke_sim import prepare_slate
 from nuke_football_v2 import simulate_player_matrix_v2
@@ -10,6 +11,7 @@ from nuke_crossseason_data import load_rotoguru_season, SOURCE_NAME
 from nuke_calibration import fit_position_calibration, apply_position_calibration, summary_comparison, promotion_gate, calibration_distance
 
 st.set_page_config(page_title="NUKE Cross-Season Gauntlet",page_icon="🧊",layout="wide")
+render_nav()
 st.title("🧊 NUKE V2.1 CROSS-SEASON GAUNTLET")
 st.caption("Freeze calibration learned only from 2017 Weeks 1–8, then test it unchanged on later NFL seasons. Target-season results never refit the candidate.")
 

@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from nuke_nav import render_nav
 
 from nuke_contest_validation import (
     normalize_contests, normalize_results, normalize_ownership,
@@ -9,6 +10,7 @@ from nuke_public_contests import PUBLIC_CONTESTS, load_public_contest
 from nuke_historical_dk import recover_contest_draftables
 
 st.set_page_config(page_title="NUKE Contest Validation",page_icon="🏁",layout="wide")
+render_nav()
 st.title("🏁 NUKE CONTEST VALIDATION LAB")
 st.caption("Validate the contest layer against real DraftKings fields, then recover the historical salary slate for blind NUKE backtesting when the archive supports it.")
 

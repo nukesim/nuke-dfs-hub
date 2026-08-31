@@ -1,6 +1,7 @@
 import time
 import pandas as pd
 import streamlit as st
+from nuke_nav import render_nav
 
 from nuke_sim import prepare_slate
 from nuke_football_v2 import simulate_player_matrix_v2
@@ -11,6 +12,7 @@ from nuke_historical_data import (
 )
 
 st.set_page_config(page_title="NUKE Validation Lab",page_icon="🧪",layout="wide")
+render_nav()
 st.title("🧪 NUKE HISTORICAL VALIDATION LAB")
 st.caption("Backtest Football Engine V2 against completed DraftKings NFL data. The recommended starter-aware lens uses only pre-game salary structure — never actual fantasy points — to approximate the roles NUKE models live.")
 

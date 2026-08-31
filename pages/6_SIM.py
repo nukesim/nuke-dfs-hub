@@ -1,4 +1,5 @@
 import streamlit as st
+from nuke_nav import render_nav
 import pandas as pd
 import numpy as np
 import time
@@ -69,6 +70,7 @@ def candidate_diagnostics(players,lineups,requested,min_salary):
     return {"grade":grade,"score":score,"generated":n,"requested":int(requested),"fill_pct":fill_pct,"unique_qbs":len(qb_names),"games":len(games),"avg_overlap":avg_overlap,"median_overlap":median_overlap,"p95_overlap":p95_overlap,"max_overlap_seen":max_overlap_seen,"max_pair_repeat":max_pair,"max_pair_pct":max_pair_pct,"max_triple_repeat":max_triple,"max_triple_pct":max_triple_pct,"avg_salary":avg_salary,"min_salary":int(min_salary)}
 
 st.set_page_config(page_title="NUKE SIM",page_icon="☢️",layout="wide")
+render_nav()
 st.title("☢️ NUKE SIM")
 st.caption("Projection-free NFL DFS outcome + contest simulation for DraftKings and FanDuel.")
 

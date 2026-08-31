@@ -92,3 +92,4 @@ s=s.replace('uploaded DraftKings slate','selected platform slate')
 
 p.write_text(s)
 print('FanDuel Hub state/autoload fix applied')
+# trigger: 2026-08-31

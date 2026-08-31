@@ -28,9 +28,6 @@ new='''            contest_roster=add_dk_roster_columns(sim_players,contest_resu
             contest_show=contest_roster[[c for c in left+stats if c in contest_roster.columns]].copy()
             st.dataframe(contest_show,use_container_width=True,hide_index=True)
 
-            # FanDuel's edit-entries CSV validates player IDs, not display strings like
-            # "Player Name (133104-12345)". Keep names on-screen, but make the downloaded
-            # FanDuel contest CSV copy/paste safe by writing raw FanDuel IDs in roster cells.
             contest_download=contest_show.copy()
             if site=="FD":
                 fd_slots=pd.DataFrame(
@@ -40,8 +37,8 @@ new='''            contest_roster=add_dk_roster_columns(sim_players,contest_resu
                 for col in ANALYSIS_ROSTER_HEADERS:
                     if col in contest_download.columns and col in fd_slots.columns:
                         contest_download[col]=fd_slots[col].values
-                contest_label="Download Contest SIM + FanDuel Lineups CSV"
-                contest_filename="nuke_contest_sim_fanduel_lineups.csv"
+                contest_label="Download Contest SIM + FanDuel IDs CSV"
+                contest_filename="nuke_contest_sim_fanduel_ids.csv"
             else:
                 contest_label="Download Contest SIM + DraftKings Lineups CSV"
                 contest_filename="nuke_contest_sim_draftkings_lineups.csv"
@@ -96,3 +93,4 @@ elif new2 not in s:
 
 p.write_text(s)
 print('FanDuel export UI and ID-only contest CSV patch applied')
+# retrigger 2026-08-31

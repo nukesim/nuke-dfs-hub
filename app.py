@@ -1075,7 +1075,7 @@ def normalize(df):
             if n.lower() in cm:return cm[n.lower()]
         return None
     cp=f("Position","Roster Position"); cnid=f("Name + ID","Name+ID","Name + Id")
-    cn=f("Name"); cid=f("ID","Id"); cs=f("Salary"); cg=f("Game Info","GameInfo","game_id","Game","game")
+    cn=f("Name","Nickname"); cid=f("ID","Id"); cs=f("Salary"); cg=f("Game Info","GameInfo","game_id","Game","game")
     co=f("Opponent","Opp","opponent","opp")
     ct=f("TeamAbbrev","Team Abbrev","Team")
     miss=[]
@@ -1083,7 +1083,7 @@ def normalize(df):
     if not cs:miss.append("Salary")
     if not ct:miss.append("TeamAbbrev")
     if not cnid and not(cn and cid):miss.append("Name + ID or Name/ID")
-    if miss:raise ValueError("Missing DK columns: "+", ".join(miss))
+    if miss:raise ValueError(f"Missing {get_platform(SITE).name} columns: "+", ".join(miss))
     o=pd.DataFrame()
     o["Position"]=df[cp].map(clean_pos)
     if cnid:

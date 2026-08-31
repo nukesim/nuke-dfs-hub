@@ -13,19 +13,16 @@ for p in files:
     s = p.read_text()
     imp = 'from nuke_nav import render_nav\n'
     if imp not in s:
-        # Put helper import after Streamlit import so all pages stay simple.
         anchor = 'import streamlit as st\n'
         if anchor not in s:
             raise RuntimeError(f'streamlit import not found in {p}')
         s = s.replace(anchor, anchor + imp, 1)
 
     if 'render_nav()' not in s:
-        # Render only after set_page_config, which Streamlit requires to be the first UI command.
         marker = 'st.set_page_config('
         idx = s.find(marker)
         if idx < 0:
             raise RuntimeError(f'set_page_config not found in {p}')
-        # Find the closing parenthesis of this call by counting parens.
         start = idx
         depth = 0
         end = None
@@ -44,3 +41,5 @@ for p in files:
 
     p.write_text(s)
     print(f'patched {p}')
+
+# deploy trigger

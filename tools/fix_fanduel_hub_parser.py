@@ -18,3 +18,4 @@ s=s.replace('if miss:raise ValueError("Missing DK columns: "+", ".join(miss))','
 
 p.write_text(s)
 print('FanDuel Hub parser fixed')
+# trigger

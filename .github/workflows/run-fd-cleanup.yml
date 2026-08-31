@@ -1,0 +1,27 @@
+name: Run FanDuel Cleanup
+on:
+  push:
+    paths:
+      - 'tools/run_fd_cleanup_trigger.txt'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/fix_fd_candidate_site.py
+      - run: python tools/fix_fd_fallback_cap.py
+      - run: python tools/fix_fanduel_export_ui.py
+      - run: python tools/clear_sim_state_on_platform_switch.py
+      - run: python -m py_compile pages/6_SIM.py nuke_sim.py fd_export.py dfs_export.py dfs_platform.py
+      - name: Commit patches
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/6_SIM.py nuke_sim.py
+          git diff --cached --quiet || git commit -m "Apply FanDuel platform cleanup fixes"
+          git push

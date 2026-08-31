@@ -1,0 +1,29 @@
+name: Run NFL Availability Now
+on:
+  push:
+    paths:
+      - '.availability-now'
+permissions:
+  contents: write
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch NFL injuries
+        env:
+          FANTASYPROS_API_KEY: ${{ secrets.FANTASYPROS_API_KEY }}
+          NFL_SEASON: '2026'
+          NFL_WEEK: '1'
+        run: python tools/fetch_nfl_availability.py
+      - name: Commit refreshed availability
+        run: |
+          git config user.name "nuke-data-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/nfl_availability_current.csv
+          git diff --cached --quiet && exit 0
+          git commit -m "Refresh NFL player availability"
+          git push

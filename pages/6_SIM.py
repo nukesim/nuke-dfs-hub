@@ -20,6 +20,7 @@ from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
 from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
 from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS
+from nuke_platform_workspace import switch_workspace, workspace_status
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
@@ -74,20 +75,18 @@ st.caption("Projection-free NFL DFS outcome + contest simulation for DraftKings 
 
 with st.sidebar:
     st.header("SIM CONTROL ROOM")
-    previous_site=st.session_state.get("nuke_sim_active_site")
     site=st.segmented_control("Platform",options=["DK","FD"],format_func=lambda x: "DraftKings" if x=="DK" else "FanDuel",default=st.session_state.get("dfs_site","DK"),key="dfs_site") or "DK"
-    if previous_site is not None and previous_site != site:
-        for key in [
-            "nuke_sim_results","nuke_sim_players","nuke_sim_exposure","nuke_path_exposure",
-            "nuke_contest_results","nuke_contest_summary","nuke_portfolio","nuke_portfolio_paths",
-            "nuke_portfolio_stats","nuke_sim_runtime","nuke_stage_times","nuke_candidate_diagnostics",
-            "nuke_player_takes","nuke_shared_portfolio_rows","nuke_shared_portfolio_version",
-            "nuke_pregame_pool","nuke_pool_editor_version"
-        ]:
-            st.session_state.pop(key,None)
-    st.session_state["nuke_sim_active_site"]=site
+    previous_site,workspace_restored=switch_workspace(st.session_state,site)
     cfg=get_platform(site)
     st.caption(f"{cfg.name} · ${cfg.salary_cap:,} cap · {'1.0 PPR + yardage bonuses' if site=='DK' else '0.5 PPR · no 100/300-yard bonuses'}")
+    dk_saved=workspace_status(st.session_state,"DK")
+    fd_saved=workspace_status(st.session_state,"FD")
+    st.caption(f"Workspace memory · DraftKings {'✓ saved' if dk_saved else 'empty'} · FanDuel {'✓ saved' if fd_saved else 'empty'}")
+    if previous_site is not None and previous_site != site:
+        if workspace_restored:
+            st.success(f"Restored your {cfg.name} SIM workspace.")
+        else:
+            st.info(f"Opened a fresh {cfg.name} workspace. Your {('FanDuel' if site=='DK' else 'DraftKings')} work is saved for this session.")
     preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=0)
     presets={"QUICK":(250,350,50,200),"STANDARD":(400,750,75,350),"DEEP":(700,1200,100,500)}
     candidates,sims,exposure_n,contest_iters=presets[preset]

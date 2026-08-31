@@ -74,7 +74,18 @@ st.caption("Projection-free NFL DFS outcome + contest simulation for DraftKings 
 
 with st.sidebar:
     st.header("SIM CONTROL ROOM")
+    previous_site=st.session_state.get("nuke_sim_active_site")
     site=st.segmented_control("Platform",options=["DK","FD"],format_func=lambda x: "DraftKings" if x=="DK" else "FanDuel",default=st.session_state.get("dfs_site","DK"),key="dfs_site") or "DK"
+    if previous_site is not None and previous_site != site:
+        for key in [
+            "nuke_sim_results","nuke_sim_players","nuke_sim_exposure","nuke_path_exposure",
+            "nuke_contest_results","nuke_contest_summary","nuke_portfolio","nuke_portfolio_paths",
+            "nuke_portfolio_stats","nuke_sim_runtime","nuke_stage_times","nuke_candidate_diagnostics",
+            "nuke_player_takes","nuke_shared_portfolio_rows","nuke_shared_portfolio_version",
+            "nuke_pregame_pool","nuke_pool_editor_version"
+        ]:
+            st.session_state.pop(key,None)
+    st.session_state["nuke_sim_active_site"]=site
     cfg=get_platform(site)
     st.caption(f"{cfg.name} · ${cfg.salary_cap:,} cap · {'1.0 PPR + yardage bonuses' if site=='DK' else '0.5 PPR · no 100/300-yard bonuses'}")
     preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=0)

@@ -54,7 +54,9 @@ def availability_status(players, feed=None):
     latest = ""
     for idx, p in out.iterrows():
         key = (_norm(p.get("Name", "")), str(p.get("Team", "")).upper().strip())
-        r = lookup.get(key) or lookup.get((key[0], ""))
+        r = lookup.get(key)
+        if r is None:
+            r = lookup.get((key[0], ""))
         if r is None:
             continue
         status = str(r.get("status", "") or "").strip()

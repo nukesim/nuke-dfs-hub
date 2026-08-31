@@ -11,6 +11,7 @@ from pathlib import Path
 from default_slate import load_default_slate, SLATE_LABEL
 from nuke_bridge import portable_to_hub_lineup
 from dfs_platform import get_platform
+from fanduel_slate import load_fanduel_slate, FD_SLATE_LABEL
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
 
@@ -346,7 +347,7 @@ if _platform!=st.session_state.get("dfs_site","DK"):
     st.session_state["slate"]=None
     st.session_state["slate_name"]="No slate loaded"
     st.session_state["pool_ids"]=set()
-    st.session_state["saved_lineups"]=[]
+    st.session_state["saved_lineups"]={}
     st.session_state["lineups"]=[empty_lu() for _ in range(MAX_LU)]
     st.rerun()
 SITE=st.session_state.get("dfs_site","DK")
@@ -1682,12 +1683,24 @@ st.caption("Slate Intel • Player Pool • QB Planning • Multi-Lineup Hand Bu
 with st.sidebar:
     st.markdown('<div class="nuke-section-kicker">NUKE CONTROL PANEL</div>',unsafe_allow_html=True)
     st.subheader("Slate")
-    up=st.file_uploader("Optional: override current weekly DK slate",type="csv",help="Leave empty to use the same built-in weekly slate as NUKE SIM.")
+    cfg=get_platform(SITE)
+    default_label=SLATE_LABEL if SITE=="DK" else FD_SLATE_LABEL
+    up=st.file_uploader(
+        f"Optional: override current weekly {cfg.name} slate",
+        type="csv",
+        key=f"hub_slate_upload_{SITE}",
+        help=f"Leave empty to use the repository-backed {cfg.name} weekly slate."
+    )
     try:
-        source_name=up.name if up is not None else SLATE_LABEL
+        source_name=up.name if up is not None else default_label
         should_load=(st.session_state.slate is None or st.session_state.slate_name!=source_name)
         if should_load:
-            raw=pd.read_csv(up) if up is not None else load_default_slate()
+            if up is not None:
+                raw=pd.read_csv(up)
+            elif SITE=="DK":
+                raw=load_default_slate()
+            else:
+                raw=load_fanduel_slate()
             sl=normalize(raw)
             st.session_state.slate=sl
             st.session_state.slate_name=source_name
@@ -1701,11 +1714,11 @@ with st.sidebar:
             if not st.session_state.pending_pool_ids and st.session_state.pool_ids:
                 st.session_state.pending_pool_ids=set(st.session_state.pool_ids)
         if up is None:
-            st.success(f"Auto-loaded {SLATE_LABEL} · {len(st.session_state.slate):,} players")
+            st.success(f"Auto-loaded {default_label} · {len(st.session_state.slate):,} players")
         else:
-            st.info(f"Using uploaded override: {up.name} · {len(st.session_state.slate):,} players")
+            st.info(f"Using uploaded {cfg.name} override: {up.name} · {len(st.session_state.slate):,} players")
     except Exception as e:
-        st.error(f"Could not load slate: {e}")
+        st.error(f"Could not load {cfg.name} slate: {e}")
     st.caption(st.session_state.slate_name)
 
     st.divider()
@@ -1770,7 +1783,7 @@ if shared_rows and shared_ver>0:
             if imported:
                 st.success(f"Imported {imported} NUKE SIM lineups into Saved Lineups" + (f" · skipped {skipped} slate mismatches" if skipped else ""))
             else:
-                st.warning("No SIM lineups matched the Hub slate. Make sure both pages are using the same DraftKings slate.")
+                st.warning("No SIM lineups matched the Hub slate. Make sure both pages are using the same platform slate.")
             st.rerun()
 
 hub,modeltab,pooltab,qbplantab,buildtab,savedtab,exptab=st.tabs(["HUB","PLAYER MODEL","PLAYER POOL","QB PLAN","BUILD","SAVED LINEUPS","EXPOSURE & COMBOS"])
@@ -1780,8 +1793,8 @@ with hub:
     st.subheader("Slate Overview")
 
     a,b,c,d=st.columns(4)
-    a.metric("Games on DK slate",ov["games"])
-    b.metric("Teams on DK slate",ov["teams"])
+    a.metric("Games on selected slate",ov["games"])
+    b.metric("Teams on selected slate",ov["teams"])
     c.metric("Games with betting lines",ov["games_with_lines"])
     d.metric("Average game total","—" if ov["avg_total"] is None else f'{ov["avg_total"]:.1f}')
 
@@ -1815,7 +1828,7 @@ with hub:
             tdf=pd.DataFrame(rows)
             st.dataframe(tdf,hide_index=True,use_container_width=True)
 
-        st.caption("All ranks use only games and teams actually present in the uploaded DraftKings slate.")
+        st.caption("All ranks use only games and teams actually present in the selected platform slate.")
 
     st.divider()
     st.subheader("Saved Portfolio")

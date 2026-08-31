@@ -12,3 +12,4 @@ if new not in s:
 s=s.replace(new,old,1)
 p.write_text(s)
 print('Rolled back workspace persistence patch')
+# trigger 2026-08-31

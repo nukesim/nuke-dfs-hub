@@ -100,7 +100,9 @@ with st.sidebar:
     exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10)
     with st.expander("Advanced settings"):
         fixed_seed=st.checkbox("Use reproducible seed",value=False,help="Off by default: every RUN NUKE SIM click gets a fresh random simulation. Turn this on only when you want to reproduce a specific run.")
-        manual_seed=st.number_input("Random seed",1,2147483646,26,1,disabled=not fixed_seed)
+        if "nuke_manual_seed" not in st.session_state:
+            st.session_state["nuke_manual_seed"]=int(np.random.default_rng().integers(1,2147483647))
+        manual_seed=st.number_input("Random seed",1,2147483646,step=1,disabled=not fixed_seed,key="nuke_manual_seed")
     st.divider()
     st.subheader("Contest")
     field_size=st.number_input("Field size",2,100000,2222,1)

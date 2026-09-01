@@ -13,6 +13,7 @@ from default_slate import load_default_slate, SLATE_LABEL
 from nuke_bridge import portable_to_hub_lineup
 from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, FD_SLATE_LABEL
+from nuke_odds import load_odds_history
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
 render_nav()
@@ -926,6 +927,66 @@ def saved_dk_export():
         })
     return pd.DataFrame(rows).to_csv(index=False).encode()
 
+def opening_line_movements():
+    """Return the first recorded game total and team total for each slate market."""
+    h=load_odds_history()
+    if h is None or h.empty:
+        return {},{}
+    needed={"Team","Opponent","Snapshot UTC"}
+    if not needed.issubset(h.columns):
+        return {},{}
+    h=h.copy()
+    h["Team"]=h["Team"].astype(str).str.upper().str.strip()
+    h["Opponent"]=h["Opponent"].astype(str).str.upper().str.strip()
+    h=h.dropna(subset=["Snapshot UTC"])
+    h=h[(h["Team"]!="") & (h["Opponent"]!="")]
+    if h.empty:
+        return {},{}
+    h["GameKey"]=h.apply(lambda r:"|".join(sorted([r["Team"],r["Opponent"]])),axis=1)
+
+    game_open={}
+    if "Game Total" in h.columns:
+        for key,g in h.groupby("GameKey"):
+            g=g.sort_values("Snapshot UTC")
+            first_ts=g["Snapshot UTC"].iloc[0]
+            vals=pd.to_numeric(g.loc[g["Snapshot UTC"].eq(first_ts),"Game Total"],errors="coerce").dropna()
+            if not vals.empty:
+                game_open[key]=float(vals.median())
+
+    team_open={}
+    if "Team Total" in h.columns:
+        for (key,team),g in h.groupby(["GameKey","Team"]):
+            g=g.sort_values("Snapshot UTC")
+            first_ts=g["Snapshot UTC"].iloc[0]
+            vals=pd.to_numeric(g.loc[g["Snapshot UTC"].eq(first_ts),"Team Total"],errors="coerce").dropna()
+            if not vals.empty:
+                team_open[(key,team)]=float(vals.median())
+    return game_open,team_open
+
+def format_total_movement(current,opening):
+    cur=float(current)
+    if opening is None or pd.isna(opening):
+        return f"{cur:g}"
+    delta=cur-float(opening)
+    if abs(delta)<0.05:
+        delta=0.0
+    return f"{cur:g} ({delta:+.1f})" if delta else f"{cur:g} (0.0)"
+
+def movement_cell_style(value):
+    txt=str(value)
+    m=re.search(r"\(([+-]?\d+(?:\.\d+)?)\)",txt)
+    if not m:
+        return ""
+    try:
+        delta=float(m.group(1))
+    except Exception:
+        return ""
+    if delta>0:
+        return "color:#19c37d;font-weight:800"
+    if delta<0:
+        return "color:#ff5d5d;font-weight:800"
+    return ""
+
 def slate_overview():
     teams,games=slate_scope()
     odds=st.session_state.get("game_totals",{}) or {}
@@ -1801,6 +1862,7 @@ with hub:
     d.metric("Average game total","—" if ov["avg_total"] is None else f'{ov["avg_total"]:.1f}')
 
     game_rank,team_rank,ng,nt=slate_total_ranks()
+    opening_games,opening_teams=opening_line_movements()
 
     if ov["top_games"]:
         left,right=st.columns([1.05,.95],gap="large")
@@ -1813,24 +1875,31 @@ with hub:
                 rows.append({
                     "Rank":game_rank.get(key),
                     "Game":f'{g.get("away","?")} @ {g.get("home","?")}',
-                    "Total":total
+                    "Total":format_total_movement(total,opening_games.get(key))
                 })
             gdf=pd.DataFrame(rows)
-            st.dataframe(gdf,hide_index=True,use_container_width=True)
+            gst=gdf.style.map(movement_cell_style,subset=["Total"]) if hasattr(gdf.style,"map") else gdf.style.applymap(movement_cell_style,subset=["Total"])
+            st.dataframe(gst,hide_index=True,use_container_width=True)
 
         with right:
             st.markdown("#### Implied Team Total Rankings")
             rows=[]
             for team,imp in ov["top_teams"]:
+                game_key=None
+                for key,g in st.session_state.game_totals.items():
+                    if team in {g.get("away"),g.get("home")}:
+                        game_key=key
+                        break
                 rows.append({
                     "Rank":team_rank.get(team),
                     "Team":team,
-                    "Implied Total":imp
+                    "Implied Total":format_total_movement(imp,opening_teams.get((game_key,team)))
                 })
             tdf=pd.DataFrame(rows)
-            st.dataframe(tdf,hide_index=True,use_container_width=True)
+            tst=tdf.style.map(movement_cell_style,subset=["Implied Total"]) if hasattr(tdf.style,"map") else tdf.style.applymap(movement_cell_style,subset=["Implied Total"])
+            st.dataframe(tst,hide_index=True,use_container_width=True)
 
-        st.caption("All ranks use only games and teams actually present in the selected platform slate.")
+        st.caption("Movement in parentheses is versus the first sportsbook snapshot: green = increase, red = decrease. Ranks use only games and teams on the selected platform slate.")
 
     st.divider()
     st.subheader("Saved Portfolio")

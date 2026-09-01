@@ -1,46 +1,26 @@
 name: Randomize SIM Seed
-
 on:
   push:
     paths:
-      - '.randomize-sim-seed-trigger'
-
+      - 'tools/randomize_sim_seed_patch.py'
+  workflow_dispatch:
 permissions:
   contents: write
-
 jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - name: Randomize each SIM run
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('pages/6_SIM.py')
-          s=p.read_text(encoding='utf-8')
-          old='min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10); seed=st.number_input("Random seed",1,999999,26,1)'
-          new='min_salary=st.number_input("Minimum salary",45000,50000,49400,100); candidates=st.number_input("Candidate lineups",100,5000,candidates,100); sims=st.number_input("Football universes",250,10000,sims,250); exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10)\n    with st.expander("Advanced settings"):\n        fixed_seed=st.checkbox("Use reproducible seed",value=False,help="Off by default: every RUN NUKE SIM click gets a fresh random simulation. Turn this on only when you want to reproduce a specific run.")\n        manual_seed=st.number_input("Random seed",1,2147483646,26,1,disabled=not fixed_seed)'
-          if old not in s:
-              raise SystemExit('sidebar seed pattern not found')
-          s=s.replace(old,new,1)
-          old2='if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):\n    if len(players)<9: st.error("Not enough active players."); st.stop()'
-          new2='if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):\n    # Public-safe default: each click gets a fresh seed, so identical users do not all receive the same portfolio.\n    seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1\n    if len(players)<9: st.error("Not enough active players."); st.stop()'
-          if old2 not in s:
-              raise SystemExit('run button pattern not found')
-          s=s.replace(old2,new2,1)
-          p.write_text(s,encoding='utf-8')
-          PY
-          python -m py_compile pages/6_SIM.py
+          python-version: '3.11'
+      - run: python tools/randomize_sim_seed_patch.py
+      - run: python -m py_compile pages/6_SIM.py
       - name: Commit
         run: |
-          git config user.name "nukesim"
-          git config user.email "bryson232323@gmail.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pages/6_SIM.py
-          git commit -m "Randomize public SIM runs by default"
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Randomize default SIM seed"
           git push

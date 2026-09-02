@@ -461,7 +461,7 @@ if results is not None and not results.empty:
             m4.metric("Contest Sims",f"{int(contest_summary.get('iterations',0)):,}")
             m5.metric("Lineups Simmed",f"{len(contest_results):,}")
             m6.metric("Field Model",str(contest_summary.get("field_model","")))
-            contest_roster=add_dk_roster_columns(sim_players,contest_results)
+            contest_roster=add_dk_roster_columns(sim_players,contest_results,site=site)
             defense_col="D" if site=="FD" else "DST"
             left=["QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX",defense_col,"FLEX Pos","Stack"]
             stats=["Contest Rank","Sim ROI %","1st %","Top 0.1%","Top 1%","Cash %","Avg Finish","Expected Duplicates","Avg Payout","Strongest Path","Path Score","Lineup Thesis","NUKE Score","Ceiling 95","Salary"]
@@ -644,7 +644,7 @@ if results is not None and not results.empty:
                 st.info(f"{dominant_path} is above the {soft_cap_pct:.0f}% soft concentration line. V5.1 does not hard-cap it; additional lineups must earn their slots by overcoming a rising marginal path penalty.")
             st.dataframe(portfolio_paths,use_container_width=True,hide_index=True)
             st.markdown("#### Selected Lineups")
-            portfolio_export=add_dk_roster_columns(sim_players,portfolio).drop(columns=["_indices"],errors="ignore")
+            portfolio_export=add_dk_roster_columns(sim_players,portfolio,site=site).drop(columns=["_indices"],errors="ignore")
             preferred=["Portfolio Slot","QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX","DST","FLEX Pos","Stack","Contest Rank","Sim ROI %","1st %","Top 0.1%","Top 1%","Cash %","Avg Finish","Avg Payout","Strongest Path","Secondary Path","Path Score","Lineup Thesis","NUKE Score","Median","Ceiling 95","Salary","Portfolio Reason"]
             portfolio_export=portfolio_export[[c for c in preferred if c in portfolio_export.columns]+[c for c in portfolio_export.columns if c not in preferred]]
             st.dataframe(portfolio_export,use_container_width=True,hide_index=True)

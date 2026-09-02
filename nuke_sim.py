@@ -39,7 +39,12 @@ def prepare_slate(df,site="DK"):
     if not out["Name"].astype(str).str.strip().ne("").any():
         names=player_name_series(df)
         if names is not None: out["Name"]=names
-    out.Name=out.Name.fillna("").astype(str).str.replace(r"\s*\(\d+\)\s*$","",regex=True); out.Position=out.Position.map(_norm_pos); out.Salary=pd.to_numeric(out.Salary,errors="coerce").fillna(0).astype(int); out.Team=out.Team.fillna("").astype(str).str.upper().str.strip(); out.Game=out.Game.fillna("").astype(str).str.strip(); out.ID=out.ID.fillna("").astype(str); out.Status=out.Status.fillna("").astype(str).str.upper().str.strip().replace({"O":"OUT"}).replace({"O":"OUT"})
+    out.Name=out.Name.fillna("").astype(str).str.replace(r"\s*\(\d+\)\s*$","",regex=True); out.Position=out.Position.map(_norm_pos); out.Salary=pd.to_numeric(out.Salary,errors="coerce").fillna(0).astype(int); out.Team=out.Team.fillna("").astype(str).str.upper().str.strip(); out.Game=out.Game.fillna("").astype(str).str.strip(); out.ID=out.ID.fillna("").astype(str).str.strip(); out.Status=out.Status.fillna("").astype(str).str.upper().str.strip().replace({"O":"OUT"}).replace({"O":"OUT"})
+    # FanDuel defense rows can have an empty Nickname even though Team/Id are present.
+    # Give every defense a stable visible name while preserving FanDuel's real player ID for export.
+    dst_blank=out.Position.eq("DST") & ~out.Name.astype(str).str.strip().ne("")
+    if dst_blank.any():
+        out.loc[dst_blank,"Name"]=out.loc[dst_blank,"Team"].astype(str).str.strip()+" D/ST"
     out=out[out.Position.isin(["QB","RB","WR","TE","DST"])&(out.Salary>0)].reset_index(drop=True); out=out[~out.Status.isin(INACTIVE_STATUSES)].reset_index(drop=True); out["market_score"]=out.groupby("Position")["Salary"].rank(pct=True).fillna(.5); out["role_override"]="AUTO"; out["usage_multiplier"]=1.0; out["generation_boost"]=0.0
     out=_attach_auto_roles(out).reset_index(drop=True)
     out.attrs["site"]=get_platform(site).code

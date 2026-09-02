@@ -17,3 +17,4 @@ if changed:
     print('patched explicit platform roster dispatch in pages/6_SIM.py')
 else:
     print('already patched')
+# trigger after workflow exists

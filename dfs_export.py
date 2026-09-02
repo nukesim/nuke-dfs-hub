@@ -25,6 +25,7 @@ def add_roster_columns(players, results, site=None):
 
 
 # Backward-compatible name used by the existing SIM UI. Despite the historical
-# function name, dispatch to the selected platform via players.attrs['site'].
-def add_dk_roster_columns(players, results, include_ids=True):
-    return add_roster_columns(players, results)
+# function name, dispatch to the selected platform. Prefer an explicit site when
+# available because pandas operations can drop DataFrame attrs.
+def add_dk_roster_columns(players, results, include_ids=True, site=None):
+    return add_roster_columns(players, results, site=site)

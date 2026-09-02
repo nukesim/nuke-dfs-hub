@@ -69,6 +69,19 @@ div[data-testid="stMetric"]{border:1px solid rgba(128,128,128,.2);padding:9px 11
 .remove-x button{padding:0!important;min-height:26px!important;height:26px!important;width:28px!important;border-radius:7px!important;font-size:1rem!important;line-height:1!important}
 .active-select button{font-weight:900!important}
 
+/* Keep build-view slot labels compact in 3/4-lineup layouts. */
+div[data-testid="stButton"] button{
+  min-height:32px!important;
+  padding:.22rem .38rem!important;
+}
+div[data-testid="stButton"] button p{
+  white-space:nowrap!important;
+  word-break:keep-all!important;
+  overflow-wrap:normal!important;
+  font-size:.72rem!important;
+  line-height:1!important;
+}
+
 :root{
   --nuke-bg:#0b0f14;
   --nuke-panel:#111820;

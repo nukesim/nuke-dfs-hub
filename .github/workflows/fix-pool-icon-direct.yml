@@ -1,0 +1,29 @@
+name: Fix player pool icon direct
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/fix_pool_icon_direct.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply direct icon fix
+        run: python tools/fix_pool_icon_direct.py
+      - name: Compile SIM page
+        run: python -m py_compile pages/6_SIM.py
+      - name: Commit SIM page change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/6_SIM.py
+          git commit -m "Replace player pool controller icon" || exit 0
+          git pull --rebase origin main
+          git push origin main

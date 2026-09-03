@@ -47,3 +47,4 @@ elif 'nuke_workspace_slate_label' not in s:
 
 p.write_text(s,encoding='utf-8')
 print('patched NUKE SIM workspace support')
+# trigger after workflow exists

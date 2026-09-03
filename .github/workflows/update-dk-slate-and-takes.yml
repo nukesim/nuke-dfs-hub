@@ -1,0 +1,36 @@
+name: Update DK slate and player takes controls
+on:
+  push:
+    paths:
+      - 'tools/update_dk_slate_and_takes.py'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/update_dk_slate_and_takes.py
+      - run: python -m py_compile default_slate.py pages/6_SIM.py
+      - name: Validate updated DK slate
+        run: |
+          python - <<'PY'
+          from default_slate import load_default_slate
+          d=load_default_slate()
+          assert len(d)==719, len(d)
+          k=d[(d['Name']=='Keenan Allen') & (d['TeamAbbrev']=='IND')]
+          assert len(k)==1
+          print(k[['Name','TeamAbbrev','Salary','ID']].to_string(index=False))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add default_slate.py pages/6_SIM.py
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Refresh DraftKings slate and add clear player-take controls"
+          git push

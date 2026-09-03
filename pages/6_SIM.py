@@ -433,7 +433,11 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_stage_times":stage_times,"nuke_candidate_diagnostics":candidate_diag,"nuke_player_takes":initial_takes}.items():
             st.session_state[k]=v
         status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
-    st.success(f"Total run time: {run_seconds:.1f} seconds")
+    st.session_state["nuke_sim_just_completed_notice"]=f"NUKE SIM complete · {run_seconds:.1f}s"
+    st.rerun()
+
+if st.session_state.pop("nuke_sim_just_completed_notice",None):
+    st.success("NUKE SIM complete. Workspace save is ready with these results.")
 
 results=st.session_state.get("nuke_sim_results")
 sim_players=st.session_state.get("nuke_sim_players")

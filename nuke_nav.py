@@ -29,10 +29,7 @@ def render_nav():
     with st.sidebar:
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
         st.page_link("pages/6_SIM.py", label="NUKE Sim", icon="☢️")
-        st.page_link("pages/7_VALIDATION.py", label="Model Performance", icon="📊")
-        st.page_link("pages/8_CALIBRATION.py", label="Model Lab", icon="🧠")
-        st.page_link("pages/9_GAUNTLET.py", label="Historical Testing", icon="🧪")
-        st.page_link("pages/10_CONTEST_VALIDATION.py", label="Contest Testing", icon="🏆")
+        st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
         if st.session_state.get("nuke_player_takes"):
             st.divider()
@@ -47,7 +44,7 @@ def render_nav():
                 _clean_player_takes("max")
 
         st.divider()
-        st.markdown("### Support NUKE")
+        st.markdown("### ❤️ Support NUKE")
         st.caption("NUKE is completely free. If it helps your DFS process and you want to support continued development, any contribution is appreciated.")
         c1, c2 = st.columns(2)
         with c1:
@@ -55,3 +52,6 @@ def render_nav():
         with c2:
             st.link_button("💸 Venmo", VENMO_URL, use_container_width=True)
         st.caption("Buy Me a Coffee supports one-time or monthly contributions.")
+
+        st.divider()
+        st.caption("NUKE DFS is an independent fantasy sports research and lineup-building tool. It is not affiliated with or endorsed by DraftKings, FanDuel, or the NFL. Simulations and model outputs are estimates and do not guarantee outcomes or winnings. Play responsibly and follow applicable laws and platform rules.")

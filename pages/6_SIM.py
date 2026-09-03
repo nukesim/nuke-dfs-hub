@@ -205,7 +205,7 @@ c3.metric("Games",players.Game.nunique())
 c4.metric("Salary Floor",f"${int(min_salary):,}")
 c5.metric("Slate",slate_source)
 
-st.subheader("🎮 Game-by-Game Player Pool")
+st.subheader("📊 Game-by-Game Player Pool")
 st.caption("Work the slate one game at a time. Include/remove players, adjust role if needed, then apply the game once.")
 current_odds=load_current_odds()
 odds_history=load_odds_history()

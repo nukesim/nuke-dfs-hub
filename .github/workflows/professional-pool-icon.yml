@@ -1,0 +1,33 @@
+name: Professional player pool icon
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/professional_pool_icon_patch.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply player pool icon update
+        run: python tools/professional_pool_icon_patch.py
+      - name: Compile SIM page
+        run: python -m py_compile pages/6_SIM.py
+      - name: Commit generated page change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/6_SIM.py
+          if git diff --cached --quiet; then
+            echo "No page changes needed"
+            exit 0
+          fi
+          git commit -m "Use professional analytics icon for player pool"
+          git pull --rebase origin main
+          git push origin main

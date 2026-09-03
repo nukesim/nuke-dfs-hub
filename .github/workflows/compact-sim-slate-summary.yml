@@ -1,0 +1,33 @@
+name: Compact NUKE SIM slate summary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/compact_sim_slate_summary.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compact slate summary
+        run: python tools/compact_sim_slate_summary.py
+      - name: Compile SIM page
+        run: python -m py_compile pages/6_SIM.py
+      - name: Commit generated SIM change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/6_SIM.py
+          if git diff --cached --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git commit -m "Compact NUKE SIM slate summary"
+          git pull --rebase origin main
+          git push origin main

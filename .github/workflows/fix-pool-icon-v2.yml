@@ -1,0 +1,33 @@
+name: Fix player pool icon v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/fix_pool_icon_v2.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace controller icon
+        run: python tools/fix_pool_icon_v2.py
+      - name: Verify replacement
+        run: |
+          grep -F 'st.subheader("📊 Game-by-Game Player Pool")' pages/6_SIM.py
+          if grep -F 'st.subheader("🎮 Game-by-Game Player Pool")' pages/6_SIM.py; then exit 1; fi
+      - name: Compile SIM page
+        run: python -m py_compile pages/6_SIM.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/6_SIM.py
+          git commit -m "Replace SIM player pool controller icon" || exit 0
+          git pull --rebase origin main
+          git push origin main

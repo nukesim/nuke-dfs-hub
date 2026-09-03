@@ -1791,6 +1791,11 @@ st.title("NUKE NFL DFS HUB")
 st.markdown("<div class=\"nuke-section-kicker\">NFL DFS COMMAND CENTER</div>",unsafe_allow_html=True)
 st.caption("Slate Intel • Player Pool • QB Planning • Multi-Lineup Hand Building • Late Swap • Portfolio Control")
 
+with st.expander("👋 NEW TO NUKE? QUICK START", expanded=False):
+    st.markdown("**1.** Choose your platform and review the slate  →  **2.** Build your Player Pool  →  **3.** Set your QB Plan  →  **4.** Build lineups  →  **5.** Save completed lineups  →  **6.** Review Saved Lineups / Exposure")
+    st.caption("BUILD lineups are drafts. They do not count toward your portfolio until you intentionally save them under SAVED LINEUPS. Use Save workspace in the sidebar when you want to leave and continue later.")
+    st.page_link("pages/11_GUIDE.py", label="Open the full NUKE Guide", icon="❓")
+
 with st.sidebar:
     st.markdown('<div class="nuke-section-kicker">NUKE CONTROL PANEL</div>',unsafe_allow_html=True)
     st.subheader("Slate")

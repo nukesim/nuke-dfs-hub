@@ -90,7 +90,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Could not load workspace: {e}")
         st.download_button("⬇️ SAVE WORKSPACE", workspace_bytes(st.session_state, st.session_state.get("nuke_workspace_slate_label","")), "nuke_sim_workspace.json", "application/json", use_container_width=True, key="save_nuke_workspace")
-        st.caption("Workspace files contain your NUKE settings only — not account credentials or API keys.")
+        st.caption("Workspace saves your current NUKE session, including settings, player pool, Player Takes, and completed SIM results. It never contains account credentials or API keys.")
     if st.session_state.pop("nuke_workspace_loaded_notice",None):
         st.success("Workspace loaded.")
     previous_site=st.session_state.get("nuke_sim_active_site")

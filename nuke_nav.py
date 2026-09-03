@@ -26,6 +26,33 @@ def _clean_player_takes(field):
 
 
 def render_nav():
+    # Shared public UI rule: show the whole value instead of Streamlit's default "..." truncation.
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stMetricValue"],
+        div[data-testid="stMetricValue"] *,
+        div[data-testid="stMetricLabel"],
+        div[data-testid="stMetricLabel"] * {
+            max-width: none !important;
+            width: auto !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+        }
+        div[data-testid="stMetric"] {
+            overflow: visible !important;
+            min-width: 0 !important;
+        }
+        div[data-testid="stMetric"] > div {
+            overflow: visible !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     with st.sidebar:
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
         st.page_link("pages/6_SIM.py", label="NUKE Sim", icon="☢️")

@@ -9,7 +9,6 @@ from nuke_sim import prepare_slate, simulate_player_matrix, generate_lineups, ev
 from nuke_contest import simulate_contest
 from nuke_paths import attach_path_labels, path_exposure
 from nuke_portfolio import build_portfolio, portfolio_summary, portfolio_player_exposure, portfolio_qb_exposure, portfolio_team_game_exposure, portfolio_stack_exposure, portfolio_health, PORTFOLIO_ENGINE_VERSION
-from dk_contest_import import parse_payout_upload
 from dfs_export import build_lineup_only_csv, fill_entries_csv, add_dk_roster_columns
 from default_slate import load_default_slate, SLATE_LABEL
 from nuke_football_v21 import simulate_player_matrix_v21, ENGINE_VERSION, engine_version, engine_version
@@ -161,22 +160,7 @@ except Exception as e:
 
 st.session_state["nuke_workspace_slate_label"]=slate_source
 
-st.subheader("🏆 Contest Payouts")
-payout_upload=st.file_uploader(f"Optional: upload {cfg.name} payout CSV / Excel",type=["csv","xlsx","xls"],key=f"payout_upload_{site}")
 payouts_override=None
-if payout_upload is not None:
-    try:
-        payouts_override,payout_info=parse_payout_upload(payout_upload)
-        a,b,c=st.columns(3)
-        a.metric("Imported Paid Places",f"{int(payout_info['paid_places']):,}")
-        b.metric("Imported 1st",f"${float(payout_info['first_prize']):,.0f}")
-        c.metric("Imported Prize Pool",f"${float(payout_info['listed_prize_pool']):,.0f}")
-        st.success("Real payout ladder loaded.")
-    except Exception as e:
-        st.error(f"Could not parse payout file: {e}")
-        st.stop()
-else:
-    st.caption("No payout file uploaded — NUKE will use the modeled GPP payout curve.")
 
 try:
     players=prepare_slate(raw_slate,site=site)

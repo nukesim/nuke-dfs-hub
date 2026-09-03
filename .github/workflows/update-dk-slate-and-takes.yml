@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'tools/update_dk_slate_and_takes.py'
+      - '.dk-slate-trigger'
   workflow_dispatch:
 permissions:
   contents: write

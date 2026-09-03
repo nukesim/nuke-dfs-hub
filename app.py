@@ -356,6 +356,14 @@ def init():
     st.session_state.setdefault("nuke_hub_imported_portfolio_version",0)
 init()
 
+# Workspace restore may need to switch platforms. Apply that saved platform BEFORE
+# the segmented-control widget is created so Streamlit does not interpret the
+# restored workspace as a user platform switch and clear Saved Lineups.
+_pending_workspace_site=st.session_state.pop("nuke_hub_workspace_site_pending",None)
+if _pending_workspace_site in ["DK","FD"]:
+    st.session_state["dfs_site"]=_pending_workspace_site
+    st.session_state["hub_platform"]=_pending_workspace_site
+
 _platform=st.segmented_control("Platform",options=["DK","FD"],format_func=lambda x: "DraftKings" if x=="DK" else "FanDuel",default=st.session_state.get("dfs_site","DK"),key="hub_platform") or "DK"
 if _platform!=st.session_state.get("dfs_site","DK"):
     st.session_state["dfs_site"]=_platform
@@ -1262,18 +1270,45 @@ def dupes():
     return [x for x in m.values() if len(x)>1]
 
 def workspace():
-    return json.dumps({"slate_name":st.session_state.slate_name,"pool_ids":list(st.session_state.pool_ids),"lineups":st.session_state.lineups,"saved_lineups":st.session_state.saved_lineups,"draft_saved_link":st.session_state.draft_saved_link,"qb_plan":st.session_state.qb_plan,"qb_slot_map":st.session_state.qb_slot_map,"projection_overrides":st.session_state.projection_overrides},indent=2)
+    return json.dumps({
+        "product":"NUKE NFL DFS HUB",
+        "workspace_version":2,
+        "dfs_site":st.session_state.get("dfs_site",SITE),
+        "slate_name":st.session_state.slate_name,
+        "pool_ids":list(st.session_state.pool_ids),
+        "lineups":st.session_state.lineups,
+        "saved_lineups":st.session_state.saved_lineups,
+        "draft_saved_link":st.session_state.draft_saved_link,
+        "qb_plan":st.session_state.qb_plan,
+        "qb_slot_map":st.session_state.qb_slot_map,
+        "projection_overrides":st.session_state.projection_overrides,
+        "current_lu":st.session_state.get("current_lu",0),
+        "active_build_slot":st.session_state.get("active_build_slot",0),
+        "slot":st.session_state.get("slot","QB"),
+        "multi_view":st.session_state.get("multi_view",1),
+        "combo_threshold":st.session_state.get("combo_threshold",35),
+    },indent=2)
 
 def restore(o):
     arr=o.get("lineups",[])[:MAX_LU]
     while len(arr)<MAX_LU:arr.append(empty_lu())
+    saved=dict(o.get("saved_lineups",{}) or {})
     st.session_state.lineups=arr
     st.session_state.pool_ids=set(o.get("pool_ids",[]))
-    st.session_state.saved_lineups=o.get("saved_lineups",{})
-    st.session_state.draft_saved_link=o.get("draft_saved_link",{})
-    st.session_state.qb_plan=o.get("qb_plan",{})
-    st.session_state.qb_slot_map=o.get("qb_slot_map",{})
-    st.session_state.projection_overrides=o.get("projection_overrides",{})
+    st.session_state.saved_lineups=saved
+    st.session_state.draft_saved_link=dict(o.get("draft_saved_link",{}) or {})
+    st.session_state.qb_plan=dict(o.get("qb_plan",{}) or {})
+    st.session_state.qb_slot_map=dict(o.get("qb_slot_map",{}) or {})
+    st.session_state.projection_overrides=dict(o.get("projection_overrides",{}) or {})
+    st.session_state.current_lu=int(o.get("current_lu",0) or 0)
+    st.session_state.active_build_slot=int(o.get("active_build_slot",0) or 0)
+    st.session_state.slot=str(o.get("slot","QB") or "QB")
+    st.session_state.multi_view=int(o.get("multi_view",1) or 1)
+    st.session_state.combo_threshold=int(o.get("combo_threshold",35) or 35)
+    saved_site=str(o.get("dfs_site",st.session_state.get("dfs_site","DK"))).upper()
+    if saved_site in ["DK","FD"]:
+        st.session_state["nuke_hub_workspace_site_pending"]=saved_site
+    st.session_state["nuke_hub_workspace_loaded_saved_count"]=len(saved)
     st.session_state.model_df=None
     st.session_state.pending_pool_ids=set(st.session_state.pool_ids)
 
@@ -1824,8 +1859,14 @@ with st.sidebar:
     st.divider()
     wup=st.file_uploader("Load workspace",type="json")
     if wup is not None and st.button("Restore workspace"):
-        try:restore(json.load(wup));st.success("Restored");st.rerun()
-        except Exception as e:st.error(str(e))
+        try:
+            restore(json.load(wup))
+            st.rerun()
+        except Exception as e:
+            st.error(str(e))
+    restored_saved=st.session_state.pop("nuke_hub_workspace_loaded_saved_count",None)
+    if restored_saved is not None:
+        st.success(f"Workspace restored · {int(restored_saved)} Saved Lineup{'s' if int(restored_saved)!=1 else ''} loaded")
     st.download_button("Save workspace",workspace(),"nuke_workspace.json","application/json",use_container_width=True)
 
 if st.session_state.slate is None:

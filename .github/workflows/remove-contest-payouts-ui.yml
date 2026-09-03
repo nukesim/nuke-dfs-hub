@@ -1,0 +1,35 @@
+name: Remove Contest Payouts UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/remove_contest_payouts_ui.py'
+      - '.github/workflows/remove-contest-payouts-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch SIM page
+        run: python tools/remove_contest_payouts_ui.py
+      - name: Compile
+        run: python -m py_compile pages/6_SIM.py
+      - name: Commit changes
+        run: |
+          git config user.name 'nukesim'
+          git config user.email 'bryson232323@gmail.com'
+          git add pages/6_SIM.py
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'Remove Contest Payouts upload from NUKE SIM'
+            git push
+          fi

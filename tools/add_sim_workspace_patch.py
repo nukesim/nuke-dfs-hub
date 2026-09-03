@@ -45,6 +45,15 @@ if anchor in s:
 elif 'nuke_workspace_slate_label' not in s:
     raise SystemExit('slate label anchor not found')
 
+# Streamlit renders the sidebar download button before the RUN NUKE SIM handler executes.
+# Force one rerun after results are written so SAVE WORKSPACE is rebuilt with the completed run.
+run_anchor='''        status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")\n    st.success(f"Total run time: {run_seconds:.1f} seconds")\n\nresults=st.session_state.get("nuke_sim_results")'''
+run_rep='''        status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")\n    st.session_state["nuke_sim_just_completed_notice"]=f"NUKE SIM complete · {run_seconds:.1f}s"\n    st.rerun()\n\nif st.session_state.pop("nuke_sim_just_completed_notice",None):\n    st.success("NUKE SIM complete. Workspace save is ready with these results.")\n\nresults=st.session_state.get("nuke_sim_results")'''
+if run_anchor in s:
+    s=s.replace(run_anchor,run_rep,1)
+elif 'nuke_sim_just_completed_notice' not in s:
+    raise SystemExit('post-run rerun anchor not found')
+
 p.write_text(s,encoding='utf-8')
 print('patched NUKE SIM workspace support')
 # trigger after workflow exists

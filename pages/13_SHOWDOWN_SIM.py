@@ -250,6 +250,7 @@ for style in construction_styles:
         "Min %": int(cfg.get("min", 0)),
         "Max %": int(cfg.get("max", 100)),
     })
+construction_editor_version = int(st.session_state.get("showdown_construction_editor_version", 0))
 construction_editor = st.data_editor(
     pd.DataFrame(construction_rows),
     use_container_width=True,
@@ -257,10 +258,10 @@ construction_editor = st.data_editor(
     disabled=["Construction"],
     column_config={
         "Construction": st.column_config.TextColumn("Construction", width="medium"),
-        "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
-        "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
+        "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
+        "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
     },
-    key="showdown_construction_editor",
+    key=f"showdown_construction_editor_{construction_editor_version}",
 )
 construction_state = {}
 for _, row in construction_editor.iterrows():
@@ -356,6 +357,8 @@ if results is None or sim_players is None or results.empty:
 
 if run_seed:
     st.caption(f"Current run seed: {int(run_seed):,}")
+if st.session_state.pop("showdown_construction_rebuild_notice", False):
+    st.success("Construction mix applied — portfolio rebuilt from the existing SIM results. No new football simulation was required.")
 
 st.subheader("Top Simulated Lineups")
 labeled = add_lineup_labels(results.head(250), sim_players)
@@ -404,7 +407,58 @@ else:
     construction_mix["Min %"] = construction_mix["Construction"].map(lambda x: construction_state.get(x, {}).get("min", 0))
     construction_mix["Max %"] = construction_mix["Construction"].map(lambda x: construction_state.get(x, {}).get("max", 100))
     st.markdown("#### Construction Mix")
-    st.dataframe(construction_mix, use_container_width=True, hide_index=True)
+    st.caption("Type new Min/Max percentages below, then rebuild the portfolio instantly from this completed SIM. Values are limited to 0–100%.")
+    with st.form("showdown_construction_results_form", clear_on_submit=False):
+        mix_editor = st.data_editor(
+            construction_mix,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Construction", "Lineups", "Construction %"],
+            column_config={
+                "Construction": st.column_config.TextColumn("Construction", width="medium"),
+                "Lineups": st.column_config.NumberColumn("Lineups", width="small"),
+                "Construction %": st.column_config.NumberColumn("Construction %", min_value=0.0, max_value=100.0, format="%.1f%%", width="small"),
+                "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
+                "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
+            },
+            key="showdown_construction_results_editor",
+        )
+        apply_mix = st.form_submit_button("APPLY MIX & REBUILD PORTFOLIO", type="primary", use_container_width=True)
+
+    if apply_mix:
+        new_state = {}
+        errors = []
+        for _, er in mix_editor.iterrows():
+            style = str(er["Construction"])
+            mn = int(er["Min %"]); mx = int(er["Max %"])
+            if mn < 0 or mn > 100 or mx < 0 or mx > 100:
+                errors.append(f"{style}: percentages must be between 0 and 100.")
+            if mn > mx:
+                errors.append(f"{style}: Min % cannot be greater than Max %.")
+            new_state[style] = {"min": mn, "max": mx}
+
+        if sum(v["min"] for v in new_state.values()) > 100:
+            errors.append("Construction minimums cannot add up to more than 100%.")
+        if sum(v["max"] for v in new_state.values()) < 100:
+            errors.append("Construction maximums must add up to at least 100% so a full portfolio is possible.")
+
+        if errors:
+            for msg in errors:
+                st.error(msg)
+        else:
+            new_mins = {k: v["min"] / 100.0 for k, v in new_state.items()}
+            new_maxes = {k: v["max"] / 100.0 for k, v in new_state.items()}
+            rebuilt = build_portfolio(
+                results, sim_players, count=portfolio_n,
+                max_player_pct=max_player, max_cpt_pct=max_cpt,
+                player_mins=player_mins, player_maxes=player_maxes,
+                construction_mins=new_mins, construction_maxes=new_maxes,
+            )
+            st.session_state["showdown_construction_controls"] = new_state
+            st.session_state["showdown_sim_portfolio"] = rebuilt
+            st.session_state["showdown_construction_editor_version"] = construction_editor_version + 1
+            st.session_state["showdown_construction_rebuild_notice"] = True
+            st.rerun()
 
 st.info(
     "Showdown SIM V1 intentionally ranks lineups by simulated outcome quality rather than contest payout simulation. "

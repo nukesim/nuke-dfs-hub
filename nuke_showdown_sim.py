@@ -1,4 +1,3 @@
-import itertools
 from collections import Counter
 
 import numpy as np
@@ -13,7 +12,6 @@ def _base_projection(row):
     fppg = float(row.get("Avg FPPG", 0) or 0)
     salary = float(row.get("FLEX Salary", 0) or 0)
     pos = str(row.get("Pos", "")).upper()
-    # Salary is the fallback signal when DK's FPPG field is sparse/new-season data.
     salary_pts = max(0.8, salary / 1000.0 * 1.55)
     if pos in {"DST", "D"}: salary_pts *= 0.85
     if pos == "K": salary_pts *= 0.9
@@ -54,7 +52,6 @@ def simulate_player_outcomes(players, teams, n_sims=5000, seed=26):
     positions = players["Pos"].astype(str).str.upper().tolist()
     player_teams = players["Team"].astype(str).tolist()
 
-    # Shared game/team shocks create useful single-game correlation without paid projections.
     game_shock = rng.normal(0, 0.12, size=int(n_sims))
     ta_shock = rng.normal(0, 0.16, size=int(n_sims))
     tb_shock = rng.normal(0, 0.16, size=int(n_sims))
@@ -67,7 +64,6 @@ def simulate_player_outcomes(players, teams, n_sims=5000, seed=26):
         for script in SCRIPT_NAMES:
             mask = scripts == script
             if mask.any(): vals[mask] *= _script_multiplier(pos, team, script, team_a, team_b)
-        # Small zero/near-zero tail for volatile skill players.
         if pos in {"WR", "TE", "RB"}:
             zero_prob = .035 if base[j] >= 8 else .10
             vals[rng.random(int(n_sims)) < zero_prob] *= rng.uniform(.0, .25)
@@ -75,25 +71,65 @@ def simulate_player_outcomes(players, teams, n_sims=5000, seed=26):
     return sims, scripts, base
 
 
-def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000):
+def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, seed=26):
+    """Create a diverse legal Showdown candidate pool across many Captains.
+
+    The old generator exhausted max_candidates under the first CPT before ever
+    reaching later Captains. This stochastic sampler deliberately mixes Captain
+    choices and FLEX combinations so downstream exposure constraints have a real
+    set of alternatives to choose from.
+    """
     rows = players.reset_index(drop=True)
-    candidates = []
     n = len(rows)
-    # Candidate search is salary/role aware: prioritize plausible pool while retaining cheap values.
-    priority = rows.assign(_score=rows.apply(_base_projection, axis=1) + rows["FLEX Salary"] / 3500.0, axis=1)
-    keep = priority.sort_values("_score", ascending=False).head(min(n, 30)).index.tolist()
-    cheap = rows.sort_values("FLEX Salary").head(min(n, 12)).index.tolist()
-    pool = sorted(set(keep + cheap))
-    for cpt in pool:
-        cpt_salary = int(rows.iloc[cpt]["CPT Salary"])
-        others = [x for x in pool if x != cpt]
-        for flex in itertools.combinations(others, 5):
-            salary = cpt_salary + int(rows.iloc[list(flex)]["FLEX Salary"].sum())
-            if salary > SHOWDOWN_SALARY_CAP or salary < int(min_salary): continue
-            teams = set(rows.iloc[[cpt] + list(flex)]["Team"].astype(str))
-            if len(teams) < 2: continue
-            candidates.append((cpt, flex, salary))
-            if len(candidates) >= int(max_candidates): return candidates
+    if n < 6:
+        return []
+
+    rng = np.random.default_rng(int(seed) + 7919)
+    base = np.array([_base_projection(r) for _, r in rows.iterrows()], dtype=float)
+
+    # Keep plausible Captain choices broad enough for large-field Showdown.
+    cpt_score = base + rows["FLEX Salary"].to_numpy(dtype=float) / 5000.0
+    cpt_count = min(n, max(16, min(30, n)))
+    cpt_pool = np.argsort(-cpt_score)[:cpt_count]
+
+    # FLEX sampling slightly favors stronger plays without excluding salary savers.
+    flex_weight = np.maximum(base, 0.75) ** 1.15
+    flex_weight = flex_weight / flex_weight.sum()
+
+    target = int(max_candidates)
+    seen = set()
+    candidates = []
+    attempts = 0
+    max_attempts = max(50000, target * 80)
+
+    # Cycle Captains rather than letting any one CPT monopolize the pool.
+    cpt_order = list(map(int, rng.permutation(cpt_pool)))
+    cpt_cursor = 0
+    while len(candidates) < target and attempts < max_attempts:
+        attempts += 1
+        cpt = cpt_order[cpt_cursor % len(cpt_order)]
+        cpt_cursor += 1
+        if cpt_cursor % len(cpt_order) == 0:
+            cpt_order = list(map(int, rng.permutation(cpt_pool)))
+
+        eligible = np.array([i for i in range(n) if i != cpt], dtype=int)
+        probs = flex_weight[eligible].copy()
+        probs = probs / probs.sum()
+        flex = tuple(sorted(map(int, rng.choice(eligible, size=5, replace=False, p=probs))))
+        ident = (cpt, flex)
+        if ident in seen:
+            continue
+
+        salary = int(rows.iloc[cpt]["CPT Salary"]) + int(rows.iloc[list(flex)]["FLEX Salary"].sum())
+        if salary > SHOWDOWN_SALARY_CAP or salary < int(min_salary):
+            continue
+        teams = set(rows.iloc[[cpt] + list(flex)]["Team"].astype(str))
+        if len(teams) < 2:
+            continue
+
+        seen.add(ident)
+        candidates.append((cpt, flex, salary))
+
     return candidates
 
 
@@ -135,17 +171,29 @@ def add_lineup_labels(results, players):
 
 def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35):
     if results.empty: return results
-    target=max(1,int(count)); max_player=max(1,int(np.ceil(target*float(max_player_pct)))); max_cpt=max(1,int(np.ceil(target*float(max_cpt_pct))))
-    player_counts=Counter(); cpt_counts=Counter(); chosen=[]
-    # Require different game-script strengths by using a broad high-quality candidate band.
-    band=results.head(min(len(results),2500))
-    for _, r in band.iterrows():
-        inds=[int(r["_cpt"])]+list(map(int,r["_flex"]))
-        if cpt_counts[inds[0]] >= max_cpt: continue
-        if any(player_counts[i] >= max_player for i in inds): continue
-        chosen.append(r); cpt_counts[inds[0]]+=1; player_counts.update(inds)
-        if len(chosen)>=target: break
-    return pd.DataFrame(chosen).reset_index(drop=True) if chosen else results.head(target).copy()
+    target = max(1, int(count))
+    max_player = max(1, int(np.floor(target * float(max_player_pct) + 1e-9)))
+    max_cpt = max(1, int(np.floor(target * float(max_cpt_pct) + 1e-9)))
+    player_counts = Counter()
+    cpt_counts = Counter()
+    chosen = []
+
+    # Search the full ranked candidate pool; stopping at a small top band can
+    # make a legal target portfolio impossible even when alternatives exist.
+    for _, r in results.iterrows():
+        cpt = int(r["_cpt"])
+        inds = [cpt] + list(map(int, r["_flex"]))
+        if cpt_counts[cpt] >= max_cpt:
+            continue
+        if any(player_counts[i] >= max_player for i in inds):
+            continue
+        chosen.append(r)
+        cpt_counts[cpt] += 1
+        player_counts.update(inds)
+        if len(chosen) >= target:
+            break
+
+    return pd.DataFrame(chosen).reset_index(drop=True) if chosen else pd.DataFrame(columns=results.columns)
 
 
 def exposure_table(portfolio, players):

@@ -111,7 +111,7 @@ else:
         odds_hist = odds_hist.dropna(subset=["Snapshot UTC"]).sort_values("Snapshot UTC")
         first = odds_hist.groupby("Team", as_index=False).first()
         last = odds_hist.groupby("Team", as_index=False).last()
-        with st.expander("Line movement history", expanded=True):
+        with st.expander("Line movement history", expanded=False):
             mov_rows = []
             for team in [team_a, team_b]:
                 a = first[first["Team"].astype(str).eq(team)]
@@ -140,9 +140,10 @@ else:
 st.subheader("🎛️ Player Controls")
 st.caption("Boost changes the simulated baseline for that player. Min/Max exposure are enforced in the generated portfolio. Leave 0 / 100 for no player-specific exposure rule.")
 control_state = dict(st.session_state.get("showdown_player_controls", {}) or {})
-team_tabs = st.tabs([team_a, team_b])
-for tab, team in zip(team_tabs, [team_a, team_b]):
-    with tab:
+team_columns = st.columns(2)
+for col, team in zip(team_columns, [team_a, team_b]):
+    with col:
+        st.markdown(f"#### {team}")
         tp = players[players["Team"].astype(str).eq(team)].copy().reset_index()
         rows = []
         for _, r in tp.iterrows():
@@ -159,12 +160,14 @@ for tab, team in zip(team_tabs, [team_a, team_b]):
             })
         edit = pd.DataFrame(rows).set_index("_idx")
         edited = st.data_editor(
-            edit, use_container_width=True, hide_index=True,
+            edit,
+            use_container_width=True,
+            hide_index=True,
             disabled=["Player", "Pos", "Salary"],
             column_config={
                 "Player": st.column_config.TextColumn("Player", width="medium"),
                 "Pos": st.column_config.TextColumn("Pos", width="small"),
-                "Salary": st.column_config.NumberColumn("FLEX Salary", format="$%d", width="small"),
+                "Salary": st.column_config.NumberColumn("FLEX", format="$%d", width="small"),
                 "Boost %": st.column_config.NumberColumn("Boost %", min_value=-50.0, max_value=50.0, step=5.0, format="%.0f%%", width="small", help="Changes this player's simulated baseline before each game outcome is drawn."),
                 "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
                 "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),

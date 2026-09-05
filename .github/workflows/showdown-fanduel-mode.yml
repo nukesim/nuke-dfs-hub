@@ -1,0 +1,30 @@
+name: Add FanDuel Showdown mode
+on:
+  push:
+    paths:
+      - tools/showdown_fanduel_mode_patch.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/showdown_fanduel_mode_patch.py
+      - run: python -m py_compile pages/13_SHOWDOWN_SIM.py nuke_showdown_sim.py nuke_showdown_workspace.py nuke_showdown_fanduel.py
+      - name: Verify
+        run: |
+          grep -q 'FanDuel' pages/13_SHOWDOWN_SIM.py
+          grep -q 'showdown_fanduel_current.csv' pages/13_SHOWDOWN_SIM.py
+          grep -q 'salary_cap=salary_cap' pages/13_SHOWDOWN_SIM.py
+          grep -q 'platform' nuke_showdown_workspace.py
+      - name: Commit
+        run: |
+          git config user.name "nukesim"
+          git config user.email "bryson232323@gmail.com"
+          git add pages/13_SHOWDOWN_SIM.py nuke_showdown_sim.py nuke_showdown_workspace.py
+          git diff --cached --quiet || git commit -m "Add FanDuel single-game Showdown mode"
+          git push

@@ -34,8 +34,7 @@ def render_nav():
     with st.sidebar:
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
         st.page_link("pages/6_SIM.py", label="NUKE Sim", icon="☢️")
-        st.page_link("pages/12_SHOWDOWN.py", label="NFL Showdown", icon="⚡")
-        st.page_link("pages/13_SHOWDOWN_SIM.py", label="Showdown Sim", icon="☢️")
+        st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
         if st.session_state.get("nuke_player_takes"):
@@ -53,5 +52,3 @@ def render_nav():
         st.caption("Buy Me a Coffee supports one-time or monthly contributions.")
         st.divider()
         st.caption("NUKE DFS is an independent fantasy sports research and lineup-building tool. It is not affiliated with or endorsed by DraftKings, FanDuel, or the NFL. Simulations and model outputs are estimates and do not guarantee outcomes or winnings. Play responsibly and follow applicable laws and platform rules.")
-
-# Deployment refresh marker: Showdown navigation added 2026-09-05

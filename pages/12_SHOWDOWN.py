@@ -14,6 +14,14 @@ from nuke_showdown import (
     validate_lineup,
 )
 
+SHOWDOWN_WIDGET_KEYS = ["showdown_cpt", "showdown_f1", "showdown_f2", "showdown_f3", "showdown_f4", "showdown_f5"]
+
+
+def clear_showdown_builder():
+    for key in SHOWDOWN_WIDGET_KEYS:
+        st.session_state.pop(key, None)
+
+
 st.set_page_config(page_title="NUKE Showdown", page_icon="⚡", layout="wide")
 render_nav()
 
@@ -45,10 +53,10 @@ if st.session_state.get("showdown_slate_sig") != slate_sig:
     st.session_state["showdown_pool"] = {
         row["Player Key"]: bool(row["Auto Include"]) for _, row in players.iterrows()
     }
-    for key in ["showdown_cpt", "showdown_f1", "showdown_f2", "showdown_f3", "showdown_f4", "showdown_f5"]:
-        st.session_state.pop(key, None)
+    clear_showdown_builder()
 
 team_a, team_b = meta["teams"]
+all_records = {row["Player Key"]: row.to_dict() for _, row in players.iterrows()}
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Game", f"{team_a} vs {team_b}")
@@ -94,8 +102,7 @@ if active.empty:
 
 records = {row["Player Key"]: row.to_dict() for _, row in active.iterrows()}
 keys = active["Player Key"].tolist()
-blank = ""
-options = [blank] + keys
+options = [""] + keys
 
 
 def player_label(key, slot):
@@ -161,10 +168,7 @@ save_col, clear_col = st.columns([3, 1])
 with save_col:
     save_clicked = st.button("SAVE LINEUP", type="primary", use_container_width=True, disabled=not legal)
 with clear_col:
-    if st.button("CLEAR", use_container_width=True):
-        for key in ["showdown_cpt", "showdown_f1", "showdown_f2", "showdown_f3", "showdown_f4", "showdown_f5"]:
-            st.session_state.pop(key, None)
-        st.rerun()
+    st.button("CLEAR", use_container_width=True, on_click=clear_showdown_builder)
 
 if save_clicked:
     rec = lineup_record(records, captain, flex_keys)
@@ -183,7 +187,7 @@ st.subheader("Saved Showdown Lineups")
 if not saved:
     st.info("No saved Showdown lineups yet.")
 else:
-    table = saved_lineups_table(saved, records)
+    table = saved_lineups_table(saved, all_records)
     st.dataframe(
         table,
         use_container_width=True,
@@ -202,14 +206,14 @@ else:
     with b:
         st.download_button(
             "DOWNLOAD DK LINEUPS CSV",
-            data=export_lineup_only_csv(saved, records),
+            data=export_lineup_only_csv(saved, all_records),
             file_name="nuke_showdown_lineups.csv",
             mime="text/csv",
             use_container_width=True,
         )
 
     st.subheader("Exposure")
-    player_exp, captain_exp = exposure_tables(saved, records)
+    player_exp, captain_exp = exposure_tables(saved, all_records)
     e1, e2 = st.columns(2)
     with e1:
         st.markdown("#### Overall Player Exposure")

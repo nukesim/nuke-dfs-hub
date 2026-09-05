@@ -1,0 +1,26 @@
+name: Style Showdown DK export green
+on:
+  push:
+    paths:
+      - tools/showdown_green_export_patch.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/showdown_green_export_patch.py
+      - run: python -m py_compile pages/13_SHOWDOWN_SIM.py
+      - name: Verify
+        run: grep -q 'showdown-dk-export-green' pages/13_SHOWDOWN_SIM.py
+      - name: Commit
+        run: |
+          git config user.name "nukesim"
+          git config user.email "bryson232323@gmail.com"
+          git add pages/13_SHOWDOWN_SIM.py
+          git diff --cached --quiet || git commit -m "Style Showdown DraftKings export green"
+          git push

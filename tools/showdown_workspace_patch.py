@@ -131,3 +131,4 @@ s = s.replace(anchor, replacement, 1)
 
 p.write_text(s, encoding="utf-8")
 print("patched Showdown true-snapshot workspace support")
+# retrigger after verification marker fix

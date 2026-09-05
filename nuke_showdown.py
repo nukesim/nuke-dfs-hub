@@ -180,6 +180,11 @@ def exposure_tables(saved, players_by_key):
     return rows_from(player_counts), rows_from(captain_counts)
 
 
+def _dk_ref(player, slot):
+    pid = str(player[f"{slot} ID"])
+    return f"{player['Name']} ({pid})"
+
+
 def export_lineup_only_csv(saved, players_by_key):
     rows = []
     for rec in saved:
@@ -187,13 +192,13 @@ def export_lineup_only_csv(saved, players_by_key):
         flex = [players_by_key[k] for k in rec["flex_keys"]]
         rows.append(
             {
-                "CPT": cpt["CPT ID"],
-                "FLEX": flex[0]["FLEX ID"],
-                "FLEX.1": flex[1]["FLEX ID"],
-                "FLEX.2": flex[2]["FLEX ID"],
-                "FLEX.3": flex[3]["FLEX ID"],
-                "FLEX.4": flex[4]["FLEX ID"],
+                "CPT": _dk_ref(cpt, "CPT"),
+                "FLEX": _dk_ref(flex[0], "FLEX"),
+                "FLEX.1": _dk_ref(flex[1], "FLEX"),
+                "FLEX.2": _dk_ref(flex[2], "FLEX"),
+                "FLEX.3": _dk_ref(flex[3], "FLEX"),
+                "FLEX.4": _dk_ref(flex[4], "FLEX"),
             }
         )
     out = pd.DataFrame(rows, columns=["CPT", "FLEX", "FLEX.1", "FLEX.2", "FLEX.3", "FLEX.4"])
-    return out.to_csv(index=False).encode("utf-8")
+    return out.to_csv(index=False).encode("utf-8-sig")

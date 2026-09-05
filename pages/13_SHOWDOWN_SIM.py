@@ -1,4 +1,5 @@
 from pathlib import Path
+import secrets
 
 import pandas as pd
 import streamlit as st
@@ -46,7 +47,7 @@ if st.session_state.get("showdown_sim_slate_sig") != slate_sig:
     st.session_state["showdown_sim_slate_sig"] = slate_sig
     for key in [
         "showdown_sim_results", "showdown_sim_portfolio", "showdown_sim_players",
-        "showdown_sim_scripts",
+        "showdown_sim_scripts", "showdown_sim_seed",
     ]:
         st.session_state.pop(key, None)
 
@@ -75,6 +76,24 @@ with st.expander("Simulation Settings", expanded=True):
     max_player = c5.slider("Max player exposure", 25, 100, 75, 5) / 100
     max_cpt = c6.slider("Max Captain exposure", 10, 100, 35, 5) / 100
 
+    st.markdown("##### Randomness")
+    r1, r2 = st.columns([1, 2])
+    fixed_seed = r1.checkbox(
+        "Use fixed seed",
+        value=False,
+        help="Off = every run gets a fresh random seed. Turn on only when you want to reproduce the exact same simulation.",
+    )
+    manual_seed = r2.number_input(
+        "Seed",
+        min_value=1,
+        max_value=2147483646,
+        value=260905,
+        step=1,
+        disabled=not fixed_seed,
+    )
+    if not fixed_seed:
+        st.caption("Fresh random seed will be generated each time you click RUN SHOWDOWN SIM.")
+
 st.markdown("#### What NUKE is simulating")
 st.caption(
     "Balanced · Shootout · Low Scoring · each team controlling the game · Passing Spike · "
@@ -83,9 +102,17 @@ st.caption(
 )
 
 if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True):
+    seed = int(manual_seed) if fixed_seed else secrets.randbelow(2147483645) + 1
     with st.spinner("Simulating single-game outcomes and evaluating Showdown constructions..."):
-        sims, scripts, base = simulate_player_outcomes(players, meta["teams"], n_sims=n_sims)
-        cand = generate_showdown_candidates(players, max_candidates=candidates, min_salary=min_salary)
+        sims, scripts, base = simulate_player_outcomes(
+            players, meta["teams"], n_sims=n_sims, seed=seed
+        )
+        cand = generate_showdown_candidates(
+            players,
+            max_candidates=candidates,
+            min_salary=min_salary,
+            seed=seed,
+        )
         results = evaluate_candidates(players, cand, sims, scripts)
         portfolio = build_portfolio(
             results, players, count=portfolio_n,
@@ -95,16 +122,21 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
         st.session_state["showdown_sim_portfolio"] = portfolio
         st.session_state["showdown_sim_players"] = players
         st.session_state["showdown_sim_scripts"] = pd.Series(scripts).value_counts().to_dict()
+        st.session_state["showdown_sim_seed"] = seed
     st.success(
-        f"Showdown SIM complete · {n_sims:,} game outcomes · "
+        f"Showdown SIM complete · seed {seed:,} · {n_sims:,} game outcomes · "
         f"{len(cand):,} legal candidate lineups"
     )
 
 results = st.session_state.get("showdown_sim_results")
 portfolio = st.session_state.get("showdown_sim_portfolio")
 sim_players = st.session_state.get("showdown_sim_players")
+run_seed = st.session_state.get("showdown_sim_seed")
 if results is None or sim_players is None or results.empty:
     st.stop()
+
+if run_seed:
+    st.caption(f"Current run seed: {int(run_seed):,}")
 
 st.subheader("Top Simulated Lineups")
 labeled = add_lineup_labels(results.head(250), sim_players)
@@ -135,6 +167,14 @@ st.subheader("NUKE Showdown Portfolio")
 if portfolio is None or portfolio.empty:
     st.info("No portfolio could be built with the current exposure limits.")
 else:
+    if len(portfolio) < int(portfolio_n):
+        st.warning(
+            f"Exposure limits allowed {len(portfolio)} of the requested {int(portfolio_n)} lineups. "
+            "Increase candidate lineups or loosen exposure caps if you want the full portfolio size."
+        )
+    else:
+        st.success(f"Built full {len(portfolio)}-lineup portfolio with exposure caps enforced.")
+
     p = add_lineup_labels(portfolio, sim_players)
     st.dataframe(
         p[show_cols].round(2),

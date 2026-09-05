@@ -393,6 +393,20 @@ else:
         column_config={"Salary": st.column_config.NumberColumn("Salary", format="$%d")},
     )
 
+    st.markdown("""
+    <style id="showdown-dk-export-green">
+    div[data-testid="stDownloadButton"] button[kind="primary"] {
+        background: #16a34a !important;
+        border-color: #16a34a !important;
+        color: white !important;
+    }
+    div[data-testid="stDownloadButton"] button[kind="primary"]:hover {
+        background: #15803d !important;
+        border-color: #15803d !important;
+        color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     st.markdown("#### 📤 DraftKings Export")
     st.caption("Download this exact NUKE portfolio using the DraftKings CPT/FLEX player IDs from the current Showdown salary file.")
     export_rows = []

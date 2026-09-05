@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from nuke_nav import render_nav
-from nuke_showdown import parse_showdown_salary_csv
+from nuke_showdown import export_lineup_only_csv, parse_showdown_salary_csv
 from nuke_showdown_sim import (
     SCRIPT_NAMES, add_lineup_labels, build_portfolio, evaluate_candidates,
     exposure_table, generate_showdown_candidates, simulate_player_outcomes,
@@ -392,6 +392,61 @@ else:
         hide_index=True,
         column_config={"Salary": st.column_config.NumberColumn("Salary", format="$%d")},
     )
+
+    st.markdown("#### 📤 DraftKings Export")
+    st.caption("Download this exact NUKE portfolio using the DraftKings CPT/FLEX player IDs from the current Showdown salary file.")
+    export_rows = []
+    export_error = None
+    sim_rows = sim_players.reset_index(drop=True)
+    try:
+        for _, lineup in portfolio.iterrows():
+            cpt_idx = int(lineup["_cpt"])
+            flex_idxs = list(map(int, lineup["_flex"]))
+            all_idxs = [cpt_idx] + flex_idxs
+            if len(all_idxs) != 6 or len(set(all_idxs)) != 6:
+                raise ValueError("A portfolio lineup does not contain 6 unique players.")
+            salary = int(lineup["Salary"])
+            if salary > 50000:
+                raise ValueError(f"A portfolio lineup exceeds the DraftKings salary cap: ${salary:,}.")
+            cpt_key = str(sim_rows.iloc[cpt_idx]["Player Key"])
+            flex_keys = [str(sim_rows.iloc[i]["Player Key"]) for i in flex_idxs]
+            export_rows.append({
+                "captain_key": cpt_key,
+                "flex_keys": flex_keys,
+                "salary": salary,
+            })
+
+        players_by_key = {
+            str(r["Player Key"]): r.to_dict()
+            for _, r in sim_rows.iterrows()
+        }
+        for rec in export_rows:
+            cpt = players_by_key.get(rec["captain_key"])
+            flex = [players_by_key.get(k) for k in rec["flex_keys"]]
+            if cpt is None or any(x is None for x in flex):
+                raise ValueError("A portfolio player could not be matched back to the current DraftKings salary file.")
+            if not str(cpt.get("CPT ID", "")).strip() or any(not str(x.get("FLEX ID", "")).strip() for x in flex):
+                raise ValueError("A DraftKings CPT/FLEX player ID is missing from the current salary file.")
+
+        dk_csv = export_lineup_only_csv(export_rows, players_by_key)
+    except Exception as exc:
+        export_error = str(exc)
+        dk_csv = None
+
+    if export_error:
+        st.error(f"DraftKings export is not ready: {export_error}")
+    else:
+        st.download_button(
+            "DOWNLOAD DK SHOWDOWN CSV",
+            data=dk_csv,
+            file_name="nuke_showdown_dk_portfolio.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+            key="showdown_dk_export_download",
+        )
+        st.caption(f"{len(export_rows)} lineup{'s' if len(export_rows) != 1 else ''} ready for DraftKings upload.")
+
     overall, captains = exposure_table(portfolio, sim_players)
     e1, e2 = st.columns(2)
     with e1:

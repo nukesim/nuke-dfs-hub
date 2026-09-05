@@ -42,13 +42,16 @@ def _script_multiplier(pos, team, script, team_a, team_b):
     return mult
 
 
-def simulate_player_outcomes(players, teams, n_sims=5000, seed=26):
+def simulate_player_outcomes(players, teams, n_sims=5000, seed=26, boosts=None):
     rng = np.random.default_rng(int(seed))
     team_a, team_b = teams
     n = len(players)
     sims = np.zeros((int(n_sims), n), dtype=np.float32)
     scripts = rng.choice(SCRIPT_NAMES, size=int(n_sims), p=[.20,.16,.13,.12,.12,.11,.10,.06])
     base = np.array([_base_projection(r) for _, r in players.iterrows()], dtype=float)
+    boosts = boosts or {}
+    for i in range(len(base)):
+        base[i] *= max(0.05, 1.0 + float(boosts.get(i, 0.0)) / 100.0)
     positions = players["Pos"].astype(str).str.upper().tolist()
     player_teams = players["Team"].astype(str).tolist()
 
@@ -169,32 +172,56 @@ def add_lineup_labels(results, players):
     return out
 
 
-def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35):
-    if results.empty: return results
+def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35, player_mins=None, player_maxes=None):
+    if results.empty:
+        return results
     target = max(1, int(count))
-    max_player = max(1, int(np.floor(target * float(max_player_pct) + 1e-9)))
-    max_cpt = max(1, int(np.floor(target * float(max_cpt_pct) + 1e-9)))
+    player_mins = player_mins or {}
+    player_maxes = player_maxes or {}
+    global_player_max = max(1, int(np.floor(target * float(max_player_pct) + 1e-9)))
+    global_cpt_max = max(1, int(np.floor(target * float(max_cpt_pct) + 1e-9)))
+    min_counts = {i: int(np.ceil(target * max(0.0, min(1.0, float(player_mins.get(i, 0.0)))))) for i in range(len(players))}
+    max_counts = {}
+    for i in range(len(players)):
+        personal = max(0.0, min(1.0, float(player_maxes.get(i, 1.0))))
+        personal_count = int(np.floor(target * personal + 1e-9))
+        max_counts[i] = min(global_player_max, personal_count)
     player_counts = Counter()
     cpt_counts = Counter()
     chosen = []
+    used = set()
+    band = results.head(min(len(results), 6000)).reset_index(drop=True)
 
-    # Search the full ranked candidate pool; stopping at a small top band can
-    # make a legal target portfolio impossible even when alternatives exist.
-    for _, r in results.iterrows():
-        cpt = int(r["_cpt"])
-        inds = [cpt] + list(map(int, r["_flex"]))
-        if cpt_counts[cpt] >= max_cpt:
-            continue
-        if any(player_counts[i] >= max_player for i in inds):
-            continue
+    for _ in range(target):
+        best_idx = None
+        best_value = None
+        for ridx, r in band.iterrows():
+            if ridx in used:
+                continue
+            cpt = int(r["_cpt"])
+            inds = [cpt] + list(map(int, r["_flex"]))
+            if cpt_counts[cpt] >= global_cpt_max:
+                continue
+            if any(player_counts[i] >= max_counts.get(i, global_player_max) for i in inds):
+                continue
+            deficit_bonus = 0.0
+            for i in inds:
+                need = max(0, min_counts.get(i, 0) - player_counts[i])
+                deficit_bonus += need * 1000.0
+            value = deficit_bonus + float(r.get("NUKE Score", 0.0))
+            if best_value is None or value > best_value:
+                best_value = value
+                best_idx = ridx
+        if best_idx is None:
+            break
+        r = band.iloc[best_idx]
+        cpt = int(r["_cpt"]); inds = [cpt] + list(map(int, r["_flex"]))
         chosen.append(r)
+        used.add(best_idx)
         cpt_counts[cpt] += 1
         player_counts.update(inds)
-        if len(chosen) >= target:
-            break
 
-    return pd.DataFrame(chosen).reset_index(drop=True) if chosen else pd.DataFrame(columns=results.columns)
-
+    return pd.DataFrame(chosen).reset_index(drop=True) if chosen else results.iloc[0:0].copy()
 
 def exposure_table(portfolio, players):
     if portfolio.empty: return pd.DataFrame(), pd.DataFrame()

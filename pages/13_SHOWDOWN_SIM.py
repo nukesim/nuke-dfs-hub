@@ -12,6 +12,8 @@ from nuke_showdown_sim import (
 )
 
 DEFAULT_SHOWDOWN_CSV = Path(__file__).resolve().parents[1] / "data" / "showdown_current.csv"
+ODDS_CURRENT_CSV = Path(__file__).resolve().parents[1] / "data" / "nfl_odds_current.csv"
+ODDS_HISTORY_CSV = Path(__file__).resolve().parents[1] / "data" / "nfl_odds_history.csv"
 
 st.set_page_config(page_title="NUKE Showdown Sim", page_icon="⚡", layout="wide")
 render_nav()
@@ -47,7 +49,7 @@ if st.session_state.get("showdown_sim_slate_sig") != slate_sig:
     st.session_state["showdown_sim_slate_sig"] = slate_sig
     for key in [
         "showdown_sim_results", "showdown_sim_portfolio", "showdown_sim_players",
-        "showdown_sim_scripts", "showdown_sim_seed",
+        "showdown_sim_scripts", "showdown_sim_seed", "showdown_player_controls",
     ]:
         st.session_state.pop(key, None)
 
@@ -65,6 +67,121 @@ m1.metric("Game", f"{team_a} vs {team_b}")
 m2.metric("Active Players", len(players))
 m3.metric("Format", "1 CPT + 5 FLEX")
 m4.metric("Cap", "$50,000")
+
+st.subheader("📈 Sportsbook & Line Movement")
+odds_now = pd.DataFrame()
+odds_hist = pd.DataFrame()
+try:
+    if ODDS_CURRENT_CSV.exists():
+        odds_now = pd.read_csv(ODDS_CURRENT_CSV)
+        odds_now = odds_now[odds_now["Team"].astype(str).isin([team_a, team_b])].copy()
+        if not odds_now.empty:
+            event_ids = odds_now["Event ID"].dropna().astype(str).unique().tolist()
+            if event_ids:
+                odds_now = odds_now[odds_now["Event ID"].astype(str).eq(event_ids[0])].copy()
+    if ODDS_HISTORY_CSV.exists() and not odds_now.empty:
+        odds_hist = pd.read_csv(ODDS_HISTORY_CSV)
+        eid = str(odds_now.iloc[0]["Event ID"])
+        odds_hist = odds_hist[odds_hist["Event ID"].astype(str).eq(eid)].copy()
+except Exception:
+    odds_now = pd.DataFrame()
+    odds_hist = pd.DataFrame()
+
+if odds_now.empty:
+    st.info("Sportsbook consensus is not available for this game yet.")
+else:
+    odds_now = odds_now.sort_values("Team")
+    game_total = float(odds_now["Game Total"].dropna().iloc[0]) if odds_now["Game Total"].notna().any() else None
+    book_count = int(odds_now["Book Count"].max()) if "Book Count" in odds_now.columns else 0
+    snapshot = str(odds_now["Snapshot UTC"].max()) if "Snapshot UTC" in odds_now.columns else ""
+    o1, o2, o3 = st.columns(3)
+    o1.metric("Game Total", f"{game_total:.1f}" if game_total is not None else "—")
+    for col, team in zip([o2, o3], [team_a, team_b]):
+        r = odds_now[odds_now["Team"].astype(str).eq(team)]
+        if not r.empty:
+            rr = r.iloc[0]
+            spread = float(rr.get("Spread", 0) or 0)
+            tt = float(rr.get("Team Total", 0) or 0)
+            col.metric(f"{team} · Team Total", f"{tt:.1f}", delta=f"Spread {spread:+.1f}")
+    books = str(odds_now.iloc[0].get("Books", ""))
+    st.caption(f"Consensus across {book_count} sportsbooks · Latest snapshot: {snapshot}" + (f" · {books}" if books else ""))
+
+    if not odds_hist.empty:
+        odds_hist["Snapshot UTC"] = pd.to_datetime(odds_hist["Snapshot UTC"], errors="coerce", utc=True)
+        odds_hist = odds_hist.dropna(subset=["Snapshot UTC"]).sort_values("Snapshot UTC")
+        first = odds_hist.groupby("Team", as_index=False).first()
+        last = odds_hist.groupby("Team", as_index=False).last()
+        with st.expander("Line movement history", expanded=True):
+            mov_rows = []
+            for team in [team_a, team_b]:
+                a = first[first["Team"].astype(str).eq(team)]
+                b = last[last["Team"].astype(str).eq(team)]
+                if not a.empty and not b.empty:
+                    mov_rows.append({
+                        "Team": team,
+                        "Open Spread": float(a.iloc[0]["Spread"]),
+                        "Current Spread": float(b.iloc[0]["Spread"]),
+                        "Spread Move": float(b.iloc[0]["Spread"] - a.iloc[0]["Spread"]),
+                        "Open Team Total": float(a.iloc[0]["Team Total"]),
+                        "Current Team Total": float(b.iloc[0]["Team Total"]),
+                        "Team Total Move": float(b.iloc[0]["Team Total"] - a.iloc[0]["Team Total"]),
+                    })
+            if mov_rows:
+                st.dataframe(pd.DataFrame(mov_rows), use_container_width=True, hide_index=True)
+            chart = odds_hist.pivot_table(index="Snapshot UTC", columns="Team", values="Team Total", aggfunc="last")
+            if not chart.empty:
+                st.caption("Team total movement")
+                st.line_chart(chart, use_container_width=True)
+            gt = odds_hist.drop_duplicates("Snapshot UTC").set_index("Snapshot UTC")[["Game Total"]]
+            if not gt.empty:
+                st.caption("Game total movement")
+                st.line_chart(gt, use_container_width=True)
+
+st.subheader("🎛️ Player Controls")
+st.caption("Boost changes the simulated baseline for that player. Min/Max exposure are enforced in the generated portfolio. Leave 0 / 100 for no player-specific exposure rule.")
+control_state = dict(st.session_state.get("showdown_player_controls", {}) or {})
+team_tabs = st.tabs([team_a, team_b])
+for tab, team in zip(team_tabs, [team_a, team_b]):
+    with tab:
+        tp = players[players["Team"].astype(str).eq(team)].copy().reset_index()
+        rows = []
+        for _, r in tp.iterrows():
+            key = str(r["Player Key"])
+            cfg = control_state.get(key, {})
+            rows.append({
+                "_idx": int(r["index"]),
+                "Player": r["Name"],
+                "Pos": r["Pos"],
+                "Salary": int(r["FLEX Salary"]),
+                "Boost %": float(cfg.get("boost", 0.0)),
+                "Min %": int(cfg.get("min", 0)),
+                "Max %": int(cfg.get("max", 100)),
+            })
+        edit = pd.DataFrame(rows).set_index("_idx")
+        edited = st.data_editor(
+            edit, use_container_width=True, hide_index=True,
+            disabled=["Player", "Pos", "Salary"],
+            column_config={
+                "Player": st.column_config.TextColumn("Player", width="medium"),
+                "Pos": st.column_config.TextColumn("Pos", width="small"),
+                "Salary": st.column_config.NumberColumn("FLEX Salary", format="$%d", width="small"),
+                "Boost %": st.column_config.NumberColumn("Boost %", min_value=-50.0, max_value=50.0, step=5.0, format="%.0f%%", width="small", help="Changes this player's simulated baseline before each game outcome is drawn."),
+                "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
+                "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
+            },
+            key=f"showdown_controls_{team}_{slate_sig}",
+        )
+        for idx, er in edited.iterrows():
+            key = str(players.iloc[int(idx)]["Player Key"])
+            mn = int(er["Min %"]); mx = int(er["Max %"])
+            if mn > mx:
+                mn = mx
+            control_state[key] = {"boost": float(er["Boost %"]), "min": mn, "max": mx}
+st.session_state["showdown_player_controls"] = control_state
+
+boosts = {i: float(control_state.get(str(r["Player Key"]), {}).get("boost", 0.0)) for i, r in players.iterrows()}
+player_mins = {i: float(control_state.get(str(r["Player Key"]), {}).get("min", 0)) / 100.0 for i, r in players.iterrows()}
+player_maxes = {i: float(control_state.get(str(r["Player Key"]), {}).get("max", 100)) / 100.0 for i, r in players.iterrows()}
 
 with st.expander("Simulation Settings", expanded=True):
     c1, c2, c3, c4 = st.columns(4)
@@ -105,7 +222,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
     seed = int(manual_seed) if fixed_seed else secrets.randbelow(2147483645) + 1
     with st.spinner("Simulating single-game outcomes and evaluating Showdown constructions..."):
         sims, scripts, base = simulate_player_outcomes(
-            players, meta["teams"], n_sims=n_sims, seed=seed
+            players, meta["teams"], n_sims=n_sims, seed=seed, boosts=boosts
         )
         cand = generate_showdown_candidates(
             players,
@@ -117,6 +234,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
         portfolio = build_portfolio(
             results, players, count=portfolio_n,
             max_player_pct=max_player, max_cpt_pct=max_cpt,
+            player_mins=player_mins, player_maxes=player_maxes,
         )
         st.session_state["showdown_sim_results"] = results
         st.session_state["showdown_sim_portfolio"] = portfolio

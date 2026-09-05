@@ -56,6 +56,7 @@ def render_nav():
     with st.sidebar:
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
         st.page_link("pages/6_SIM.py", label="NUKE Sim", icon="☢️")
+        st.page_link("pages/12_SHOWDOWN.py", label="NFL Showdown", icon="⚡")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
         if st.session_state.get("nuke_player_takes"):

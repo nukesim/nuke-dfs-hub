@@ -1,0 +1,29 @@
+name: Add Showdown player exclusions
+on:
+  push:
+    paths:
+      - tools/showdown_player_exclude_patch.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/showdown_player_exclude_patch.py
+      - run: python -m py_compile pages/13_SHOWDOWN_SIM.py pages/11_GUIDE.py
+      - name: Verify
+        run: |
+          grep -q 'Exclude' pages/13_SHOWDOWN_SIM.py
+          grep -q 'excluded from candidate generation' pages/13_SHOWDOWN_SIM.py
+          grep -q 'Exclude' pages/11_GUIDE.py
+      - name: Commit
+        run: |
+          git config user.name "nukesim"
+          git config user.email "bryson232323@gmail.com"
+          git add pages/13_SHOWDOWN_SIM.py pages/11_GUIDE.py
+          git diff --cached --quiet || git commit -m "Add player exclusion controls to Showdown"
+          git push

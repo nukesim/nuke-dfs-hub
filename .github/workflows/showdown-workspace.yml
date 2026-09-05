@@ -18,9 +18,9 @@ jobs:
       - run: python -m py_compile pages/13_SHOWDOWN_SIM.py nuke_showdown_workspace.py nuke_showdown_sim.py
       - name: Verify markers
         run: |
-          grep -q 'Save / Load Workspace' pages/13_SHOWDOWN_SIM.py
+          grep -q 'Showdown Workspace' pages/13_SHOWDOWN_SIM.py
           grep -q 'showdown_workspace_bytes' pages/13_SHOWDOWN_SIM.py
-          grep -q 'st.rerun()' pages/13_SHOWDOWN_SIM.py
+          grep -q 'showdown_workspace_run_ready_notice' pages/13_SHOWDOWN_SIM.py
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"

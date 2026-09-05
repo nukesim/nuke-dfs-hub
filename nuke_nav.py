@@ -53,3 +53,5 @@ def render_nav():
         st.caption("Buy Me a Coffee supports one-time or monthly contributions.")
         st.divider()
         st.caption("NUKE DFS is an independent fantasy sports research and lineup-building tool. It is not affiliated with or endorsed by DraftKings, FanDuel, or the NFL. Simulations and model outputs are estimates and do not guarantee outcomes or winnings. Play responsibly and follow applicable laws and platform rules.")
+
+# Deployment refresh marker: Showdown navigation added 2026-09-05

@@ -1,0 +1,28 @@
+name: Set Showdown salary sliders to 100
+on:
+  push:
+    paths:
+      - tools/showdown_salary_step_100.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/showdown_salary_step_100.py
+      - run: python -m py_compile pages/13_SHOWDOWN_SIM.py
+      - name: Verify
+        run: |
+          grep -q 'Minimum salary", 30000, 50000, 42000, 100' pages/13_SHOWDOWN_SIM.py
+          grep -q 'Maximum salary", 30000, 50000, 50000, 100' pages/13_SHOWDOWN_SIM.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/13_SHOWDOWN_SIM.py
+          git diff --cached --quiet || git commit -m "Use $100 salary increments in Showdown"
+          git push

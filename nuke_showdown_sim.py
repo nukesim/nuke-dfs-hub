@@ -74,14 +74,8 @@ def simulate_player_outcomes(players, teams, n_sims=5000, seed=26, boosts=None):
     return sims, scripts, base
 
 
-def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, seed=26):
-    """Create a diverse legal Showdown candidate pool across many Captains.
-
-    The old generator exhausted max_candidates under the first CPT before ever
-    reaching later Captains. This stochastic sampler deliberately mixes Captain
-    choices and FLEX combinations so downstream exposure constraints have a real
-    set of alternatives to choose from.
-    """
+def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, max_salary=SHOWDOWN_SALARY_CAP, seed=26):
+    """Create a diverse legal Showdown candidate pool across many Captains."""
     rows = players.reset_index(drop=True)
     n = len(rows)
     if n < 6:
@@ -89,13 +83,9 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
 
     rng = np.random.default_rng(int(seed) + 7919)
     base = np.array([_base_projection(r) for _, r in rows.iterrows()], dtype=float)
-
-    # Keep plausible Captain choices broad enough for large-field Showdown.
     cpt_score = base + rows["FLEX Salary"].to_numpy(dtype=float) / 5000.0
     cpt_count = min(n, max(16, min(30, n)))
     cpt_pool = np.argsort(-cpt_score)[:cpt_count]
-
-    # FLEX sampling slightly favors stronger plays without excluding salary savers.
     flex_weight = np.maximum(base, 0.75) ** 1.15
     flex_weight = flex_weight / flex_weight.sum()
 
@@ -104,8 +94,8 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
     candidates = []
     attempts = 0
     max_attempts = max(50000, target * 80)
+    effective_max_salary = min(SHOWDOWN_SALARY_CAP, int(max_salary))
 
-    # Cycle Captains rather than letting any one CPT monopolize the pool.
     cpt_order = list(map(int, rng.permutation(cpt_pool)))
     cpt_cursor = 0
     while len(candidates) < target and attempts < max_attempts:
@@ -124,7 +114,6 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
             continue
 
         salary = int(rows.iloc[cpt]["CPT Salary"]) + int(rows.iloc[list(flex)]["FLEX Salary"].sum())
-        effective_max_salary = min(SHOWDOWN_SALARY_CAP, int(max_salary))
         if salary > effective_max_salary or salary < int(min_salary):
             continue
         teams = set(rows.iloc[[cpt] + list(flex)]["Team"].astype(str))
@@ -181,25 +170,12 @@ def add_lineup_labels(results, players):
     out.insert(0, "CPT", [rows.iloc[i]["Name"] for i in out["_cpt"]])
     for k in range(5):
         out.insert(k + 1, f"FLEX{k+1}", [rows.iloc[list(x)[k]]["Name"] for x in out["_flex"]])
-    constructions = [
-        _construction_label(r["_cpt"], r["_flex"], rows)
-        for _, r in out.iterrows()
-    ]
+    constructions = [_construction_label(r["_cpt"], r["_flex"], rows) for _, r in out.iterrows()]
     out.insert(6, "Construction", constructions)
     return out
 
 
-def build_portfolio(
-    results,
-    players,
-    count=20,
-    max_player_pct=.75,
-    max_cpt_pct=.35,
-    player_mins=None,
-    player_maxes=None,
-    construction_mins=None,
-    construction_maxes=None,
-):
+def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35, player_mins=None, player_maxes=None, construction_mins=None, construction_maxes=None):
     if results.empty:
         return results
     target = max(1, int(count))
@@ -210,75 +186,51 @@ def build_portfolio(
 
     global_player_max = max(1, int(np.floor(target * float(max_player_pct) + 1e-9)))
     global_cpt_max = max(1, int(np.floor(target * float(max_cpt_pct) + 1e-9)))
-    min_counts = {
-        i: int(np.ceil(target * max(0.0, min(1.0, float(player_mins.get(i, 0.0))))))
-        for i in range(len(players))
-    }
+    min_counts = {i: int(np.ceil(target * max(0.0, min(1.0, float(player_mins.get(i, 0.0)))))) for i in range(len(players))}
     max_counts = {}
     for i in range(len(players)):
         personal = max(0.0, min(1.0, float(player_maxes.get(i, 1.0))))
         personal_count = int(np.floor(target * personal + 1e-9))
         max_counts[i] = min(global_player_max, personal_count)
 
-    construction_min_counts = {
-        str(k): int(np.ceil(target * max(0.0, min(1.0, float(v)))))
-        for k, v in construction_mins.items()
-    }
-    construction_max_counts = {
-        str(k): int(np.floor(target * max(0.0, min(1.0, float(v))) + 1e-9))
-        for k, v in construction_maxes.items()
-    }
+    construction_min_counts = {str(k): int(np.ceil(target * max(0.0, min(1.0, float(v))))) for k, v in construction_mins.items()}
+    construction_max_counts = {str(k): int(np.floor(target * max(0.0, min(1.0, float(v))) + 1e-9)) for k, v in construction_maxes.items()}
 
-    player_counts = Counter()
-    cpt_counts = Counter()
-    construction_counts = Counter()
-    chosen = []
-    used = set()
+    player_counts = Counter(); cpt_counts = Counter(); construction_counts = Counter()
+    chosen = []; used = set()
     band = results.head(min(len(results), 6000)).reset_index(drop=True)
 
     for _ in range(target):
-        best_idx = None
-        best_value = None
+        best_idx = None; best_value = None
         for ridx, r in band.iterrows():
-            if ridx in used:
-                continue
+            if ridx in used: continue
             cpt = int(r["_cpt"])
             inds = [cpt] + list(map(int, r["_flex"]))
             construction = _construction_label(cpt, r["_flex"], players)
-            if cpt_counts[cpt] >= global_cpt_max:
-                continue
-            if any(player_counts[i] >= max_counts.get(i, global_player_max) for i in inds):
-                continue
-            if construction in construction_max_counts and construction_counts[construction] >= construction_max_counts[construction]:
-                continue
+            if cpt_counts[cpt] >= global_cpt_max: continue
+            if any(player_counts[i] >= max_counts.get(i, global_player_max) for i in inds): continue
+            if construction in construction_max_counts and construction_counts[construction] >= construction_max_counts[construction]: continue
 
             deficit_bonus = 0.0
             for i in inds:
                 need = max(0, min_counts.get(i, 0) - player_counts[i])
                 deficit_bonus += need * 1000.0
-            construction_need = max(
-                0,
-                construction_min_counts.get(construction, 0) - construction_counts[construction],
-            )
+            construction_need = max(0, construction_min_counts.get(construction, 0) - construction_counts[construction])
             deficit_bonus += construction_need * 1500.0
             value = deficit_bonus + float(r.get("NUKE Score", 0.0))
             if best_value is None or value > best_value:
-                best_value = value
-                best_idx = ridx
+                best_value = value; best_idx = ridx
 
-        if best_idx is None:
-            break
+        if best_idx is None: break
         r = band.iloc[best_idx]
         cpt = int(r["_cpt"])
         inds = [cpt] + list(map(int, r["_flex"]))
         construction = _construction_label(cpt, r["_flex"], players)
-        chosen.append(r)
-        used.add(best_idx)
-        cpt_counts[cpt] += 1
-        player_counts.update(inds)
-        construction_counts[construction] += 1
+        chosen.append(r); used.add(best_idx)
+        cpt_counts[cpt] += 1; player_counts.update(inds); construction_counts[construction] += 1
 
     return pd.DataFrame(chosen).reset_index(drop=True) if chosen else results.iloc[0:0].copy()
+
 
 def exposure_table(portfolio, players):
     if portfolio.empty: return pd.DataFrame(), pd.DataFrame()

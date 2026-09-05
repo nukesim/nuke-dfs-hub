@@ -6,6 +6,9 @@ import streamlit as st
 
 from nuke_nav import render_nav
 from nuke_showdown import export_lineup_only_csv, parse_showdown_salary_csv
+from nuke_showdown_fanduel import (
+    FANDUEL_SHOWDOWN_SALARY_CAP, export_fanduel_lineup_only_csv, parse_fanduel_showdown_csv,
+)
 from nuke_showdown_sim import (
     SCRIPT_NAMES, add_lineup_labels, build_portfolio, evaluate_candidates,
     exposure_table, generate_showdown_candidates, simulate_player_outcomes,
@@ -17,21 +20,38 @@ from nuke_showdown_workspace import (
 )
 
 DEFAULT_SHOWDOWN_CSV = Path(__file__).resolve().parents[1] / "data" / "showdown_current.csv"
+DEFAULT_FANDUEL_SHOWDOWN_CSV = Path(__file__).resolve().parents[1] / "data" / "showdown_fanduel_current.csv"
 ODDS_CURRENT_CSV = Path(__file__).resolve().parents[1] / "data" / "nfl_odds_current.csv"
 ODDS_HISTORY_CSV = Path(__file__).resolve().parents[1] / "data" / "nfl_odds_history.csv"
 
 st.set_page_config(page_title="NUKE Showdown Sim", page_icon="⚡", layout="wide")
 render_nav()
 st.title("⚡ NUKE SHOWDOWN")
-st.caption("Projection-free DraftKings NFL single-game simulation · game scripts · Captain outcomes · portfolio generation")
+site = st.radio("Platform", ["DraftKings", "FanDuel"], horizontal=True, key="showdown_site")
+site_key = "dk" if site == "DraftKings" else "fd"
+salary_cap = 50000 if site == "DraftKings" else FANDUEL_SHOWDOWN_SALARY_CAP
+multiplier_label = "CPT" if site == "DraftKings" else "MVP"
+flex_label = "FLEX" if site == "DraftKings" else "AnyFLEX"
+st.caption(f"Projection-free {site} NFL single-game simulation · game scripts · {multiplier_label} outcomes · portfolio generation")
+
+if st.session_state.get("showdown_last_site") != site:
+    st.session_state["showdown_last_site"] = site
+    st.session_state["showdown_min_salary"] = 42000 if site == "DraftKings" else 50000
+    st.session_state["showdown_max_salary"] = salary_cap
+    for _key in [
+        "showdown_sim_results", "showdown_sim_portfolio", "showdown_sim_players",
+        "showdown_sim_scripts", "showdown_sim_seed", "showdown_player_controls",
+        "showdown_construction_controls",
+    ]:
+        st.session_state.pop(_key, None)
 
 st.subheader("🏈 Current Game")
-with st.expander("Optional: upload a different DraftKings Showdown salary CSV", expanded=False):
+with st.expander(f"Optional: upload a different {site} Showdown salary CSV", expanded=False):
     upload = st.file_uploader(
-        "Override current Showdown slate",
+        f"Override current {site} Showdown slate",
         type=["csv"],
-        key="showdown_sim_upload",
-        help="Normally you do not need this. NUKE automatically loads the current bundled Showdown slate.",
+        key=f"showdown_sim_upload_{site_key}",
+        help=f"Normally you do not need this. NUKE automatically loads the current bundled {site} single-game slate.",
     )
 
 try:
@@ -39,27 +59,31 @@ try:
         raw = pd.read_csv(upload)
         source_label = f"Uploaded override: {upload.name}"
     else:
-        if not DEFAULT_SHOWDOWN_CSV.exists():
-            st.error("The current Showdown slate is not available yet.")
+        default_csv = DEFAULT_SHOWDOWN_CSV if site == "DraftKings" else DEFAULT_FANDUEL_SHOWDOWN_CSV
+        if not default_csv.exists():
+            st.error(f"The current {site} Showdown slate is not available yet.")
             st.stop()
-        raw = pd.read_csv(DEFAULT_SHOWDOWN_CSV)
+        raw = pd.read_csv(default_csv)
         source_label = "Loaded automatically"
-    players, meta = parse_showdown_salary_csv(raw)
+    if site == "DraftKings":
+        players, meta = parse_showdown_salary_csv(raw)
+    else:
+        players, meta = parse_fanduel_showdown_csv(raw)
 except Exception as exc:
-    st.error(f"Could not read this Showdown slate: {exc}")
+    st.error(f"Could not read this {site} Showdown slate: {exc}")
     st.stop()
 
-slate_sig = f"{meta['game_info']}|{len(players)}|{source_label}"
+slate_sig = f"{site}|{meta['game_info']}|{len(players)}|{source_label}"
 
 with st.sidebar:
     st.divider()
     st.markdown("### 💾 Showdown Workspace")
     st.caption("Save a true snapshot of this game, player controls, SIM settings, and completed results.")
-    workspace_payload = showdown_workspace_bytes(st.session_state, meta["game_info"])
+    workspace_payload = showdown_workspace_bytes(st.session_state, meta["game_info"], site)
     st.download_button(
         "SAVE WORKSPACE",
         data=workspace_payload,
-        file_name="nuke_showdown_workspace.json",
+        file_name=f"nuke_showdown_{site_key}_workspace.json",
         mime="application/json",
         use_container_width=True,
         key="showdown_workspace_download",
@@ -79,7 +103,10 @@ with st.sidebar:
         try:
             loaded_workspace = load_showdown_workspace_bytes(workspace_upload.getvalue())
             saved_slate = str(loaded_workspace.get("slate_label", "") or "")
+            saved_platform = str(loaded_workspace.get("platform", "") or "")
             current_slate = str(meta.get("game_info", "") or "")
+            if saved_platform and saved_platform != site:
+                raise ValueError(f"This workspace is for {saved_platform}, but the current platform is {site}.")
             if saved_slate and saved_slate != current_slate:
                 raise ValueError(
                     f"This workspace is for {saved_slate}, but the current Showdown slate is {current_slate}."
@@ -117,8 +144,8 @@ if flagged:
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Game", f"{team_a} vs {team_b}")
 m2.metric("Active Players", len(players))
-m3.metric("Format", "1 CPT + 5 FLEX")
-m4.metric("Cap", "$50,000")
+m3.metric("Format", f"1 {multiplier_label} + 5 {flex_label}")
+m4.metric("Cap", f"${salary_cap:,}")
 
 st.subheader("📈 Sportsbook & Line Movement")
 odds_now = pd.DataFrame()
@@ -219,7 +246,7 @@ for col, team in zip(team_columns, [team_a, team_b]):
             column_config={
                 "Player": st.column_config.TextColumn("Player", width="medium"),
                 "Pos": st.column_config.TextColumn("Pos", width="small"),
-                "Salary": st.column_config.NumberColumn("FLEX", format="$%d", width="small"),
+                "Salary": st.column_config.NumberColumn(flex_label, format="$%d", width="small"),
                 "Boost %": st.column_config.NumberColumn("Boost %", min_value=-50.0, max_value=50.0, step=5.0, format="%.0f%%", width="small", help="Changes this player's simulated baseline before each game outcome is drawn."),
                 "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
                 "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
@@ -282,16 +309,17 @@ with st.expander("Simulation Settings", expanded=True):
     portfolio_n = c3.selectbox("Portfolio lineups", [5, 10, 20, 50, 100, 150], index=2, key="showdown_portfolio_n")
     c4.caption("Salary range applies to every generated candidate lineup.")
     s1, s2 = st.columns(2)
-    min_salary = s1.slider("Minimum salary", 30000, 50000, 42000, 100, key="showdown_min_salary")
+    salary_floor_min = 30000
+    min_salary = s1.slider("Minimum salary", salary_floor_min, salary_cap, 42000 if site == "DraftKings" else 50000, 100, key="showdown_min_salary")
     max_salary = s2.slider(
-        "Maximum salary", 30000, 50000, 50000, 100, key="showdown_max_salary",
-        help="Set below $50,000 to intentionally leave salary unused and reduce duplicated Showdown constructions.",
+        "Maximum salary", salary_floor_min, salary_cap, salary_cap, 100, key="showdown_max_salary",
+        help=f"Set below ${salary_cap:,} to intentionally leave salary unused and reduce duplicated Showdown constructions.",
     )
     if max_salary < min_salary:
         st.warning("Maximum salary is below Minimum salary. Raise Max or lower Min before running the SIM.")
     c5, c6 = st.columns(2)
     max_player = c5.slider("Max player exposure", 25, 100, 75, 5, key="showdown_max_player") / 100
-    max_cpt = c6.slider("Max Captain exposure", 10, 100, 35, 5, key="showdown_max_cpt") / 100
+    max_cpt = c6.slider(f"Max {multiplier_label} exposure", 10, 100, 35, 5, key="showdown_max_cpt") / 100
 
     st.markdown("##### Randomness")
     r1, r2 = st.columns([1, 2])
@@ -316,7 +344,7 @@ with st.expander("Simulation Settings", expanded=True):
 st.markdown("#### What NUKE is simulating")
 st.caption(
     "Balanced · Shootout · Low Scoring · each team controlling the game · Passing Spike · "
-    "Rushing Control · Chaos. Player outcomes use DraftKings salary/FPPG as baseline signals "
+    f"Rushing Control · Chaos. Player outcomes use {site} salary/FPPG as baseline signals "
     "plus correlated game, team and role volatility — no paid projections required."
 )
 
@@ -331,6 +359,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
             max_candidates=candidates,
             min_salary=min_salary,
             max_salary=max_salary,
+            salary_cap=salary_cap,
             seed=seed,
         )
         results = evaluate_candidates(players, cand, sims, scripts)
@@ -362,8 +391,10 @@ if st.session_state.pop("showdown_construction_rebuild_notice", False):
 
 st.subheader("Top Simulated Lineups")
 labeled = add_lineup_labels(results.head(250), sim_players)
+if site == "FanDuel":
+    labeled = labeled.rename(columns={"CPT": "MVP"})
 show_cols = [
-    "CPT", "FLEX1", "FLEX2", "FLEX3", "FLEX4", "FLEX5", "Construction", "Salary",
+    multiplier_label, "FLEX1", "FLEX2", "FLEX3", "FLEX4", "FLEX5", "Construction", "Salary",
     "NUKE Score", "Mean", "Ceiling", "P95", "Top 1% Score",
 ]
 st.dataframe(
@@ -386,6 +417,8 @@ else:
         st.success(f"Built full {len(portfolio)}-lineup portfolio with exposure caps enforced.")
 
     p = add_lineup_labels(portfolio, sim_players)
+    if site == "FanDuel":
+        p = p.rename(columns={"CPT": "MVP"})
     st.dataframe(
         p[show_cols].round(2),
         use_container_width=True,
@@ -407,8 +440,8 @@ else:
     }
     </style>
     """, unsafe_allow_html=True)
-    st.markdown("#### 📤 DraftKings Export")
-    st.caption("Download this exact NUKE portfolio using the DraftKings CPT/FLEX player IDs from the current Showdown salary file.")
+    st.markdown(f"#### 📤 {site} Export")
+    st.caption(f"Download this exact NUKE portfolio using the {site} {multiplier_label}/{flex_label} player IDs from the current single-game salary file.")
     export_rows = []
     export_error = None
     sim_rows = sim_players.reset_index(drop=True)
@@ -420,8 +453,8 @@ else:
             if len(all_idxs) != 6 or len(set(all_idxs)) != 6:
                 raise ValueError("A portfolio lineup does not contain 6 unique players.")
             salary = int(lineup["Salary"])
-            if salary > 50000:
-                raise ValueError(f"A portfolio lineup exceeds the DraftKings salary cap: ${salary:,}.")
+            if salary > salary_cap:
+                raise ValueError(f"A portfolio lineup exceeds the {site} salary cap: ${salary:,}.")
             cpt_key = str(sim_rows.iloc[cpt_idx]["Player Key"])
             flex_keys = [str(sim_rows.iloc[i]["Player Key"]) for i in flex_idxs]
             export_rows.append({
@@ -438,28 +471,28 @@ else:
             cpt = players_by_key.get(rec["captain_key"])
             flex = [players_by_key.get(k) for k in rec["flex_keys"]]
             if cpt is None or any(x is None for x in flex):
-                raise ValueError("A portfolio player could not be matched back to the current DraftKings salary file.")
+                raise ValueError(f"A portfolio player could not be matched back to the current {site} salary file.")
             if not str(cpt.get("CPT ID", "")).strip() or any(not str(x.get("FLEX ID", "")).strip() for x in flex):
-                raise ValueError("A DraftKings CPT/FLEX player ID is missing from the current salary file.")
+                raise ValueError(f"A {site} {multiplier_label}/{flex_label} player ID is missing from the current salary file.")
 
-        dk_csv = export_lineup_only_csv(export_rows, players_by_key)
+        export_csv = export_lineup_only_csv(export_rows, players_by_key) if site == "DraftKings" else export_fanduel_lineup_only_csv(export_rows, players_by_key)
     except Exception as exc:
         export_error = str(exc)
-        dk_csv = None
+        export_csv = None
 
     if export_error:
-        st.error(f"DraftKings export is not ready: {export_error}")
+        st.error(f"{site} export is not ready: {export_error}")
     else:
         st.download_button(
-            "DOWNLOAD DK SHOWDOWN CSV",
-            data=dk_csv,
-            file_name="nuke_showdown_dk_portfolio.csv",
+            f"DOWNLOAD {'DK' if site == 'DraftKings' else 'FANDUEL'} SHOWDOWN CSV",
+            data=export_csv,
+            file_name=f"nuke_showdown_{site_key}_portfolio.csv",
             mime="text/csv",
             type="primary",
             use_container_width=True,
-            key="showdown_dk_export_download",
+            key=f"showdown_{site_key}_export_download",
         )
-        st.caption(f"{len(export_rows)} lineup{'s' if len(export_rows) != 1 else ''} ready for DraftKings upload.")
+        st.caption(f"{len(export_rows)} lineup{'s' if len(export_rows) != 1 else ''} ready for {site}.")
 
     overall, captains = exposure_table(portfolio, sim_players)
     e1, e2 = st.columns(2)
@@ -467,7 +500,7 @@ else:
         st.markdown("#### Player Exposure")
         st.dataframe(overall, use_container_width=True, hide_index=True)
     with e2:
-        st.markdown("#### Captain Exposure")
+        st.markdown(f"#### {multiplier_label} Exposure")
         st.dataframe(captains, use_container_width=True, hide_index=True)
 
     construction_counts = p["Construction"].value_counts().reindex(construction_styles, fill_value=0)

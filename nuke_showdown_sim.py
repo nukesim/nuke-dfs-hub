@@ -74,7 +74,7 @@ def simulate_player_outcomes(players, teams, n_sims=5000, seed=26, boosts=None):
     return sims, scripts, base
 
 
-def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, max_salary=SHOWDOWN_SALARY_CAP, seed=26):
+def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, max_salary=SHOWDOWN_SALARY_CAP, salary_cap=SHOWDOWN_SALARY_CAP, seed=26):
     """Create a diverse legal Showdown candidate pool quickly using NumPy arrays."""
     rows = players.reset_index(drop=True)
     n = len(rows)
@@ -96,7 +96,7 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
 
     target = int(max_candidates)
     minimum = int(min_salary)
-    maximum = min(SHOWDOWN_SALARY_CAP, int(max_salary))
+    maximum = min(int(salary_cap), int(max_salary))
     seen = set()
     candidates = []
 

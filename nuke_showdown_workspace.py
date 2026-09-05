@@ -81,12 +81,13 @@ def _restore_json(value):
     return {k: _restore_json(v) for k, v in value.items()}
 
 
-def build_workspace(session_state, slate_label=""):
+def build_workspace(session_state, slate_label="", platform=""):
     return {
         "product": "NUKE SHOWDOWN",
         "workspace_version": WORKSPACE_VERSION,
         "saved_at_utc": datetime.now(timezone.utc).isoformat(),
         "slate_label": str(slate_label or ""),
+        "platform": str(platform or ""),
         "controls": {
             k: _json_safe(session_state[k]) for k in CONTROL_KEYS if k in session_state
         },
@@ -99,9 +100,9 @@ def build_workspace(session_state, slate_label=""):
     }
 
 
-def workspace_bytes(session_state, slate_label=""):
+def workspace_bytes(session_state, slate_label="", platform=""):
     return json.dumps(
-        build_workspace(session_state, slate_label), indent=2, sort_keys=True
+        build_workspace(session_state, slate_label, platform), indent=2, sort_keys=True
     ).encode("utf-8")
 
 

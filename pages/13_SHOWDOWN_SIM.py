@@ -238,6 +238,42 @@ boosts = {i: float(control_state.get(str(r["Player Key"]), {}).get("boost", 0.0)
 player_mins = {i: float(control_state.get(str(r["Player Key"]), {}).get("min", 0)) / 100.0 for i, r in players.iterrows()}
 player_maxes = {i: float(control_state.get(str(r["Player Key"]), {}).get("max", 100)) / 100.0 for i, r in players.iterrows()}
 
+st.subheader("🧱 Construction Limits")
+st.caption("Control the team build mix in the final portfolio. 3-3 is even; team-specific 4-2 and 5-1 builds show which team supplies the majority of the lineup.")
+construction_styles = [f"{team_a} 5-1", f"{team_b} 5-1", f"{team_a} 4-2", f"{team_b} 4-2", "3-3 Even"]
+construction_state = dict(st.session_state.get("showdown_construction_controls", {}) or {})
+construction_rows = []
+for style in construction_styles:
+    cfg = construction_state.get(style, {})
+    construction_rows.append({
+        "Construction": style,
+        "Min %": int(cfg.get("min", 0)),
+        "Max %": int(cfg.get("max", 100)),
+    })
+construction_editor = st.data_editor(
+    pd.DataFrame(construction_rows),
+    use_container_width=True,
+    hide_index=True,
+    disabled=["Construction"],
+    column_config={
+        "Construction": st.column_config.TextColumn("Construction", width="medium"),
+        "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
+        "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
+    },
+    key="showdown_construction_editor",
+)
+construction_state = {}
+for _, row in construction_editor.iterrows():
+    mn = int(row["Min %"]); mx = int(row["Max %"])
+    if mn > mx:
+        mn = mx
+    construction_state[str(row["Construction"])] = {"min": mn, "max": mx}
+st.session_state["showdown_construction_controls"] = construction_state
+construction_mins = {k: float(v["min"]) / 100.0 for k, v in construction_state.items()}
+construction_maxes = {k: float(v["max"]) / 100.0 for k, v in construction_state.items()}
+if sum(v["min"] for v in construction_state.values()) > 100:
+    st.warning("Construction minimums add up to more than 100%. Lower the Min % values before running the SIM.")
+
 with st.expander("Simulation Settings", expanded=True):
     c1, c2, c3, c4 = st.columns(4)
     n_sims = c1.selectbox("Game simulations", [2000, 5000, 10000], index=1, key="showdown_game_sims")
@@ -292,6 +328,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
             results, players, count=portfolio_n,
             max_player_pct=max_player, max_cpt_pct=max_cpt,
             player_mins=player_mins, player_maxes=player_maxes,
+            construction_mins=construction_mins, construction_maxes=construction_maxes,
         )
         st.session_state["showdown_sim_results"] = results
         st.session_state["showdown_sim_portfolio"] = portfolio
@@ -314,7 +351,7 @@ if run_seed:
 st.subheader("Top Simulated Lineups")
 labeled = add_lineup_labels(results.head(250), sim_players)
 show_cols = [
-    "CPT", "FLEX1", "FLEX2", "FLEX3", "FLEX4", "FLEX5", "Split", "Salary",
+    "CPT", "FLEX1", "FLEX2", "FLEX3", "FLEX4", "FLEX5", "Construction", "Salary",
     "NUKE Score", "Mean", "Ceiling", "P95", "Top 1% Score",
 ]
 st.dataframe(
@@ -323,18 +360,6 @@ st.dataframe(
     hide_index=True,
     column_config={"Salary": st.column_config.NumberColumn("Salary", format="$%d")},
 )
-
-st.subheader("Game-Script Leaders")
-script_tabs = st.tabs(SCRIPT_NAMES)
-for tab, script in zip(script_tabs, SCRIPT_NAMES):
-    with tab:
-        x = results.nlargest(20, script)
-        x = add_lineup_labels(x, sim_players)
-        st.dataframe(
-            x[["CPT", "FLEX1", "FLEX2", "FLEX3", "FLEX4", "FLEX5", "Split", "Salary", script]].round(2),
-            use_container_width=True,
-            hide_index=True,
-        )
 
 st.subheader("NUKE Showdown Portfolio")
 if portfolio is None or portfolio.empty:
@@ -364,9 +389,13 @@ else:
         st.markdown("#### Captain Exposure")
         st.dataframe(captains, use_container_width=True, hide_index=True)
 
-    split_counts = p["Split"].value_counts().rename_axis("Construction").reset_index(name="Lineups")
+    construction_counts = p["Construction"].value_counts().reindex(construction_styles, fill_value=0)
+    construction_mix = construction_counts.rename_axis("Construction").reset_index(name="Lineups")
+    construction_mix["Construction %"] = (100.0 * construction_mix["Lineups"] / max(1, len(p))).round(1)
+    construction_mix["Min %"] = construction_mix["Construction"].map(lambda x: construction_state.get(x, {}).get("min", 0))
+    construction_mix["Max %"] = construction_mix["Construction"].map(lambda x: construction_state.get(x, {}).get("max", 100))
     st.markdown("#### Construction Mix")
-    st.dataframe(split_counts, use_container_width=True, hide_index=True)
+    st.dataframe(construction_mix, use_container_width=True, hide_index=True)
 
 st.info(
     "Showdown SIM V1 intentionally ranks lineups by simulated outcome quality rather than contest payout simulation. "

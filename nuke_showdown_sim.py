@@ -158,36 +158,79 @@ def evaluate_candidates(players, candidates, sims, scripts):
     return df.sort_values(["NUKE Score","Top 1% Score"], ascending=False).reset_index(drop=True)
 
 
+def _construction_label(cpt, flex, players):
+    rows = players.reset_index(drop=True)
+    inds = [int(cpt)] + list(map(int, flex))
+    counts = Counter(rows.iloc[inds]["Team"].astype(str))
+    ordered = counts.most_common()
+    if not ordered:
+        return "Unknown"
+    if len(ordered) == 2 and ordered[0][1] == ordered[1][1]:
+        return "3-3 Even"
+    major_team, major_count = ordered[0]
+    minor_count = ordered[1][1] if len(ordered) > 1 else 0
+    return f"{major_team} {major_count}-{minor_count}"
+
+
 def add_lineup_labels(results, players):
-    if results.empty: return results
+    if results.empty:
+        return results
     rows = players.reset_index(drop=True)
     out = results.copy()
     out.insert(0, "CPT", [rows.iloc[i]["Name"] for i in out["_cpt"]])
     for k in range(5):
-        out.insert(k+1, f"FLEX{k+1}", [rows.iloc[list(x)[k]]["Name"] for x in out["_flex"]])
-    splits=[]
-    for _, r in out.iterrows():
-        inds=[r["_cpt"]]+list(r["_flex"]); counts=Counter(rows.iloc[inds]["Team"].astype(str)); splits.append("-".join(map(str,sorted(counts.values(),reverse=True))))
-    out.insert(6,"Split",splits)
+        out.insert(k + 1, f"FLEX{k+1}", [rows.iloc[list(x)[k]]["Name"] for x in out["_flex"]])
+    constructions = [
+        _construction_label(r["_cpt"], r["_flex"], rows)
+        for _, r in out.iterrows()
+    ]
+    out.insert(6, "Construction", constructions)
     return out
 
 
-def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35, player_mins=None, player_maxes=None):
+def build_portfolio(
+    results,
+    players,
+    count=20,
+    max_player_pct=.75,
+    max_cpt_pct=.35,
+    player_mins=None,
+    player_maxes=None,
+    construction_mins=None,
+    construction_maxes=None,
+):
     if results.empty:
         return results
     target = max(1, int(count))
     player_mins = player_mins or {}
     player_maxes = player_maxes or {}
+    construction_mins = construction_mins or {}
+    construction_maxes = construction_maxes or {}
+
     global_player_max = max(1, int(np.floor(target * float(max_player_pct) + 1e-9)))
     global_cpt_max = max(1, int(np.floor(target * float(max_cpt_pct) + 1e-9)))
-    min_counts = {i: int(np.ceil(target * max(0.0, min(1.0, float(player_mins.get(i, 0.0)))))) for i in range(len(players))}
+    min_counts = {
+        i: int(np.ceil(target * max(0.0, min(1.0, float(player_mins.get(i, 0.0))))))
+        for i in range(len(players))
+    }
     max_counts = {}
     for i in range(len(players)):
         personal = max(0.0, min(1.0, float(player_maxes.get(i, 1.0))))
         personal_count = int(np.floor(target * personal + 1e-9))
         max_counts[i] = min(global_player_max, personal_count)
+
+    construction_min_counts = {
+        str(k): int(np.ceil(target * max(0.0, min(1.0, float(v)))))
+        for k, v in construction_mins.items()
+    }
+    construction_max_counts = {
+        str(k): int(np.floor(target * max(0.0, min(1.0, float(v))) + 1e-9))
+        for k, v in construction_maxes.items()
+    }
+
     player_counts = Counter()
     cpt_counts = Counter()
+    construction_counts = Counter()
     chosen = []
     used = set()
     band = results.head(min(len(results), 6000)).reset_index(drop=True)
@@ -200,26 +243,39 @@ def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=
                 continue
             cpt = int(r["_cpt"])
             inds = [cpt] + list(map(int, r["_flex"]))
+            construction = _construction_label(cpt, r["_flex"], players)
             if cpt_counts[cpt] >= global_cpt_max:
                 continue
             if any(player_counts[i] >= max_counts.get(i, global_player_max) for i in inds):
                 continue
+            if construction in construction_max_counts and construction_counts[construction] >= construction_max_counts[construction]:
+                continue
+
             deficit_bonus = 0.0
             for i in inds:
                 need = max(0, min_counts.get(i, 0) - player_counts[i])
                 deficit_bonus += need * 1000.0
+            construction_need = max(
+                0,
+                construction_min_counts.get(construction, 0) - construction_counts[construction],
+            )
+            deficit_bonus += construction_need * 1500.0
             value = deficit_bonus + float(r.get("NUKE Score", 0.0))
             if best_value is None or value > best_value:
                 best_value = value
                 best_idx = ridx
+
         if best_idx is None:
             break
         r = band.iloc[best_idx]
-        cpt = int(r["_cpt"]); inds = [cpt] + list(map(int, r["_flex"]))
+        cpt = int(r["_cpt"])
+        inds = [cpt] + list(map(int, r["_flex"]))
+        construction = _construction_label(cpt, r["_flex"], players)
         chosen.append(r)
         used.add(best_idx)
         cpt_counts[cpt] += 1
         player_counts.update(inds)
+        construction_counts[construction] += 1
 
     return pd.DataFrame(chosen).reset_index(drop=True) if chosen else results.iloc[0:0].copy()
 

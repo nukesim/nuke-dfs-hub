@@ -15,6 +15,7 @@ CONTROL_KEYS = [
     "showdown_max_cpt",
     "showdown_fixed_seed",
     "showdown_manual_seed",
+    "showdown_construction_controls",
 ]
 
 STATE_KEYS = [

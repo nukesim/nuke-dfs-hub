@@ -278,8 +278,16 @@ with st.expander("Simulation Settings", expanded=True):
     c1, c2, c3, c4 = st.columns(4)
     n_sims = c1.selectbox("Game simulations", [2000, 5000, 10000], index=1, key="showdown_game_sims")
     candidates = c2.selectbox("Candidate lineups", [3000, 6000, 12000], index=1, key="showdown_candidates")
-    min_salary = c3.slider("Minimum salary", 30000, 50000, 42000, 500, key="showdown_min_salary")
-    portfolio_n = c4.selectbox("Portfolio lineups", [5, 10, 20, 50, 100, 150], index=2, key="showdown_portfolio_n")
+    portfolio_n = c3.selectbox("Portfolio lineups", [5, 10, 20, 50, 100, 150], index=2, key="showdown_portfolio_n")
+    c4.caption("Salary range applies to every generated candidate lineup.")
+    s1, s2 = st.columns(2)
+    min_salary = s1.slider("Minimum salary", 30000, 50000, 42000, 500, key="showdown_min_salary")
+    max_salary = s2.slider(
+        "Maximum salary", 30000, 50000, 50000, 500, key="showdown_max_salary",
+        help="Set below $50,000 to intentionally leave salary unused and reduce duplicated Showdown constructions.",
+    )
+    if max_salary < min_salary:
+        st.warning("Maximum salary is below Minimum salary. Raise Max or lower Min before running the SIM.")
     c5, c6 = st.columns(2)
     max_player = c5.slider("Max player exposure", 25, 100, 75, 5, key="showdown_max_player") / 100
     max_cpt = c6.slider("Max Captain exposure", 10, 100, 35, 5, key="showdown_max_cpt") / 100
@@ -321,6 +329,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
             players,
             max_candidates=candidates,
             min_salary=min_salary,
+            max_salary=max_salary,
             seed=seed,
         )
         results = evaluate_candidates(players, cand, sims, scripts)

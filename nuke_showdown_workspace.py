@@ -10,6 +10,7 @@ CONTROL_KEYS = [
     "showdown_game_sims",
     "showdown_candidates",
     "showdown_min_salary",
+    "showdown_max_salary",
     "showdown_portfolio_n",
     "showdown_max_player",
     "showdown_max_cpt",

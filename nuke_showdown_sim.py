@@ -124,7 +124,8 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
             continue
 
         salary = int(rows.iloc[cpt]["CPT Salary"]) + int(rows.iloc[list(flex)]["FLEX Salary"].sum())
-        if salary > SHOWDOWN_SALARY_CAP or salary < int(min_salary):
+        effective_max_salary = min(SHOWDOWN_SALARY_CAP, int(max_salary))
+        if salary > effective_max_salary or salary < int(min_salary):
             continue
         teams = set(rows.iloc[[cpt] + list(flex)]["Team"].astype(str))
         if len(teams) < 2:

@@ -281,9 +281,9 @@ with st.expander("Simulation Settings", expanded=True):
     portfolio_n = c3.selectbox("Portfolio lineups", [5, 10, 20, 50, 100, 150], index=2, key="showdown_portfolio_n")
     c4.caption("Salary range applies to every generated candidate lineup.")
     s1, s2 = st.columns(2)
-    min_salary = s1.slider("Minimum salary", 30000, 50000, 42000, 500, key="showdown_min_salary")
+    min_salary = s1.slider("Minimum salary", 30000, 50000, 42000, 100, key="showdown_min_salary")
     max_salary = s2.slider(
-        "Maximum salary", 30000, 50000, 50000, 500, key="showdown_max_salary",
+        "Maximum salary", 30000, 50000, 50000, 100, key="showdown_max_salary",
         help="Set below $50,000 to intentionally leave salary unused and reduce duplicated Showdown constructions.",
     )
     if max_salary < min_salary:

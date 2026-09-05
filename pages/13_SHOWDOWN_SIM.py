@@ -217,7 +217,7 @@ else:
                 st.line_chart(gt, use_container_width=True)
 
 st.subheader("🎛️ Player Controls")
-st.caption("Boost changes the simulated baseline for that player. Min/Max exposure are enforced in the generated portfolio. Leave 0 / 100 for no player-specific exposure rule.")
+st.caption("Exclude removes a player from candidate generation entirely. Boost changes the simulated baseline for that player. Min/Max exposure are enforced in the generated portfolio. Leave 0 / 100 for no player-specific exposure rule.")
 control_state = dict(st.session_state.get("showdown_player_controls", {}) or {})
 team_columns = st.columns(2)
 for col, team in zip(team_columns, [team_a, team_b]):
@@ -233,6 +233,7 @@ for col, team in zip(team_columns, [team_a, team_b]):
                 "Player": r["Name"],
                 "Pos": r["Pos"],
                 "Salary": int(r["FLEX Salary"]),
+                "Exclude": bool(cfg.get("exclude", False)),
                 "Boost %": float(cfg.get("boost", 0.0)),
                 "Min %": int(cfg.get("min", 0)),
                 "Max %": int(cfg.get("max", 100)),
@@ -247,6 +248,7 @@ for col, team in zip(team_columns, [team_a, team_b]):
                 "Player": st.column_config.TextColumn("Player", width="medium"),
                 "Pos": st.column_config.TextColumn("Pos", width="small"),
                 "Salary": st.column_config.NumberColumn(flex_label, format="$%d", width="small"),
+                "Exclude": st.column_config.CheckboxColumn("Exclude", width="small", help="Remove this player from all generated Showdown lineups."),
                 "Boost %": st.column_config.NumberColumn("Boost %", min_value=-50.0, max_value=50.0, step=5.0, format="%.0f%%", width="small", help="Changes this player's simulated baseline before each game outcome is drawn."),
                 "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
                 "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
@@ -258,8 +260,16 @@ for col, team in zip(team_columns, [team_a, team_b]):
             mn = int(er["Min %"]); mx = int(er["Max %"])
             if mn > mx:
                 mn = mx
-            control_state[key] = {"boost": float(er["Boost %"]), "min": mn, "max": mx}
+            control_state[key] = {"exclude": bool(er["Exclude"]), "boost": float(er["Boost %"]), "min": mn, "max": mx}
 st.session_state["showdown_player_controls"] = control_state
+
+excluded_keys = {k for k, cfg in control_state.items() if bool((cfg or {}).get("exclude", False))}
+if excluded_keys:
+    players = players[~players["Player Key"].astype(str).isin(excluded_keys)].reset_index(drop=True)
+    st.caption(f"{len(excluded_keys)} player{'s' if len(excluded_keys) != 1 else ''} manually excluded from candidate generation.")
+if len(players) < 6:
+    st.error("Fewer than 6 players remain after exclusions. Re-enable at least enough players to build a legal single-game lineup.")
+    st.stop()
 
 boosts = {i: float(control_state.get(str(r["Player Key"]), {}).get("boost", 0.0)) for i, r in players.iterrows()}
 player_mins = {i: float(control_state.get(str(r["Player Key"]), {}).get("min", 0)) / 100.0 for i, r in players.iterrows()}

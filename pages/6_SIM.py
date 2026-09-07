@@ -257,127 +257,172 @@ for game in game_values:
     teams0=list(dict.fromkeys(gp0.Team.astype(str).tolist()))
     game_labels[game]=" vs ".join(teams0[:2]) if len(teams0)>=2 else str(game)
 
-selected_game=st.selectbox(
-    "Open game",game_values,
-    format_func=lambda g: f"🏈 {game_labels.get(g,str(g))}",
-    key="nuke_active_pool_game",
-    help="Only the selected game is rendered. This keeps the SIM page fast even on large slates."
-) if game_values else None
+pool_game_tab,pool_current_tab=st.tabs(["🏈 Game-by-Game","👥 Current Player Pool"])
+with pool_game_tab:
+    selected_game=st.selectbox(
+        "Open game",game_values,
+        format_func=lambda g: f"🏈 {game_labels.get(g,str(g))}",
+        key="nuke_active_pool_game",
+        help="Only the selected game is rendered. This keeps the SIM page fast even on large slates."
+    ) if game_values else None
 
-if selected_game is not None:
-    game=selected_game
-    gp=players[players.Game.eq(game)].copy()
-    teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
-    label=game_labels.get(game,str(game))
-    ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
-    st.markdown(f"### 🏈 {label}")
-    if not ge.empty:
-        env_cols=["Team","Opponent","Spread","Team Total","Team Total Rank","Game Total","Game Total Rank","Books","Source"]
-        env_show=ge[[c for c in env_cols if c in ge.columns]]
-        st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
-        book_rows=ge[ge["Source"].eq("Sportsbook Consensus")] if "Source" in ge.columns else pd.DataFrame()
-        if not book_rows.empty:
-            last_update=str(book_rows.iloc[0].get("Last Update",""))
-            st.caption(f"Consensus across {int(book_rows['Books'].max()) if 'Books' in book_rows.columns else 0} US sportsbooks · Last odds snapshot: {last_update}")
-            movement=movement_for_game(odds_history,teams)
-            if not movement.empty:
-                with st.expander("📈 Odds movement this week",expanded=False):
-                    chart_cols=[c for c in ["Game Total",f"{teams[0]} Team Total",f"{teams[1]} Team Total"] if c in movement.columns]
-                    if chart_cols:
-                        chart_df=movement[["Timestamp"]+chart_cols].copy().set_index("Timestamp")
-                        st.line_chart(chart_df,use_container_width=True)
-                    first,last=movement.iloc[0],movement.iloc[-1]
-                    m1,m2,m3=st.columns(3)
-                    gt0=float(first.get("Game Total",0)); gt1=float(last.get("Game Total",0))
-                    a_col=f"{teams[0]} Team Total"; b_col=f"{teams[1]} Team Total"
-                    a0=float(first.get(a_col,0)); a1=float(last.get(a_col,0)); b0=float(first.get(b_col,0)); b1=float(last.get(b_col,0))
-                    m1.metric("Game Total",f"{gt1:.1f}",delta=f"{gt1-gt0:+.1f} vs first snapshot")
-                    m2.metric(f"{teams[0]} Team Total",f"{a1:.1f}",delta=f"{a1-a0:+.1f}")
-                    m3.metric(f"{teams[1]} Team Total",f"{b1:.1f}",delta=f"{b1-b0:+.1f}")
-                    spread_cols=[c for c in [f"{teams[0]} Spread",f"{teams[1]} Spread"] if c in movement.columns]
-                    if spread_cols:
-                        st.caption("Spread movement")
-                        st.line_chart(movement[["Timestamp"]+spread_cols].set_index("Timestamp"),use_container_width=True)
-    st.caption("Only this game's controls are loaded. Make as many changes as you want, then click Apply changes once.")
-    with st.form(key=f"pool_form_{str(game)}_{editor_version}",clear_on_submit=False):
-        st.markdown("**Game Action**")
-        game_action=st.selectbox("Game bulk action",["No bulk change","✅ Include entire game","🚫 Exclude entire game"],key=f"game_bulk_{str(game)}_{editor_version}",label_visibility="collapsed")
-        visible_teams=teams[:2]
-        team_cols=st.columns(len(visible_teams),gap="medium") if visible_teams else [st.container()]
-        pending_by_team={}
-        team_actions={}
-        for team_col,team in zip(team_cols,visible_teams):
-            tp=gp[gp.Team.eq(team)].copy()
-            pos_order={"QB":0,"RB":1,"WR":2,"TE":3,"DST":4}
-            tp["_pos_order"]=tp.Position.map(pos_order).fillna(9)
-            tp=tp.sort_values(["_pos_order","Salary"],ascending=[True,False])
-            trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
-            with team_col:
-                with st.container(border=True):
-                    if trow is not None:
-                        team_total=float(trow['Team Total'])
-                        team_rank=int(trow['Team Total Rank'])
-                        rank_badge="🏆" if team_rank<=3 else ""
-                        st.markdown(
-                            f"""<div style='display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-bottom:.25rem'>
-                            <span style='font-size:1.55rem;font-weight:800;letter-spacing:.01em'>{team}</span>
-                            <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>TEAM TOTAL {team_total:.1f}</span>
-                            <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>{rank_badge} SLATE RANK #{team_rank}</span>
-                            </div>""",
-                            unsafe_allow_html=True,
+    if selected_game is not None:
+        game=selected_game
+        gp=players[players.Game.eq(game)].copy()
+        teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
+        label=game_labels.get(game,str(game))
+        ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
+        st.markdown(f"### 🏈 {label}")
+        if not ge.empty:
+            env_cols=["Team","Opponent","Spread","Team Total","Team Total Rank","Game Total","Game Total Rank","Books","Source"]
+            env_show=ge[[c for c in env_cols if c in ge.columns]]
+            st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
+            book_rows=ge[ge["Source"].eq("Sportsbook Consensus")] if "Source" in ge.columns else pd.DataFrame()
+            if not book_rows.empty:
+                last_update=str(book_rows.iloc[0].get("Last Update",""))
+                st.caption(f"Consensus across {int(book_rows['Books'].max()) if 'Books' in book_rows.columns else 0} US sportsbooks · Last odds snapshot: {last_update}")
+                movement=movement_for_game(odds_history,teams)
+                if not movement.empty:
+                    with st.expander("📈 Odds movement this week",expanded=False):
+                        chart_cols=[c for c in ["Game Total",f"{teams[0]} Team Total",f"{teams[1]} Team Total"] if c in movement.columns]
+                        if chart_cols:
+                            chart_df=movement[["Timestamp"]+chart_cols].copy().set_index("Timestamp")
+                            st.line_chart(chart_df,use_container_width=True)
+                        first,last=movement.iloc[0],movement.iloc[-1]
+                        m1,m2,m3=st.columns(3)
+                        gt0=float(first.get("Game Total",0)); gt1=float(last.get("Game Total",0))
+                        a_col=f"{teams[0]} Team Total"; b_col=f"{teams[1]} Team Total"
+                        a0=float(first.get(a_col,0)); a1=float(last.get(a_col,0)); b0=float(first.get(b_col,0)); b1=float(last.get(b_col,0))
+                        m1.metric("Game Total",f"{gt1:.1f}",delta=f"{gt1-gt0:+.1f} vs first snapshot")
+                        m2.metric(f"{teams[0]} Team Total",f"{a1:.1f}",delta=f"{a1-a0:+.1f}")
+                        m3.metric(f"{teams[1]} Team Total",f"{b1:.1f}",delta=f"{b1-b0:+.1f}")
+                        spread_cols=[c for c in [f"{teams[0]} Spread",f"{teams[1]} Spread"] if c in movement.columns]
+                        if spread_cols:
+                            st.caption("Spread movement")
+                            st.line_chart(movement[["Timestamp"]+spread_cols].set_index("Timestamp"),use_container_width=True)
+        st.caption("Only this game's controls are loaded. Make as many changes as you want, then click Apply changes once.")
+        with st.form(key=f"pool_form_{str(game)}_{editor_version}",clear_on_submit=False):
+            st.markdown("**Game Action**")
+            game_action=st.selectbox("Game bulk action",["No bulk change","✅ Include entire game","🚫 Exclude entire game"],key=f"game_bulk_{str(game)}_{editor_version}",label_visibility="collapsed")
+            visible_teams=teams[:2]
+            team_cols=st.columns(len(visible_teams),gap="medium") if visible_teams else [st.container()]
+            pending_by_team={}
+            team_actions={}
+            for team_col,team in zip(team_cols,visible_teams):
+                tp=gp[gp.Team.eq(team)].copy()
+                pos_order={"QB":0,"RB":1,"WR":2,"TE":3,"DST":4}
+                tp["_pos_order"]=tp.Position.map(pos_order).fillna(9)
+                tp=tp.sort_values(["_pos_order","Salary"],ascending=[True,False])
+                trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
+                with team_col:
+                    with st.container(border=True):
+                        if trow is not None:
+                            team_total=float(trow['Team Total'])
+                            team_rank=int(trow['Team Total Rank'])
+                            rank_badge="🏆" if team_rank<=3 else ""
+                            st.markdown(
+                                f"""<div style='display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-bottom:.25rem'>
+                                <span style='font-size:1.55rem;font-weight:800;letter-spacing:.01em'>{team}</span>
+                                <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>TEAM TOTAL {team_total:.1f}</span>
+                                <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>{rank_badge} SLATE RANK #{team_rank}</span>
+                                </div>""",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(f"### {team}")
+                        st.caption("Team Action")
+                        team_actions[team]=st.selectbox(f"{team} bulk action",["No bulk change","✅ Include all","🚫 Exclude all"],key=f"team_bulk_{str(game)}_{team}_{editor_version}",label_visibility="collapsed")
+                        rows=[]
+                        for idx,row in tp.iterrows():
+                            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+                            cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
+                            rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":f"${int(row.Salary):,}","Model Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
+                        edit_df=pd.DataFrame(rows).set_index("_row")
+                        all_available=bool(len(edit_df)) and edit_df["Status"].astype(str).str.lower().eq("available").all()
+                        visible_cols=["Include","Pos","Player"]
+                        disabled_cols=["Pos","Player","Salary","Model Role"]
+                        if not all_available:
+                            visible_cols.append("Status")
+                            disabled_cols.append("Status")
+                        visible_cols += ["Salary","Model Role","Role","Usage x"]
+                        edited_team=st.data_editor(
+                            edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
+                            disabled=disabled_cols,
+                            column_order=visible_cols,
+                            column_config={
+                                "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active SIM pool."),
+                                "Pos":st.column_config.TextColumn("Pos",width="small"),
+                                "Player":st.column_config.TextColumn("Player",width="medium"),
+                                "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. Healthy players are hidden from this column to reduce clutter."),
+                                "Salary":st.column_config.TextColumn("Salary",width="small"),
+                                "Model Role":st.column_config.TextColumn("Model Role",width="small",help="NUKE's automatically inferred depth-chart role."),
+                                "Role":st.column_config.SelectboxColumn("Override",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small",help="Optional role override. Leave AUTO to use NUKE's model role."),
+                                "Usage x":st.column_config.NumberColumn("Usage",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
+                            },key=f"game_pool_{str(game)}_{team}_{editor_version}"
                         )
-                    else:
-                        st.markdown(f"### {team}")
-                    st.caption("Team Action")
-                    team_actions[team]=st.selectbox(f"{team} bulk action",["No bulk change","✅ Include all","🚫 Exclude all"],key=f"team_bulk_{str(game)}_{team}_{editor_version}",label_visibility="collapsed")
-                    rows=[]
-                    for idx,row in tp.iterrows():
-                        key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-                        cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
-                        rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":f"${int(row.Salary):,}","Model Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
-                    edit_df=pd.DataFrame(rows).set_index("_row")
-                    all_available=bool(len(edit_df)) and edit_df["Status"].astype(str).str.lower().eq("available").all()
-                    visible_cols=["Include","Pos","Player"]
-                    disabled_cols=["Pos","Player","Salary","Model Role"]
-                    if not all_available:
-                        visible_cols.append("Status")
-                        disabled_cols.append("Status")
-                    visible_cols += ["Salary","Model Role","Role","Usage x"]
-                    edited_team=st.data_editor(
-                        edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
-                        disabled=disabled_cols,
-                        column_order=visible_cols,
-                        column_config={
-                            "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active SIM pool."),
-                            "Pos":st.column_config.TextColumn("Pos",width="small"),
-                            "Player":st.column_config.TextColumn("Player",width="medium"),
-                            "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. Healthy players are hidden from this column to reduce clutter."),
-                            "Salary":st.column_config.TextColumn("Salary",width="small"),
-                            "Model Role":st.column_config.TextColumn("Model Role",width="small",help="NUKE's automatically inferred depth-chart role."),
-                            "Role":st.column_config.SelectboxColumn("Override",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small",help="Optional role override. Leave AUTO to use NUKE's model role."),
-                            "Usage x":st.column_config.NumberColumn("Usage",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
-                        },key=f"game_pool_{str(game)}_{team}_{editor_version}"
-                    )
-                    pending_by_team[team]=(edit_df,edited_team)
-                    excluded_count=sum(not bool(updated_state.get(str(r.ID) if str(r.ID) else f"{r.Name}|{r.Team}|{r.Position}|{int(r.Salary)}",{}).get("include",True)) for _,r in tp.iterrows())
-                    if excluded_count:
-                        st.caption(f"🚫 {excluded_count} excluded from {team}")
-        apply_changes=st.form_submit_button(f"Apply changes for {label}",type="primary",use_container_width=True)
-    if apply_changes:
-        for team,(edit_df,edited_team) in pending_by_team.items():
-            action=team_actions.get(team,"No bulk change")
-            for idx,erow in edited_team.iterrows():
-                key=str(edit_df.loc[idx,"_key"])
-                include=bool(erow["Include"])
-                if action=="✅ Include all": include=True
-                elif action=="🚫 Exclude all": include=False
-                if game_action=="✅ Include entire game": include=True
-                elif game_action=="🚫 Exclude entire game": include=False
-                updated_state[key]={"include":include,"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
-        st.session_state["nuke_pregame_pool"]=updated_state
-        st.session_state["nuke_pool_editor_version"]=editor_version+1
-        st.rerun()
+                        pending_by_team[team]=(edit_df,edited_team)
+                        excluded_count=sum(not bool(updated_state.get(str(r.ID) if str(r.ID) else f"{r.Name}|{r.Team}|{r.Position}|{int(r.Salary)}",{}).get("include",True)) for _,r in tp.iterrows())
+                        if excluded_count:
+                            st.caption(f"🚫 {excluded_count} excluded from {team}")
+            apply_changes=st.form_submit_button(f"Apply changes for {label}",type="primary",use_container_width=True)
+        if apply_changes:
+            for team,(edit_df,edited_team) in pending_by_team.items():
+                action=team_actions.get(team,"No bulk change")
+                for idx,erow in edited_team.iterrows():
+                    key=str(edit_df.loc[idx,"_key"])
+                    include=bool(erow["Include"])
+                    if action=="✅ Include all": include=True
+                    elif action=="🚫 Exclude all": include=False
+                    if game_action=="✅ Include entire game": include=True
+                    elif game_action=="🚫 Exclude entire game": include=False
+                    updated_state[key]={"include":include,"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+            st.session_state["nuke_pregame_pool"]=updated_state
+            st.session_state["nuke_pool_editor_version"]=editor_version+1
+            st.rerun()
 
+
+with pool_current_tab:
+    st.markdown("### 👥 Current Player Pool")
+    st.caption("A clean snapshot of everyone currently eligible to enter NUKE lineups. Apply game changes, then return here to verify the pool before running the SIM.")
+    pool_rows=[]
+    for _,row in players.iterrows():
+        key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+        pcfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
+        if not bool(pcfg.get("include",True)):
+            continue
+        override=str(pcfg.get("role","AUTO")).upper()
+        model_role=str(getattr(row,"auto_role","AUTO"))
+        role=model_role if override=="AUTO" else override
+        pool_rows.append({
+            "Player":str(row.Name),
+            "Team":str(row.Team),
+            "Pos":str(row.Position),
+            "Salary":int(row.Salary),
+            "Role":role,
+            "Usage":float(pcfg.get("usage",1.0)),
+        })
+    current_pool=pd.DataFrame(pool_rows)
+    if current_pool.empty:
+        st.warning("No players are currently included in the SIM pool.")
+    else:
+        pos_order=["QB","RB","WR","TE","DST"]
+        counts=current_pool["Pos"].value_counts().to_dict()
+        m0,m1,m2,m3,m4,m5=st.columns(6)
+        m0.metric("Active",f"{len(current_pool):,}")
+        for col,pos in zip([m1,m2,m3,m4,m5],pos_order):
+            col.metric(pos,f"{int(counts.get(pos,0)):,}")
+        st.markdown("#### Active by Position")
+        pos_tabs=st.tabs([f"{pos} · {int(counts.get(pos,0))}" for pos in pos_order])
+        for tab,pos in zip(pos_tabs,pos_order):
+            with tab:
+                view=current_pool[current_pool["Pos"].eq(pos)].copy()
+                if view.empty:
+                    st.caption(f"No {pos} players are currently included.")
+                    continue
+                view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
+                view["Salary"]=view["Salary"].map(lambda x:f"${int(x):,}")
+                view["Usage"]=view["Usage"].map(lambda x:f"{float(x):.2f}x")
+                st.dataframe(view[["Player","Team","Salary","Role","Usage"]],use_container_width=True,hide_index=True,height=min(520,70+35*len(view)))
 st.session_state["nuke_pregame_pool"]=updated_state
 active_rows=[]
 for _,row in players.iterrows():

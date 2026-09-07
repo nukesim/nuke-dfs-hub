@@ -690,8 +690,13 @@ if results is not None and not results.empty:
         st.dataframe(path_scope[cols],use_container_width=True,hide_index=True)
     with tab5:
         st.subheader("Exposure Insights")
-        scope=st.radio("Exposure scope",["Portfolio", "All contest-simmed lineups",f"Top {int(exposure_n)} NUKEM lineups"],horizontal=True)
-        er=portfolio if scope=="Portfolio" and portfolio is not None and not portfolio.empty else contest_results if scope.startswith("All") and contest_results is not None else results.head(int(exposure_n))
+        scope=st.radio("Exposure scope",["Portfolio", "All contest-simmed lineups", "All generated NUKE lineups"],horizontal=True)
+        if scope=="Portfolio" and portfolio is not None and not portfolio.empty:
+            er=portfolio
+        elif scope=="All contest-simmed lineups" and contest_results is not None and not contest_results.empty:
+            er=contest_results
+        else:
+            er=results
         flex_table=flex_exposure_table(sim_players,er)
         pos_table=position_exposure_table(sim_players,er)
         fcols=st.columns(3)

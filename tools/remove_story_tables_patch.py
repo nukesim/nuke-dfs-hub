@@ -6,3 +6,4 @@ if old not in s:
     raise SystemExit('target block not found')
 s=s.replace(old,'',1)
 p.write_text(s,encoding='utf-8')
+# trigger v2

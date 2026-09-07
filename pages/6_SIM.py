@@ -532,13 +532,12 @@ if results is not None and not results.empty:
             sm=story.get("metrics",{})
             st.markdown("### 🧠 Portfolio Story")
             st.caption("What this portfolio is betting on, where it is different from the modeled field, and where concentration risk lives.")
-            s1,s2,s3,s4,s5,s6=st.columns(6)
+            s1,s2,s3,s4,s5=st.columns([0.85,1.0,1.35,1.15,1.15])
             s1.metric("Lineups",f"{int(sm.get('lineups',len(portfolio))):,}")
             s2.metric("Elite Ceiling",f"{int(sm.get('elite_lineups',0)):,}")
-            s3.metric("Low-Dup Leverage",f"{int(sm.get('leverage_lineups',0)):,}")
-            s4.metric("Top Scenario",str(sm.get('dominant_scenario','UNKNOWN')),delta=f"{float(sm.get('dominant_scenario_pct',0)):.1f}% of portfolio")
-            s5.metric("Top QB",str(sm.get('dominant_qb','UNKNOWN')),delta=f"{float(sm.get('dominant_qb_pct',0)):.1f}% exposure")
-            s6.metric("Top Game",str(sm.get('dominant_game','UNKNOWN')),delta=f"{float(sm.get('dominant_game_pct',0)):.1f}% exposure")
+            s3.metric("Top Scenario",str(sm.get('dominant_scenario','UNKNOWN')),delta=f"{float(sm.get('dominant_scenario_pct',0)):.1f}% of portfolio")
+            s4.metric("Top QB",str(sm.get('dominant_qb','UNKNOWN')),delta=f"{float(sm.get('dominant_qb_pct',0)):.1f}% exposure")
+            s5.metric("Top Game",str(sm.get('dominant_game','UNKNOWN')),delta=f"{float(sm.get('dominant_game_pct',0)):.1f}% exposure")
 
             story_left,story_right=st.columns(2)
             with story_left:

@@ -7,7 +7,9 @@ from nuke_portfolio import portfolio_player_exposure, portfolio_qb_exposure, por
 
 def _reason_bucket(value):
     s=str(value or "")
-    for label in ["Elite Ceiling","Low-Dup Leverage","Scenario Diversifier","Contrarian QB Path","GPP Upside"]:
+    if "low-dup leverage" in s.lower():
+        return "GPP Upside"
+    for label in ["Elite Ceiling","Scenario Diversifier","Contrarian QB Path","GPP Upside"]:
         if label.lower() in s.lower():
             return label
     return "Other"
@@ -51,7 +53,7 @@ def portfolio_story(players, portfolio):
     dup=pd.to_numeric(portfolio.get("Duplication Pressure",pd.Series(dtype=float)),errors="coerce").dropna()
     elite=int(reason_df.loc[reason_df["Reason"].eq("Elite Ceiling"),"Lineups"].sum()) if not reason_df.empty else 0
     leverage_count=int(reason_df.loc[reason_df["Reason"].eq("Low-Dup Leverage"),"Lineups"].sum()) if not reason_df.empty else 0
-    dominant_scenario=str(scenario_df.iloc[0]["Scenario"]) if not scenario_df.empty else "UNKNOWN"
+    dominant_scenario=str(scenario_df.iloc[0]["Scenario"]).split("|")[0].strip() if not scenario_df.empty else "UNKNOWN"
     dominant_scenario_pct=float(scenario_df.iloc[0]["Portfolio %"]) if not scenario_df.empty else 0.0
     dominant_qb=str(qb_df.iloc[0]["QB"]) if qb_df is not None and not qb_df.empty else "UNKNOWN"
     dominant_qb_pct=float(qb_df.iloc[0]["Exposure %"]) if qb_df is not None and not qb_df.empty else 0.0

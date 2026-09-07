@@ -1,0 +1,37 @@
+name: Remove main-slate ownership leverage
+
+on:
+  push:
+    paths:
+      - 'tools/remove_main_slate_ownership_leverage.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/remove_main_slate_ownership_leverage.py
+      - run: python -m py_compile pages/6_SIM.py nuke_portfolio.py nuke_portfolio_story.py
+      - name: Verify
+        run: |
+          ! grep -q 'Portfolio vs Modeled Field' pages/6_SIM.py
+          ! grep -q 'Largest Overweights' pages/6_SIM.py
+          ! grep -q 'base=base+elite_bonus+leverage' nuke_portfolio.py
+          grep -q 'simulation quality, scenario coverage' pages/6_SIM.py
+      - name: Commit
+        run: |
+          if git diff --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py nuke_portfolio.py nuke_portfolio_story.py
+          git commit -m 'Remove main-slate ownership leverage'
+          git push

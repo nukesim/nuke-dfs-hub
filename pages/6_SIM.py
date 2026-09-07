@@ -20,7 +20,7 @@ from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
 from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
 from nuke_availability import availability_status
-from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS
+from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS, build_fd_lineup_only_csv
 from nuke_workspace import workspace_bytes, load_workspace_bytes, apply_workspace
 
 def candidate_diagnostics(players,lineups,requested,min_salary):
@@ -673,7 +673,15 @@ if results is not None and not results.empty:
             }
             </style>
             """,unsafe_allow_html=True)
-            st.download_button("⬇️ Download Portfolio + Stats CSV",portfolio_export.to_csv(index=False).encode("utf-8-sig"),"nuke_portfolio_with_stats.csv","text/csv",type="primary",use_container_width=True,key="download_portfolio_stats")
+            if site=="FD":
+                st.caption("Review file keeps player names + stats. FanDuel upload file uses player IDs only in roster columns.")
+                d1,d2=st.columns(2)
+                with d1:
+                    st.download_button("⬇️ Download Portfolio + Stats CSV",portfolio_export.to_csv(index=False).encode("utf-8-sig"),"nuke_portfolio_with_stats.csv","text/csv",type="primary",use_container_width=True,key="download_portfolio_stats")
+                with d2:
+                    st.download_button("⬇️ Download FanDuel Upload CSV",build_fd_lineup_only_csv(sim_players,portfolio),"nuke_fanduel_portfolio_upload.csv","text/csv",type="primary",use_container_width=True,key="download_fd_portfolio_upload")
+            else:
+                st.download_button("⬇️ Download Portfolio + Stats CSV",portfolio_export.to_csv(index=False).encode("utf-8-sig"),"nuke_portfolio_with_stats.csv","text/csv",type="primary",use_container_width=True,key="download_portfolio_stats")
     with tab3:
         show=results.drop(columns=["_indices"],errors="ignore")
         st.dataframe(show.head(150),use_container_width=True,hide_index=True)

@@ -1,53 +1,28 @@
 from pathlib import Path
 
-# Main NUKE SIM UI: FanDuel-only FLEX position lock.
+# Runtime-safe main NUKE SIM FLEX enforcement.
+# Do not pass a new keyword into generate_lineups: Streamlit can retain an older imported
+# function object across hot reloads. Generate a larger FD candidate pool, then enforce
+# the selected FLEX construction before football simulation.
 p = Path('pages/6_SIM.py')
 s = p.read_text()
-s = s.replace(
-'    min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")\n    candidates=st.number_input("Candidate lineups",100,5000,candidates,100,key="candidate_lineups")',
-'    min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")\n    flex_position="ANY"\n    if site=="FD":\n        flex_position=st.selectbox(\n            "FLEX position", ["ANY","RB","WR","TE"], index=0, key="nuke_fd_flex_position",\n            help="FanDuel only. Choose RB to force every generated lineup to use a running back in FLEX (3 RB total). Changing this requires a new NUKE SIM run."\n        )\n    candidates=st.number_input("Candidate lineups",100,5000,candidates,100,key="candidate_lineups")'
-)
-s = s.replace(
-'        lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed),site=site)',
-'        lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed),site=site,flex_position=flex_position if site=="FD" else None)'
-)
+old='        lineups=generate_lineups(players,int(candidates),int(min_salary),int(seed),site=site,flex_position=flex_position if site=="FD" else None)'
+new='''        generation_target=int(candidates)\n        if site=="FD" and flex_position!="ANY":\n            generation_target=min(5000,max(int(candidates)*4,int(candidates)+500))\n        lineups=generate_lineups(players,generation_target,int(min_salary),int(seed),site=site)\n        if site=="FD" and flex_position!="ANY":\n            required_count={"RB":3,"WR":4,"TE":2}[flex_position]\n            lineups=[lu for lu in lineups if int((players.iloc[list(lu)]["Position"]==flex_position).sum())==required_count][:int(candidates)]\n            if len(lineups)<int(candidates):\n                st.caption(f"FLEX {flex_position} filter produced {len(lineups):,} eligible candidates from {generation_target:,} generated lineups.")'''
+if old in s:
+    s=s.replace(old,new)
+elif new not in s:
+    raise SystemExit('Expected NUKE SIM generation call not found')
 p.write_text(s)
 
-# Candidate engine: optionally force the one extra RB/WR/TE roster spot.
-p = Path('nuke_sim.py')
-s = p.read_text()
-s = s.replace(
-'def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):',
-'def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None):'
-)
-s = s.replace(
-'    cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)\n',
-'    cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)\n    flex_position=str(flex_position or "ANY").upper().strip()\n    if flex_position not in {"ANY","RB","WR","TE"}: flex_position="ANY"\n'
-)
-s = s.replace(
-'        ids=flex[(sal[flex]>=lo)&(sal[flex]<=hi)&(~np.isin(flex,chosen))]\n        if not len(ids):continue',
-'        ids=flex[(sal[flex]>=lo)&(sal[flex]<=hi)&(~np.isin(flex,chosen))]\n        if flex_position!="ANY":\n            ids=ids[pos[ids]==flex_position]\n        if not len(ids):continue'
-)
-s = s.replace(
-'        if not(counts["QB"]==1 and counts["RB"]>=2 and counts["WR"]>=3 and counts["TE"]>=1 and counts["DST"]==1):continue\n',
-'        if not(counts["QB"]==1 and counts["RB"]>=2 and counts["WR"]>=3 and counts["TE"]>=1 and counts["DST"]==1):continue\n        if flex_position!="ANY" and counts.get(flex_position,0)!={"RB":3,"WR":4,"TE":2}[flex_position]:continue\n'
-)
-s = s.replace(
-'            if total<min_salary or total>salary_cap or key in keys or not _valid_lineup(chosen,p,min_salary,max_salary=salary_cap,site=site):continue\n',
-'            if total<min_salary or total>salary_cap or key in keys or not _valid_lineup(chosen,p,min_salary,max_salary=salary_cap,site=site):continue\n            if flex_position!="ANY":\n                counts={k:int(np.sum(pos[arr]==k)) for k in ["RB","WR","TE"]}\n                if counts.get(flex_position,0)!={"RB":3,"WR":4,"TE":2}[flex_position]:continue\n'
-)
-p.write_text(s)
-
-# Persist control in NUKE workspace.
+# Keep engine support too for future callers, but the public page no longer depends on
+# the expanded function signature, eliminating the Streamlit hot-reload TypeError.
 p = Path('nuke_workspace.py')
 s = p.read_text()
-s = s.replace(
-'    "min_salary_DK", "min_salary_FD",\n',
-'    "min_salary_DK", "min_salary_FD", "nuke_fd_flex_position",\n'
-)
+if '"nuke_fd_flex_position"' not in s:
+    s=s.replace('    "min_salary_DK", "min_salary_FD",\n','    "min_salary_DK", "min_salary_FD", "nuke_fd_flex_position",\n')
 p.write_text(s)
 
-# Guide/About: explain main-slate FanDuel FLEX lock and rerun requirement.
+# Guide remains explicit that this changes candidate construction and requires a rerun.
 p = Path('pages/11_GUIDE.py')
 s = p.read_text()
 needle='        st.info("NUKE Sim is designed to model ranges of outcomes, not predict one exact future result.")\n'

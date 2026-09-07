@@ -538,22 +538,6 @@ if results is not None and not results.empty:
             s4.metric("Top QB",str(sm.get('dominant_qb','UNKNOWN')),delta=f"{float(sm.get('dominant_qb_pct',0)):.1f}% exposure")
             s5.metric("Top Game",str(sm.get('dominant_game','UNKNOWN')),delta=f"{float(sm.get('dominant_game_pct',0)):.1f}% exposure")
 
-            story_left,story_right=st.columns(2)
-            with story_left:
-                st.markdown("#### Scenario Bets")
-                scenario_df=story.get("scenario_df",pd.DataFrame())
-                if scenario_df is not None and not scenario_df.empty:
-                    st.dataframe(scenario_df.head(12),use_container_width=True,hide_index=True,height=330)
-                else:
-                    st.caption("No scenario labels are available for this portfolio yet.")
-            with story_right:
-                st.markdown("#### Why Lineups Made It")
-                reason_df=story.get("reason_df",pd.DataFrame())
-                if reason_df is not None and not reason_df.empty:
-                    st.dataframe(reason_df,use_container_width=True,hide_index=True,height=330)
-                else:
-                    st.caption("No portfolio-reason labels are available yet.")
-
             story_flags=story.get("flags",[])
             st.caption("Portfolio selection is driven by simulation quality, scenario coverage, correlation, exposure limits, and diversification — not modeled ownership estimates.")
             st.markdown("#### 🚨 Portfolio Risk Check")

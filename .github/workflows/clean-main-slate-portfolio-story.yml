@@ -1,0 +1,36 @@
+name: Clean main-slate portfolio story
+
+on:
+  push:
+    paths:
+      - 'tools/clean_main_slate_portfolio_story_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/clean_main_slate_portfolio_story_patch.py
+      - run: python -m py_compile pages/6_SIM.py nuke_portfolio_story.py
+      - name: Verify
+        run: |
+          grep -q 'Top Scenario' pages/6_SIM.py
+          ! grep -q 's3.metric("Low-Dup Leverage"' pages/6_SIM.py
+          grep -q 'split("|")' nuke_portfolio_story.py
+      - name: Commit
+        run: |
+          if git diff --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py nuke_portfolio_story.py
+          git commit -m 'Clean main-slate portfolio story'
+          git push

@@ -6,7 +6,7 @@ import pandas as pd
 WORKSPACE_VERSION = 2
 
 CONTROL_KEYS = [
-    "dfs_site", "sim_preset", "candidate_lineups", "football_universes", "exposure_sample",
+    "dfs_site", "sim_preset", "candidate_lineups", "football_universes",
     "use_reproducible_seed", "nuke_manual_seed", "field_size", "entry_fee", "first_prize",
     "contest_iterations", "portfolio_size", "max_player_overlap", "path_diversification",
     "max_player_exposure", "max_qb_exposure", "max_team_exposure", "max_game_exposure",

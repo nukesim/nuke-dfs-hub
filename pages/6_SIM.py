@@ -107,8 +107,8 @@ with st.sidebar:
     cfg=get_platform(site)
     st.caption(f"{cfg.name} · ${cfg.salary_cap:,} cap · {'1.0 PPR + yardage bonuses' if site=='DK' else '0.5 PPR · no 100/300-yard bonuses'}")
     preset=st.selectbox("Preset",["QUICK","STANDARD","DEEP"],index=0,key="sim_preset")
-    presets={"QUICK":(250,350,50,200),"STANDARD":(400,750,75,350),"DEEP":(700,1200,100,500)}
-    candidates,sims,exposure_n,contest_iters=presets[preset]
+    presets={"QUICK":(250,350,200),"STANDARD":(400,750,350),"DEEP":(700,1200,500)}
+    candidates,sims,contest_iters=presets[preset]
     min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")
     flex_position="ANY"
     if site=="FD":
@@ -118,7 +118,6 @@ with st.sidebar:
         )
     candidates=st.number_input("Candidate lineups",100,5000,candidates,100,key="candidate_lineups")
     sims=st.number_input("Football universes",250,10000,sims,250,key="football_universes")
-    exposure_n=st.number_input("Exposure sample",10,150,exposure_n,10,key="exposure_sample")
     with st.expander("Advanced settings"):
         fixed_seed=st.checkbox("Use reproducible seed",value=False,help="Off by default: every RUN NUKE SIM click gets a fresh random simulation. Turn this on only when you want to reproduce a specific run.",key="use_reproducible_seed")
         if "nuke_manual_seed" not in st.session_state:
@@ -428,7 +427,7 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         stage=time.perf_counter()
         st.write("3/5 · Ranking outcomes and assigning paths...")
         results=attach_path_labels(players,evaluate_lineups(players,lineups,matrix))
-        exposure=exposure_table(players,results,int(exposure_n))
+        exposure=exposure_table(players,results,len(results))
         stage_times["Ranking + Paths"]=time.perf_counter()-stage
         st.write(f"Ranking + paths: {stage_times['Ranking + Paths']:.1f}s")
         stage=time.perf_counter()

@@ -1,0 +1,36 @@
+name: Add FanDuel main-slate FLEX position control
+
+on:
+  push:
+    paths:
+      - 'tools/fanduel_main_flex_position_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/fanduel_main_flex_position_patch.py
+      - run: python -m py_compile pages/6_SIM.py nuke_sim.py nuke_workspace.py pages/11_GUIDE.py
+      - name: Verify
+        run: |
+          grep -q 'FLEX position' pages/6_SIM.py
+          grep -q 'flex_position=None' nuke_sim.py
+          grep -q 'nuke_fd_flex_position' nuke_workspace.py
+      - name: Commit
+        run: |
+          if git diff --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py nuke_sim.py nuke_workspace.py pages/11_GUIDE.py
+          git commit -m 'Add FanDuel main-slate FLEX position control'
+          git push

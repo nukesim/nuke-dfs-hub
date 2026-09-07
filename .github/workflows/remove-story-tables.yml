@@ -1,0 +1,26 @@
+name: Remove Portfolio Story Tables
+on:
+  push:
+    paths:
+      - 'tools/remove_story_tables_patch.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/remove_story_tables_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile pages/6_SIM.py
+          ! grep -q '#### Scenario Bets' pages/6_SIM.py
+          ! grep -q '#### Why Lineups Made It' pages/6_SIM.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py
+          git diff --cached --quiet || git commit -m 'Remove Scenario Bets and lineup reason tables'
+          git push

@@ -1,0 +1,29 @@
+name: Add FanDuel AnyFLEX locks
+on:
+  push:
+    paths:
+      - 'tools/fanduel_lock_anyflex_patch.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/fanduel_lock_anyflex_patch.py
+      - run: python -m py_compile pages/13_SHOWDOWN_SIM.py nuke_showdown_sim.py pages/11_GUIDE.py
+      - name: Verify
+        run: |
+          grep -q 'Lock AnyFLEX' pages/13_SHOWDOWN_SIM.py
+          grep -q 'required_flex_indices' nuke_showdown_sim.py
+          grep -q 'Lock AnyFLEX' pages/11_GUIDE.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/13_SHOWDOWN_SIM.py nuke_showdown_sim.py pages/11_GUIDE.py
+          git diff --cached --quiet || git commit -m 'Add FanDuel AnyFLEX player locks'
+          git push

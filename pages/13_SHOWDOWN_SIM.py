@@ -217,7 +217,7 @@ else:
                 st.line_chart(gt, use_container_width=True)
 
 st.subheader("🎛️ Player Controls")
-st.caption("Exclude removes a player from candidate generation entirely. Boost changes the simulated baseline for that player. Min/Max exposure are enforced in the generated portfolio. Leave 0 / 100 for no player-specific exposure rule.")
+st.caption("Exclude removes a player from candidate generation entirely. On FanDuel, Lock AnyFLEX forces a player into an AnyFLEX spot in every generated lineup and prevents that player from being used at MVP. Boost changes the simulated baseline; Min/Max control portfolio exposure.")
 control_state = dict(st.session_state.get("showdown_player_controls", {}) or {})
 team_columns = st.columns(2)
 for col, team in zip(team_columns, [team_a, team_b]):
@@ -234,6 +234,7 @@ for col, team in zip(team_columns, [team_a, team_b]):
                 "Pos": r["Pos"],
                 "Salary": int(r["FLEX Salary"]),
                 "Exclude": bool(cfg.get("exclude", False)),
+                **({"Lock AnyFLEX": bool(cfg.get("lock_flex", False))} if site == "FanDuel" else {}),
                 "Boost %": float(cfg.get("boost", 0.0)),
                 "Min %": int(cfg.get("min", 0)),
                 "Max %": int(cfg.get("max", 100)),
@@ -249,6 +250,7 @@ for col, team in zip(team_columns, [team_a, team_b]):
                 "Pos": st.column_config.TextColumn("Pos", width="small"),
                 "Salary": st.column_config.NumberColumn(flex_label, format="$%d", width="small"),
                 "Exclude": st.column_config.CheckboxColumn("Exclude", width="small", help="Remove this player from all generated Showdown lineups."),
+                **({"Lock AnyFLEX": st.column_config.CheckboxColumn("Lock AnyFLEX", width="small", help="FanDuel only: force this player into an AnyFLEX spot in every lineup; the player will not be used at MVP.")} if site == "FanDuel" else {}),
                 "Boost %": st.column_config.NumberColumn("Boost %", min_value=-50.0, max_value=50.0, step=5.0, format="%.0f%%", width="small", help="Changes this player's simulated baseline before each game outcome is drawn."),
                 "Min %": st.column_config.NumberColumn("Min %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
                 "Max %": st.column_config.NumberColumn("Max %", min_value=0, max_value=100, step=5, format="%d%%", width="small"),
@@ -260,7 +262,7 @@ for col, team in zip(team_columns, [team_a, team_b]):
             mn = int(er["Min %"]); mx = int(er["Max %"])
             if mn > mx:
                 mn = mx
-            control_state[key] = {"exclude": bool(er["Exclude"]), "boost": float(er["Boost %"]), "min": mn, "max": mx}
+            control_state[key] = {"exclude": bool(er["Exclude"]), "lock_flex": bool(er.get("Lock AnyFLEX", False)) if site == "FanDuel" else False, "boost": float(er["Boost %"]), "min": mn, "max": mx}
 st.session_state["showdown_player_controls"] = control_state
 
 excluded_keys = {k for k, cfg in control_state.items() if bool((cfg or {}).get("exclude", False))}
@@ -270,6 +272,15 @@ if excluded_keys:
 if len(players) < 6:
     st.error("Fewer than 6 players remain after exclusions. Re-enable at least enough players to build a legal single-game lineup.")
     st.stop()
+
+locked_flex_keys = {k for k, cfg in control_state.items() if site == "FanDuel" and bool((cfg or {}).get("lock_flex", False)) and k not in excluded_keys}
+locked_flex_indices = [i for i, r in players.iterrows() if str(r["Player Key"]) in locked_flex_keys]
+if len(locked_flex_indices) > 5:
+    st.error("FanDuel lineups have only 5 AnyFLEX spots. Remove at least one AnyFLEX lock before running the SIM.")
+    st.stop()
+if locked_flex_indices:
+    locked_names = players.iloc[locked_flex_indices]["Name"].astype(str).tolist()
+    st.info("🔒 AnyFLEX lock: " + ", ".join(locked_names) + " — included at AnyFLEX in every generated FanDuel lineup and excluded from MVP.")
 
 boosts = {i: float(control_state.get(str(r["Player Key"]), {}).get("boost", 0.0)) for i, r in players.iterrows()}
 player_mins = {i: float(control_state.get(str(r["Player Key"]), {}).get("min", 0)) / 100.0 for i, r in players.iterrows()}
@@ -371,6 +382,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
             max_salary=max_salary,
             salary_cap=salary_cap,
             seed=seed,
+            required_flex_indices=locked_flex_indices if site == "FanDuel" else None,
         )
         results = evaluate_candidates(players, cand, sims, scripts)
         portfolio = build_portfolio(

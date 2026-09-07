@@ -74,11 +74,15 @@ def simulate_player_outcomes(players, teams, n_sims=5000, seed=26, boosts=None):
     return sims, scripts, base
 
 
-def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, max_salary=SHOWDOWN_SALARY_CAP, salary_cap=SHOWDOWN_SALARY_CAP, seed=26):
+def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000, max_salary=SHOWDOWN_SALARY_CAP, salary_cap=SHOWDOWN_SALARY_CAP, seed=26, required_flex_indices=None):
     """Create a diverse legal Showdown candidate pool quickly using NumPy arrays."""
     rows = players.reset_index(drop=True)
     n = len(rows)
     if n < 6:
+        return []
+
+    required_flex = tuple(sorted(set(int(i) for i in (required_flex_indices or []))))
+    if len(required_flex) > 5 or any(i < 0 or i >= n for i in required_flex):
         return []
 
     rng = np.random.default_rng(int(seed) + 7919)
@@ -90,6 +94,11 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
     cpt_score = base + flex_salary.astype(np.float32) / 5000.0
     cpt_count = min(n, max(16, min(30, n)))
     cpt_pool = np.argsort(-cpt_score)[:cpt_count].astype(np.int32)
+    if required_flex:
+        required_set = set(required_flex)
+        cpt_pool = np.asarray([i for i in cpt_pool if int(i) not in required_set], dtype=np.int32)
+        if cpt_pool.size == 0:
+            return []
 
     flex_weight = np.maximum(base, 0.75) ** 1.15
     flex_weight = flex_weight / flex_weight.sum()
@@ -124,7 +133,22 @@ def generate_showdown_candidates(players, max_candidates=12000, min_salary=42000
             cpt_order = rng.permutation(cpt_pool).tolist()
 
         eligible, probs = cached[cpt]
-        flex_arr = rng.choice(eligible, size=5, replace=False, p=probs)
+        if required_flex:
+            required_arr = np.asarray(required_flex, dtype=np.int32)
+            remaining = 5 - len(required_flex)
+            if remaining:
+                mask = ~np.isin(eligible, required_arr)
+                optional = eligible[mask]
+                optional_probs = probs[mask]
+                if optional.size < remaining or optional_probs.sum() <= 0:
+                    continue
+                optional_probs = optional_probs / optional_probs.sum()
+                sampled = rng.choice(optional, size=remaining, replace=False, p=optional_probs)
+                flex_arr = np.concatenate([required_arr, sampled])
+            else:
+                flex_arr = required_arr.copy()
+        else:
+            flex_arr = rng.choice(eligible, size=5, replace=False, p=probs)
         flex = tuple(sorted(map(int, flex_arr)))
         ident = (cpt, flex)
         if ident in seen:

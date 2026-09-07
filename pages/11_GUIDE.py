@@ -27,6 +27,7 @@ with c2:
         st.markdown("**Typical workflow**")
         st.markdown("1. Choose DraftKings or FanDuel.\n2. Confirm the current slate.\n3. Adjust the player pool and role/usage assumptions.\n4. Set contest and portfolio controls.\n5. Run NUKE Sim.\n6. Review results, paths, exposures, and portfolio intelligence.\n7. Send the portfolio to the Lineup Builder when you want to work with it there.")
         st.info("NUKE Sim is designed to model ranges of outcomes, not predict one exact future result.")
+        st.caption("FanDuel: use **FLEX position** to choose Any, RB, WR, or TE. Selecting RB forces every generated lineup to use 3 RBs, placing an RB in FLEX. Because this changes candidate construction, rerun NUKE Sim after changing the FLEX position setting.")
         st.page_link("pages/6_SIM.py",label="OPEN NUKE SIM",icon="☢️",use_container_width=True)
 
 st.divider()

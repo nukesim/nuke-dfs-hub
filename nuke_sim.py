@@ -76,7 +76,7 @@ def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK"):
     if not(c.get("QB",0)==1 and c.get("RB",0)>=2 and c.get("WR",0)>=3 and c.get("TE",0)>=1 and c.get("DST",0)==1):return False
     q=r[r.Position.eq("QB")]; return not("auto_qb_eligible" in q.columns and not bool(q.iloc[0].auto_qb_eligible))
 
-def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
+def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None):
     """Candidate Engine V3: salary-aware tournament construction.
 
     Builds the first eight roster spots under the existing stack/profile rules, then solves
@@ -86,6 +86,8 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
     rng=np.random.default_rng(seed); p=players.reset_index(drop=True)
     if p.empty:return []
     cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)
+    flex_position=str(flex_position or "ANY").upper().strip()
+    if flex_position not in {"ANY","RB","WR","TE"}: flex_position="ANY"
     pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int)
     market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float)
     gen_boost=pd.to_numeric(p.get("generation_boost",0.0),errors="coerce").fillna(0).clip(-3,3).to_numpy(float)
@@ -159,6 +161,8 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
         partial=int(sal[np.asarray(chosen,dtype=int)].sum())
         lo=min_salary-partial; hi=salary_cap-partial
         ids=flex[(sal[flex]>=lo)&(sal[flex]<=hi)&(~np.isin(flex,chosen))]
+        if flex_position!="ANY":
+            ids=ids[pos[ids]==flex_position]
         if not len(ids):continue
         # Prevent final FLEX from creating the DST-vs-multiple-offense conflict.
         dst=[i for i in chosen if pos[i]=="DST"]
@@ -175,6 +179,7 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
         # Cheap array-level roster validation; construction already guarantees salary and minimums.
         counts={k:int(np.sum(pos[arr]==k)) for k in ["QB","RB","WR","TE","DST"]}
         if not(counts["QB"]==1 and counts["RB"]>=2 and counts["WR"]>=3 and counts["TE"]>=1 and counts["DST"]==1):continue
+        if flex_position!="ANY" and counts.get(flex_position,0)!={"RB":3,"WR":4,"TE":2}[flex_position]:continue
         if dst:
             d=dst[0]; opposing=sum((game[i]==game[d]) and (team[i]!=team[d]) and pos[i]!="DST" for i in lineup)
             if opposing>=2:continue
@@ -213,6 +218,9 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK"):
             if len(chosen)!=9:continue
             arr=np.asarray(chosen,dtype=int); total=int(sal[arr].sum()); key=tuple(sorted(chosen))
             if total<min_salary or total>salary_cap or key in keys or not _valid_lineup(chosen,p,min_salary,max_salary=salary_cap,site=site):continue
+            if flex_position!="ANY":
+                counts={k:int(np.sum(pos[arr]==k)) for k in ["RB","WR","TE"]}
+                if counts.get(flex_position,0)!={"RB":3,"WR":4,"TE":2}[flex_position]:continue
             dst_ids=[i for i in chosen if pos[i]=="DST"]
             if dst_ids:
                 d=dst_ids[0]; opposing=sum((game[i]==game[d]) and (team[i]!=team[d]) and pos[i]!="DST" for i in chosen)

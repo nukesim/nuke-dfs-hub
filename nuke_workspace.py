@@ -10,7 +10,7 @@ CONTROL_KEYS = [
     "use_reproducible_seed", "nuke_manual_seed", "field_size", "entry_fee", "first_prize",
     "contest_iterations", "portfolio_size", "max_player_overlap", "path_diversification",
     "max_player_exposure", "max_qb_exposure", "max_team_exposure", "max_game_exposure",
-    "min_salary_DK", "min_salary_FD",
+    "min_salary_DK", "min_salary_FD", "nuke_fd_flex_position",
 ]
 
 STATE_KEYS = [

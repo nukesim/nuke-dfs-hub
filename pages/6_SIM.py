@@ -659,6 +659,20 @@ if results is not None and not results.empty:
             preferred=["Portfolio Slot","QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX","DST","FLEX Pos","Stack","Contest Rank","Sim ROI %","1st %","Top 0.1%","Top 1%","Cash %","Avg Finish","Avg Payout","Strongest Path","Secondary Path","Path Score","Lineup Thesis","NUKE Score","Median","Ceiling 95","Salary","Portfolio Reason"]
             portfolio_export=portfolio_export[[c for c in preferred if c in portfolio_export.columns]+[c for c in portfolio_export.columns if c not in preferred]]
             st.dataframe(portfolio_export,use_container_width=True,hide_index=True)
+            st.markdown("""
+            <style id="portfolio-download-green">
+            div[data-testid="stDownloadButton"] button[kind="primary"] {
+                background: #16a34a !important;
+                border-color: #16a34a !important;
+                color: white !important;
+            }
+            div[data-testid="stDownloadButton"] button[kind="primary"]:hover {
+                background: #15803d !important;
+                border-color: #15803d !important;
+                color: white !important;
+            }
+            </style>
+            """,unsafe_allow_html=True)
             st.download_button("⬇️ Download Portfolio + Stats CSV",portfolio_export.to_csv(index=False).encode("utf-8-sig"),"nuke_portfolio_with_stats.csv","text/csv",type="primary",use_container_width=True,key="download_portfolio_stats")
     with tab3:
         show=results.drop(columns=["_indices"],errors="ignore")

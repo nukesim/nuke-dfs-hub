@@ -50,9 +50,9 @@ def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leve
     # Protect truly elite tournament lineups from being diversified away.
     elite=.55*_z(first)+.35*_z(top01)+.25*_z(ceil)+.20*_z(roi)
     elite_rank=pd.Series(elite).rank(method="min",ascending=False).to_numpy(); elite_bonus=np.where(elite_rank<=max(3,int(np.ceil(n*.04))),.65,.0)
-    # V3 field information: duplication/popularity is useful portfolio information, not a hard fade.
-    leverage=.34*(-_z(dup))+.18*(-_z(fieldpop)); leverage=np.clip(leverage,-.75,.75)
-    base=base+elite_bonus+leverage
+    # Main-slate portfolio selection intentionally does not use modeled ownership or duplication estimates.
+    # Candidate quality, simulated tournament outcomes, correlation and portfolio diversification drive selection.
+    base=base+elite_bonus
     path=x.get("Strongest Path",pd.Series(["UNKNOWN"]*n)).fillna("UNKNOWN").astype(str).to_numpy(); qb=x.get("QB",pd.Series(["UNKNOWN"]*n)).fillna("UNKNOWN").astype(str).to_numpy(); stack=x.get("Stack",pd.Series(["UNKNOWN"]*n)).fillna("UNKNOWN").astype(str).to_numpy()
     ids=[tuple(map(int,lu)) for lu in x["_indices"]] if "_indices" in x.columns else [tuple() for _ in range(n)]; sets=[set(a) for a in ids]; pairs=[tuple(itertools.combinations(sorted(set(a)),2)) for a in ids]; triples=[tuple(itertools.combinations(sorted(set(a)),3)) for a in ids]
     overlap=np.zeros((n,n),dtype=np.int8)
@@ -117,11 +117,10 @@ def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leve
         else:
             worst,maxpr,maxtr,sc=bm
             if elite_bonus[bi]>0: label="Elite Ceiling"
-            elif dup[bi] <= np.nanpercentile(dup,30) and first[bi] >= np.nanmedian(first): label="Low-Dup Leverage"
             elif sc==0: label="Scenario Diversifier"
             elif qbc.get(qb[bi],0)==0: label="Contrarian QB Path"
             else: label="GPP Upside"
-            reasons[bi]=f"{label} | {path[bi]} | {scenario[bi].split(' | ')[-1]} | max overlap {worst} | expected dup {dup[bi]:.1f}"
+            reasons[bi]=f"{label} | {path[bi]} | {scenario[bi].split(' | ')[-1]} | max overlap {worst}"
         selected.append(bi); mask[bi]=True; pathc[path[bi]]=pathc.get(path[bi],0)+1; qbc[qb[bi]]=qbc.get(qb[bi],0)+1; stackc[stack[bi]]=stackc.get(stack[bi],0)+1; scenec[scenario[bi]]=scenec.get(scenario[bi],0)+1
         for pid in ids[bi]:
             if 0<=pid<=maxpid: pc[pid]+=1

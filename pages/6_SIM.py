@@ -531,7 +531,7 @@ if results is not None and not results.empty:
             story=portfolio_story(sim_players,portfolio)
             sm=story.get("metrics",{})
             st.markdown("### 🧠 Portfolio Story")
-            st.caption("What this portfolio is betting on, where it is different from the modeled field, and where concentration risk lives.")
+            st.caption("What this portfolio is betting on, why lineups earned portfolio slots, and where concentration risk lives.")
             s1,s2,s3,s4,s5=st.columns([0.85,1.0,1.35,1.15,1.15])
             s1.metric("Lineups",f"{int(sm.get('lineups',len(portfolio))):,}")
             s2.metric("Elite Ceiling",f"{int(sm.get('elite_lineups',0)):,}")
@@ -555,19 +555,8 @@ if results is not None and not results.empty:
                 else:
                     st.caption("No portfolio-reason labels are available yet.")
 
-            leverage_df=story.get("leverage_df",pd.DataFrame())
-            if leverage_df is not None and not leverage_df.empty:
-                st.markdown("#### ⚡ Portfolio vs Modeled Field")
-                st.caption("Positive leverage = NUKE is using the player more than the projection-free Field Engine ownership prior. Negative leverage = portfolio fade. This is a portfolio stance, not a live ownership projection.")
-                lev1,lev2=st.columns(2)
-                with lev1:
-                    st.markdown("**Largest Overweights**")
-                    st.dataframe(leverage_df.head(12),use_container_width=True,hide_index=True,height=390)
-                with lev2:
-                    st.markdown("**Largest Underweights / Fades**")
-                    st.dataframe(leverage_df.sort_values("Leverage +/-",ascending=True).head(12),use_container_width=True,hide_index=True,height=390)
-
             story_flags=story.get("flags",[])
+            st.caption("Portfolio selection is driven by simulation quality, scenario coverage, correlation, exposure limits, and diversification — not modeled ownership estimates.")
             st.markdown("#### 🚨 Portfolio Risk Check")
             if story_flags:
                 for flag in story_flags:

@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-from nuke_field import projection_free_player_ownership
 from nuke_portfolio import portfolio_player_exposure, portfolio_qb_exposure, portfolio_team_game_exposure, portfolio_health
 
 
@@ -33,24 +32,13 @@ def portfolio_story(players, portfolio):
     reason_df=pd.DataFrame({"Reason":reasons.index,"Lineups":reasons.values})
     reason_df["Portfolio %"]=np.round(100.0*reason_df["Lineups"]/n,1)
 
-    pexp=portfolio_player_exposure(players,portfolio)
-    field=projection_free_player_ownership(players)
     leverage_df=pd.DataFrame()
-    if pexp is not None and not pexp.empty and field is not None and not field.empty:
-        left=pexp.copy(); right=field.copy()
-        left["Player"]=left["Player"].astype(str); left["Pos"]=left["Pos"].astype(str); left["Team"]=left["Team"].astype(str)
-        right["Player"]=right["Player"].astype(str); right["Position"]=right["Position"].astype(str); right["Team"]=right["Team"].astype(str)
-        leverage_df=left.merge(right[["Player","Position","Team","Field Ownership %"]],left_on=["Player","Pos","Team"],right_on=["Player","Position","Team"],how="left")
-        leverage_df["Field Ownership %"]=pd.to_numeric(leverage_df["Field Ownership %"],errors="coerce").fillna(0.0)
-        leverage_df["Leverage +/-"]=np.round(pd.to_numeric(leverage_df["Exposure %"],errors="coerce").fillna(0.0)-leverage_df["Field Ownership %"],1)
-        leverage_df=leverage_df[["Player","Pos","Team","Salary","Exposure %","Field Ownership %","Leverage +/-"]].sort_values("Leverage +/-",ascending=False).reset_index(drop=True)
 
     qb_df=portfolio_qb_exposure(portfolio)
     _,game_df=portfolio_team_game_exposure(players,portfolio)
     health=portfolio_health(players,portfolio)
     flags=list(health.get("flags",[]))
 
-    dup=pd.to_numeric(portfolio.get("Duplication Pressure",pd.Series(dtype=float)),errors="coerce").dropna()
     elite=int(reason_df.loc[reason_df["Reason"].eq("Elite Ceiling"),"Lineups"].sum()) if not reason_df.empty else 0
     leverage_count=int(reason_df.loc[reason_df["Reason"].eq("Low-Dup Leverage"),"Lineups"].sum()) if not reason_df.empty else 0
     dominant_scenario=str(scenario_df.iloc[0]["Scenario"]).split("|")[0].strip() if not scenario_df.empty else "UNKNOWN"
@@ -70,6 +58,5 @@ def portfolio_story(players, portfolio):
         "dominant_qb_pct":dominant_qb_pct,
         "dominant_game":dominant_game,
         "dominant_game_pct":dominant_game_pct,
-        "median_dup_pressure":float(dup.median()) if len(dup) else np.nan,
     }
     return {"metrics":metrics,"scenario_df":scenario_df,"reason_df":reason_df,"leverage_df":leverage_df,"qb_df":qb_df,"game_df":game_df,"flags":flags}

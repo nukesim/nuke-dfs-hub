@@ -155,16 +155,17 @@ with st.sidebar:
     presets={"QUICK":(250,350,200),"STANDARD":(400,750,350),"DEEP":(700,1200,500)}
     candidates,sims,contest_iters=presets[preset]
     min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")
+    st.markdown("**LINEUP RULES**")
+    no_offense_vs_dst=st.checkbox(
+        "No players vs opposing defense", value=True, key="nuke_no_offense_vs_dst",
+        help="DraftKings and FanDuel. When checked, if a defense is selected, NUKE will not use any QB/RB/WR/TE from that defense's opponent in the same lineup. Changing this requires a new NUKE SIM run."
+    )
     flex_position="ANY"
     if site=="FD":
         flex_position=st.selectbox(
             "FLEX position", ["ANY","RB","WR","TE"], index=0, key="nuke_fd_flex_position",
             help="FanDuel only. Choose RB to force every generated lineup to use a running back in FLEX (3 RB total). Changing this requires a new NUKE SIM run."
         )
-    no_offense_vs_dst=st.checkbox(
-        "No players vs opposing defense", value=True, key="nuke_no_offense_vs_dst",
-        help="DraftKings and FanDuel. When checked, if a defense is selected, NUKE will not use any QB/RB/WR/TE from that defense's opponent in the same lineup. Changing this requires a new NUKE SIM run."
-    )
     candidates=st.number_input("Candidate lineups",100,5000,candidates,100,key="candidate_lineups")
     sims=st.number_input("Football universes",250,10000,sims,250,key="football_universes")
     with st.expander("Advanced settings"):

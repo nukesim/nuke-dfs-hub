@@ -4,7 +4,7 @@ name = "Lineup Builder"
 icon = "🏈"
 
 [[pages]]
-path = "pages/6_SIM.py"
+path = "pages/6_SIM_LIVE.py"
 name = "NUKE Sim"
 icon = "☢️"
 

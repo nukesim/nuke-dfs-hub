@@ -1,0 +1,36 @@
+name: Create NUKE Sim Current Pool Page
+on:
+  push:
+    paths:
+      - 'deploy/create_nuke_sim_current_pool.txt'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create fresh NUKE Sim page
+        run: |
+          cp pages/6_SIM_LIVE.py pages/14_NUKE_SIM.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pages/14_NUKE_SIM.py')
+          s=p.read_text()
+          required=['✅ INCLUDE ALL','🚫 REMOVE ALL','current_pool_editor_','APPLY {pos} PLAYER POOL','Game-by-Game']
+          missing=[x for x in required if x not in s]
+          if missing:
+              raise SystemExit('Missing required current-pool controls: '+str(missing))
+          p.write_text(s)
+          PY
+      - name: Compile
+        run: python -m py_compile pages/14_NUKE_SIM.py
+      - name: Commit fresh page
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add pages/14_NUKE_SIM.py
+          git commit -m 'Create fresh NUKE Sim page with editable current player pool' || exit 0
+          git push

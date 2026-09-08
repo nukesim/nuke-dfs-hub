@@ -18,3 +18,4 @@ if old not in s:
     raise SystemExit('Player Takes block not found')
 s=s.replace(old,new,1)
 p.write_text(s,encoding='utf-8')
+# trigger: isolate position-filter reruns to this fragment only

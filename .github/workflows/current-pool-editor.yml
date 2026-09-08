@@ -1,0 +1,28 @@
+name: Current Player Pool Editor
+on:
+  push:
+    paths:
+      - 'tools/current_pool_editor_trigger.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/current_pool_editor_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile pages/6_SIM.py
+          grep -q 'INCLUDE ALL' pages/6_SIM.py
+          grep -q 'REMOVE ALL' pages/6_SIM.py
+          grep -q 'APPLY {pos} PLAYER POOL' pages/6_SIM.py
+          grep -q 'Excluded players stay visible' pages/6_SIM.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py
+          git diff --cached --quiet || git commit -m 'Make current player pool fully editable'
+          git push

@@ -1,0 +1,27 @@
+name: Both Platform DST Rule
+on:
+  push:
+    paths:
+      - 'tools/both_platform_dst_rule_patch.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/both_platform_dst_rule_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile pages/6_SIM.py nuke_workspace.py pages/11_GUIDE.py
+          grep -q 'nuke_no_offense_vs_dst' pages/6_SIM.py
+          grep -q 'No players vs opposing defense' pages/6_SIM.py
+          grep -q 'nuke_no_offense_vs_dst' nuke_workspace.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py nuke_workspace.py pages/11_GUIDE.py
+          git diff --cached --quiet || git commit -m 'Make defense-vs-offense rule available on DK and FD'
+          git push

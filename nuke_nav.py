@@ -1,3 +1,5 @@
+import inspect
+import os
 import streamlit as st
 
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/nukedfs"
@@ -27,31 +29,42 @@ def _sync_flex_from_nav(site, nav_key):
         st.session_state["nuke_fd_flex_position"]=value
 
 
-def _render_sim_flex_control():
-    """Fallback FLEX control for NUKE SIM sessions.
+def _caller_is_nuke_sim():
+    """Detect NUKE SIM from the file that called render_nav().
 
-    This lives in shared nav so the selector remains available even if Streamlit is
-    temporarily serving an older cached copy of pages/6_SIM.py.
+    render_nav() executes before NUKE SIM creates its session-state controls, so session-state
+    detection is too early. Inspect the caller stack instead so the FLEX control renders on the
+    first pass every time.
     """
-    is_sim_session=(
-        "nuke_sim_active_site" in st.session_state
-        or "sim_preset" in st.session_state
-        or "candidate_lineups" in st.session_state
-    )
-    if not is_sim_session:
+    try:
+        for frame_info in inspect.stack()[1:12]:
+            filename=os.path.basename(str(frame_info.filename or ""))
+            if filename=="6_SIM.py":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _render_sim_flex_control():
+    if not _caller_is_nuke_sim():
         return
+
     site=str(st.session_state.get("dfs_site",st.session_state.get("nuke_sim_active_site","DK")) or "DK").upper()
     if site not in {"DK","FD"}:
         site="DK"
+
     canonical_key=f"nuke_flex_position_{site}"
     legacy_key="nuke_fd_flex_position" if site=="FD" else None
     default_value=str(st.session_state.get(canonical_key,st.session_state.get(legacy_key,"ANY") if legacy_key else "ANY") or "ANY").upper()
     options=["ANY","RB","WR","TE"]
     if default_value not in options:
         default_value="ANY"
+
     nav_key=f"nuke_nav_flex_position_{site}"
     if nav_key not in st.session_state:
         st.session_state[nav_key]=default_value
+
     st.markdown("### SIM ROSTER RULES")
     st.selectbox(
         "FLEX position",
@@ -61,6 +74,7 @@ def _render_sim_flex_control():
         args=(site,nav_key),
         help="ANY leaves FLEX unrestricted. RB forces 3 RB total, WR forces 4 WR total, and TE forces 2 TE total. Rerun NUKE SIM after changing this.",
     )
+    _sync_flex_from_nav(site,nav_key)
 
 
 def render_nav():

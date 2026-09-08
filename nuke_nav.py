@@ -20,6 +20,13 @@ def _clean_player_takes(field):
     st.rerun()
 
 
+def _sync_flex_from_nav(site, nav_key):
+    value=str(st.session_state.get(nav_key,"ANY") or "ANY").upper()
+    st.session_state[f"nuke_flex_position_{site}"]=value
+    if site=="FD":
+        st.session_state["nuke_fd_flex_position"]=value
+
+
 def _render_sim_flex_control():
     """Fallback FLEX control for NUKE SIM sessions.
 
@@ -36,23 +43,24 @@ def _render_sim_flex_control():
     site=str(st.session_state.get("dfs_site",st.session_state.get("nuke_sim_active_site","DK")) or "DK").upper()
     if site not in {"DK","FD"}:
         site="DK"
-    key=f"nuke_flex_position_{site}"
-    # Preserve the legacy FD selector when loading older workspaces/sessions.
+    canonical_key=f"nuke_flex_position_{site}"
     legacy_key="nuke_fd_flex_position" if site=="FD" else None
-    default_value=str(st.session_state.get(key,st.session_state.get(legacy_key,"ANY") if legacy_key else "ANY") or "ANY").upper()
+    default_value=str(st.session_state.get(canonical_key,st.session_state.get(legacy_key,"ANY") if legacy_key else "ANY") or "ANY").upper()
     options=["ANY","RB","WR","TE"]
     if default_value not in options:
         default_value="ANY"
+    nav_key=f"nuke_nav_flex_position_{site}"
+    if nav_key not in st.session_state:
+        st.session_state[nav_key]=default_value
     st.markdown("### SIM ROSTER RULES")
     st.selectbox(
         "FLEX position",
         options,
-        index=options.index(default_value),
-        key=key,
+        key=nav_key,
+        on_change=_sync_flex_from_nav,
+        args=(site,nav_key),
         help="ANY leaves FLEX unrestricted. RB forces 3 RB total, WR forces 4 WR total, and TE forces 2 TE total. Rerun NUKE SIM after changing this.",
     )
-    if site=="FD":
-        st.session_state["nuke_fd_flex_position"]=st.session_state.get(key,"ANY")
 
 
 def render_nav():

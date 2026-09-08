@@ -155,11 +155,6 @@ with st.sidebar:
     presets={"QUICK":(250,350,200),"STANDARD":(400,750,350),"DEEP":(700,1200,500)}
     candidates,sims,contest_iters=presets[preset]
     min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")
-    st.markdown("**LINEUP RULES**")
-    no_offense_vs_dst=st.checkbox(
-        "No players vs opposing defense", value=True, key="nuke_no_offense_vs_dst",
-        help="DraftKings and FanDuel. When checked, if a defense is selected, NUKE will not use any QB/RB/WR/TE from that defense's opponent in the same lineup. Changing this requires a new NUKE SIM run."
-    )
     flex_position="ANY"
     if site=="FD":
         flex_position=st.selectbox(
@@ -190,6 +185,16 @@ with st.sidebar:
     max_team_exp=st.slider("Max team exposure %",10,100,80,5,key="max_team_exposure")
     max_game_exp=st.slider("Max game exposure %",10,100,70,5,key="max_game_exposure")
     st.caption(f"{PORTFOLIO_ENGINE_VERSION}: tournament upside + player/team/game concentration controls. Duplication is not used to select your portfolio.")
+
+with st.container(border=True):
+    st.markdown("### 🛡️ Lineup Rules")
+    no_offense_vs_dst=st.checkbox(
+        "No players vs opposing defense",
+        value=True,
+        key="nuke_no_offense_vs_dst",
+        help="DraftKings and FanDuel. When checked, NUKE will not place QB/RB/WR/TE from a defense's opponent in the same lineup as that defense. Changing this requires a new NUKE SIM run.",
+    )
+    st.caption("ON by default for both DraftKings and FanDuel. Example: if CHI D/ST is in a lineup, no offensive player from Chicago's opponent can appear in that lineup.")
 
 st.subheader("🏈 Current Slate")
 salary_upload=st.file_uploader(f"{'Optional: upload a different DraftKings NFL salary CSV' if site=='DK' else 'Upload FanDuel NFL salary CSV'}",type=["csv"],key=f"salary_upload_{site}",help="DraftKings can use the built-in weekly slate. FanDuel currently uses the official FanDuel salary CSV so its player IDs and $60K salaries are exact.")

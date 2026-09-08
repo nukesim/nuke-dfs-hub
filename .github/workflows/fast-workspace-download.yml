@@ -1,0 +1,25 @@
+name: Fast Workspace Download
+on:
+  push:
+    paths:
+      - 'tools/fast_workspace_download_patch.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/fast_workspace_download_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile pages/6_SIM.py
+          grep -q 'on_click="ignore"' pages/6_SIM.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py
+          git diff --cached --quiet || git commit -m 'Prevent workspace download from rerunning NUKE SIM'
+          git push

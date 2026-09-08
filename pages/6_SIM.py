@@ -23,6 +23,54 @@ from nuke_availability import availability_status
 from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS, build_fd_lineup_only_csv
 from nuke_workspace import workspace_bytes, load_workspace_bytes, apply_workspace
 
+@st.fragment
+def render_player_takes_fragment(sim_players, portfolio, contest_results, portfolio_stats, manage_size, manage_overlap, manage_player, manage_qb, manage_path, manage_team, manage_game):
+    st.markdown("#### 🎚️ Player Takes")
+    st.caption("Boost changes only portfolio selection — it does NOT change the player's simulated fantasy points. +1/+2/+3 = Like/Love/Flag Plant; negatives reduce exposure. Min/Max are hard portfolio targets when the candidate pool can support them.")
+    saved_takes=st.session_state.get("nuke_player_takes",{})
+    current_counts={}
+    for lu in portfolio["_indices"]:
+        for pid in lu:
+            current_counts[int(pid)]=current_counts.get(int(pid),0)+1
+    candidate_ids=sorted({int(pid) for lu in contest_results["_indices"] for pid in lu})
+    take_rows=[]
+    for pid in candidate_ids:
+        p=sim_players.iloc[pid]
+        pref=saved_takes.get(pid,{})
+        take_rows.append({"Player ID":pid,"Player":p.Name,"Pos":p.Position,"Team":p.Team,"Salary":int(p.Salary),"Current %":round(100*current_counts.get(pid,0)/max(1,len(portfolio)),1),"Boost":float(pref.get("boost",0.0)),"Min %":float(100*pref.get("min",0.0)),"Max %":float(100*pref.get("max",float(manage_player)/100.0))})
+    take_df=pd.DataFrame(take_rows).set_index("Player ID")
+    take_filter=st.multiselect("Positions",["QB","RB","WR","TE","DST"],default=["QB","RB","WR","TE","DST"],key="take_pos_filter")
+    edit_base=take_df[take_df.Pos.isin(take_filter)].copy()
+    take_edit=st.data_editor(edit_base,use_container_width=True,hide_index=True,height=430,disabled=["Player","Pos","Team","Salary","Current %"],column_config={"Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f"),"Min %":st.column_config.NumberColumn("Min %",min_value=0.0,max_value=100.0,step=5.0,format="%.0f%%"),"Max %":st.column_config.NumberColumn("Max %",min_value=0.0,max_value=100.0,step=5.0,format="%.0f%%")},key="player_takes_editor")
+
+    if st.button("🧬 REBUILD PORTFOLIO",type="primary",use_container_width=True,key="rebuild_portfolio"):
+        preferences=dict(saved_takes)
+        invalid=[]
+        for pid,row in take_edit.iterrows():
+            mn=float(row["Min %"])/100.0
+            mx=float(row["Max %"])/100.0
+            boost=float(row["Boost"])
+            if mn>mx:
+                invalid.append(str(row["Player"]))
+                continue
+            if abs(boost)>1e-9 or mn>0 or abs(mx-float(manage_player)/100.0)>1e-9:
+                preferences[int(pid)]={"boost":boost,"min":mn,"max":mx}
+            else:
+                preferences.pop(int(pid),None)
+        if invalid:
+            st.error("Min % cannot be greater than Max % for: "+", ".join(invalid))
+            st.stop()
+        new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences,players=sim_players,max_team_exposure=float(manage_team)/100.0,max_game_exposure=float(manage_game)/100.0)
+        new_paths,new_stats=portfolio_summary(new_portfolio)
+        st.session_state["nuke_player_takes"]=preferences
+        st.session_state["nuke_portfolio"]=new_portfolio
+        st.session_state["nuke_portfolio_paths"]=new_paths
+        st.session_state["nuke_portfolio_stats"]=new_stats
+        st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(sim_players,new_portfolio)
+        st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
+        st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio))
+        st.rerun()
+
 def candidate_diagnostics(players,lineups,requested,min_salary):
     if not lineups:
         return {}
@@ -601,51 +649,7 @@ if results is not None and not results.empty:
             manage_team=pc6.slider("Max team %",10,100,int(round(100*float(portfolio_stats.get("max_team_exposure",.80)))),5,key="manage_team_exp")
             manage_game=pc7.slider("Max game %",10,100,int(round(100*float(portfolio_stats.get("max_game_exposure",.70)))),5,key="manage_game_exp")
 
-            st.markdown("#### 🎚️ Player Takes")
-            st.caption("Boost changes only portfolio selection — it does NOT change the player's simulated fantasy points. +1/+2/+3 = Like/Love/Flag Plant; negatives reduce exposure. Min/Max are hard portfolio targets when the candidate pool can support them.")
-            saved_takes=st.session_state.get("nuke_player_takes",{})
-            current_counts={}
-            for lu in portfolio["_indices"]:
-                for pid in lu:
-                    current_counts[int(pid)]=current_counts.get(int(pid),0)+1
-            candidate_ids=sorted({int(pid) for lu in contest_results["_indices"] for pid in lu})
-            take_rows=[]
-            for pid in candidate_ids:
-                p=sim_players.iloc[pid]
-                pref=saved_takes.get(pid,{})
-                take_rows.append({"Player ID":pid,"Player":p.Name,"Pos":p.Position,"Team":p.Team,"Salary":int(p.Salary),"Current %":round(100*current_counts.get(pid,0)/max(1,len(portfolio)),1),"Boost":float(pref.get("boost",0.0)),"Min %":float(100*pref.get("min",0.0)),"Max %":float(100*pref.get("max",float(manage_player)/100.0))})
-            take_df=pd.DataFrame(take_rows).set_index("Player ID")
-            take_filter=st.multiselect("Positions",["QB","RB","WR","TE","DST"],default=["QB","RB","WR","TE","DST"],key="take_pos_filter")
-            edit_base=take_df[take_df.Pos.isin(take_filter)].copy()
-            take_edit=st.data_editor(edit_base,use_container_width=True,hide_index=True,height=430,disabled=["Player","Pos","Team","Salary","Current %"],column_config={"Boost":st.column_config.NumberColumn("Boost",min_value=-3.0,max_value=3.0,step=1.0,format="%.0f"),"Min %":st.column_config.NumberColumn("Min %",min_value=0.0,max_value=100.0,step=5.0,format="%.0f%%"),"Max %":st.column_config.NumberColumn("Max %",min_value=0.0,max_value=100.0,step=5.0,format="%.0f%%")},key="player_takes_editor")
-
-            if st.button("🧬 REBUILD PORTFOLIO",type="primary",use_container_width=True,key="rebuild_portfolio"):
-                preferences=dict(saved_takes)
-                invalid=[]
-                for pid,row in take_edit.iterrows():
-                    mn=float(row["Min %"])/100.0
-                    mx=float(row["Max %"])/100.0
-                    boost=float(row["Boost"])
-                    if mn>mx:
-                        invalid.append(str(row["Player"]))
-                        continue
-                    if abs(boost)>1e-9 or mn>0 or abs(mx-float(manage_player)/100.0)>1e-9:
-                        preferences[int(pid)]={"boost":boost,"min":mn,"max":mx}
-                    else:
-                        preferences.pop(int(pid),None)
-                if invalid:
-                    st.error("Min % cannot be greater than Max % for: "+", ".join(invalid))
-                    st.stop()
-                new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences,players=sim_players,max_team_exposure=float(manage_team)/100.0,max_game_exposure=float(manage_game)/100.0)
-                new_paths,new_stats=portfolio_summary(new_portfolio)
-                st.session_state["nuke_player_takes"]=preferences
-                st.session_state["nuke_portfolio"]=new_portfolio
-                st.session_state["nuke_portfolio_paths"]=new_paths
-                st.session_state["nuke_portfolio_stats"]=new_stats
-                st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(sim_players,new_portfolio)
-                st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
-                st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio))
-                st.rerun()
+            render_player_takes_fragment(sim_players, portfolio, contest_results, portfolio_stats, manage_size, manage_overlap, manage_player, manage_qb, manage_path, manage_team, manage_game)
 
             requested=int(portfolio_stats.get("requested_lineups",len(portfolio)))
             if len(portfolio)<requested:

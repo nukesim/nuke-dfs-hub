@@ -89,13 +89,10 @@ def candidate_diagnostics(players,lineups,requested,min_salary):
         for pid in lu:
             if pid<0 or pid>=len(players):
                 continue
-            r=players.iloc[pid]
-            salary+=int(r.Salary)
-            if str(r.Position)=="QB":
-                qb_names.add(str(r.Name))
-            game=str(getattr(r,"Game",""))
-            if game and game.lower()!="nan":
-                games.add(game)
+            row=players.iloc[pid]
+            salary+=int(row.Salary)
+            if row.Position=="QB": qb_names.add(str(row.Name))
+            if str(row.Game): games.add(str(row.Game))
         salaries.append(salary)
     sample=lus if n<=300 else lus[:300]
     overlap_vals=[]
@@ -212,89 +209,18 @@ except Exception as e:
     st.stop()
 
 st.session_state["nuke_workspace_slate_label"]=slate_source
-
-payouts_override=None
-
-try:
-    players=prepare_slate(raw_slate,site=site)
-except Exception as e:
-    st.error(f"Could not read this slate: {e}")
-    st.stop()
-
-# Automated player availability protection. The scheduled feed is joined before the pool editor.
-players,availability_meta=availability_status(players)
-if availability_meta.get("loaded"):
-    red=int(availability_meta.get("red",0)); yellow=int(availability_meta.get("yellow",0))
-    updated=availability_meta.get("updated","")
-    if red:
-        st.warning(f"🚑 Player Availability · {red} OUT/inactive auto-excluded · {yellow} questionable/doubtful kept in pool" + (f" · Updated {updated}" if updated else ""))
-    else:
-        st.success(f"🚑 Player Availability ✓ · 0 OUT/inactive · {yellow} questionable/doubtful" + (f" · Updated {updated}" if updated else ""))
-    for warning in availability_meta.get("qb_warnings",[]):
-        st.warning(f"⚠️ Starting QB alert: {warning}")
-else:
-    st.info("🚑 Player Availability feed not connected yet — no automatic injury exclusions are being applied.")
-
-# One-stop injury review so users do not have to hunt through every game.
-flagged=players[players["Availability"].astype(str).str.lower().ne("available")].copy() if "Availability" in players.columns else players.iloc[0:0].copy()
-if not flagged.empty:
-    with st.expander(f"🚑 Injuries & Availability · {len(flagged)} flagged", expanded=True):
-        st.caption("OUT/inactive players default to excluded. Questionable/doubtful players stay available but are flagged for review.")
-        flagged["NUKE Action"]=flagged["Auto Exclude"].map(lambda x: "🔴 EXCLUDED" if bool(x) else "🟡 INCLUDED / REVIEW")
-        cols=[c for c in ["Name","Team","Position","Availability","Availability Detail","NUKE Action"] if c in flagged.columns]
-        show=flagged[cols].copy()
-        rename={"Name":"Player","Position":"Pos","Availability":"Status","Availability Detail":"Detail"}
-        show=show.rename(columns=rename)
-        show=show.fillna("")
-        st.dataframe(show,use_container_width=True,hide_index=True)
-else:
-    if availability_meta.get("loaded"):
-        st.caption("🚑 Injuries & Availability · No flagged players on the current slate.")
-
-c1,c2,c3,c4,c5=st.columns(5)
-c1.metric("Players",len(players))
-c2.metric("Teams",players.Team.nunique())
-c3.metric("Games",players.Game.nunique())
-c4.metric("Salary Floor",f"${int(min_salary):,}")
-c5.metric("Slate",slate_source)
-
-st.subheader("📊 Game-by-Game Player Pool")
-st.caption("Work the slate one game at a time. Include/remove players, adjust role if needed, then apply the game once.")
-current_odds=load_current_odds()
+players=prepare_slate(raw_slate,site=site)
+players["Availability"]=availability_status(players)
+env=game_environment(players)
 odds_history=load_odds_history()
-odds_meta=odds_status(current_odds)
-env=game_environment(players,current_odds)
-if not env.empty:
-    sportsbook_games=int(env[env["Source"].eq("Sportsbook Consensus")]["Game"].nunique()) if "Source" in env.columns else 0
-    if sportsbook_games:
-        rem=odds_meta.get("credits_remaining")
-        rem_text=f" · {rem} free API credits remaining" if rem is not None else ""
-        st.caption(f"Sportsbook consensus is live for {sportsbook_games} slate games. Team totals are implied from consensus spread + game total. Auto-updated throughout the week{rem_text}. Rank 1 = strongest on the slate.")
-    else:
-        st.caption(f"Sportsbook lines are not loaded yet, so NUKE is temporarily using its {cfg.name} salary-market estimates. Rank 1 = strongest on the slate.")
+rendered_odds_status=odds_status(env)
+if rendered_odds_status:
+    st.caption(rendered_odds_status)
 
+# Bring across hand-builder pool choices when they match this slate.
+sync_hub_pool_to_sim(st.session_state,players)
 pool_state=st.session_state.get("nuke_pregame_pool",{})
 editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
-
-# Hub and SIM share Streamlit session state. Pull the committed Hub pool and role adjustments
-# only when those Hub inputs change; later SIM-only edits remain intact until the Hub changes again.
-hub_pool=list(st.session_state.get("pool_ids",[]) or [])
-hub_adjust=dict(st.session_state.get("projection_overrides",{}) or {})
-hub_signature=(tuple(sorted(map(str,hub_pool))),tuple(sorted((str(k),float(v)) for k,v in hub_adjust.items())))
-last_hub_signature=st.session_state.get("nuke_sim_hub_signature")
-if (hub_pool or hub_adjust) and hub_signature!=last_hub_signature:
-    pool_state=sync_hub_pool_to_sim(players,pool_state,hub_pool,hub_adjust)
-    st.session_state["nuke_pregame_pool"]=pool_state
-    st.session_state["nuke_sim_hub_signature"]=hub_signature
-    st.session_state["nuke_pool_editor_version"]=editor_version+1
-    editor_version+=1
-    st.success(f"Synced from Hub · {len(hub_pool) if hub_pool else 'all'} players in committed pool · {len(hub_adjust)} role adjustments")
-
-for _,row in players.iterrows():
-    key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-    auto_exclude=bool(row.get("Auto Exclude",False))
-    pool_state.setdefault(key,{"include":not auto_exclude,"role":"AUTO","usage":1.0,"lock":False})
-
 updated_state=dict(pool_state)
 needs_rerun=False
 
@@ -431,7 +357,6 @@ with pool_game_tab:
             st.session_state["nuke_pool_editor_version"]=editor_version+1
             st.rerun()
 
-
 with pool_current_tab:
     st.markdown("### 👥 Current Player Pool")
     st.caption("A clean snapshot of everyone currently eligible to enter NUKE lineups. Apply game changes, then return here to verify the pool before running the SIM.")
@@ -549,86 +474,38 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         pexposure=path_exposure(portfolio,len(portfolio))
         stage_times["Portfolio Build"]=time.perf_counter()-stage
         st.write(f"Portfolio build: {stage_times['Portfolio Build']:.1f}s")
-        run_seconds=time.perf_counter()-run_started
-        stage_times["Other / UI Overhead"]=max(0.0,run_seconds-sum(stage_times.values()))
-        initial_takes={}
+        total_runtime=time.perf_counter()-run_started
+        st.session_state["nuke_sim_results"]=results
+        st.session_state["nuke_sim_players"]=players
+        st.session_state["nuke_sim_exposure"]=exposure
+        st.session_state["nuke_path_exposure"]=pexposure
+        st.session_state["nuke_contest_results"]=contest_results
+        st.session_state["nuke_contest_summary"]=contest_summary
+        st.session_state["nuke_portfolio"]=portfolio
+        st.session_state["nuke_portfolio_paths"]=portfolio_paths
+        st.session_state["nuke_portfolio_stats"]=portfolio_stats
+        st.session_state["nuke_sim_runtime"]=total_runtime
+        st.session_state["nuke_stage_times"]=stage_times
+        st.session_state["nuke_candidate_diagnostics"]=candidate_diag
         st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(players,portfolio)
         st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
-        for k,v in {"nuke_sim_results":results,"nuke_sim_players":players.copy(),"nuke_sim_exposure":exposure,"nuke_path_exposure":pexposure,"nuke_contest_results":contest_results,"nuke_contest_summary":contest_summary,"nuke_portfolio":portfolio,"nuke_portfolio_paths":portfolio_paths,"nuke_portfolio_stats":portfolio_stats,"nuke_sim_runtime":run_seconds,"nuke_stage_times":stage_times,"nuke_candidate_diagnostics":candidate_diag,"nuke_player_takes":initial_takes}.items():
-            st.session_state[k]=v
-        status.update(label=f"NUKE SIM complete · {run_seconds:.1f}s",state="complete")
-    st.session_state["nuke_sim_just_completed_notice"]=f"NUKE SIM complete · {run_seconds:.1f}s"
+        status.update(label=f"NUKE SIM complete in {total_runtime:.1f}s",state="complete")
     st.rerun()
-
-if st.session_state.pop("nuke_sim_just_completed_notice",None):
-    st.success("NUKE SIM complete. Workspace save is ready with these results.")
 
 results=st.session_state.get("nuke_sim_results")
 sim_players=st.session_state.get("nuke_sim_players")
 exposure=st.session_state.get("nuke_sim_exposure")
-pexposure=st.session_state.get("nuke_path_exposure")
-contest_results=st.session_state.get("nuke_contest_results")
-contest_summary=st.session_state.get("nuke_contest_summary",{})
 portfolio=st.session_state.get("nuke_portfolio")
+contest_results=st.session_state.get("nuke_contest_results")
+contest_summary=st.session_state.get("nuke_contest_summary")
 portfolio_paths=st.session_state.get("nuke_portfolio_paths")
 portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
-candidate_diag=st.session_state.get("nuke_candidate_diagnostics",{})
-stage_times=st.session_state.get("nuke_stage_times",{})
 
-if stage_times:
-    st.subheader("⏱️ Run Performance")
-    total=float(st.session_state.get("nuke_sim_runtime",0.0))
-    timing_cols=st.columns(len(stage_times))
-    for col,(name,secs) in zip(timing_cols,stage_times.items()):
-        col.metric(name,f"{float(secs):.1f}s")
-    if total>0:
-        slow_name,slow_secs=max(stage_times.items(),key=lambda kv:kv[1])
-        st.caption(f"Total {total:.1f}s · Bottleneck: {slow_name} ({float(slow_secs):.1f}s, {100.0*float(slow_secs)/total:.0f}% of run).")
-
-if candidate_diag:
-    st.subheader("🩺 Candidate Pool Health")
-    d1,d2,d3,d4,d5,d6=st.columns(6)
-    d1.metric("Grade",str(candidate_diag.get("grade","?")))
-    d2.metric("Candidates",f"{int(candidate_diag.get('generated',0)):,}")
-    d3.metric("Unique QBs",f"{int(candidate_diag.get('unique_qbs',0)):,}")
-    d4.metric("Avg Shared Players",f"{float(candidate_diag.get('avg_overlap',0)):.2f}",help="Average number of identical players shared by two candidate lineups. This is calculated across candidate-lineup pairs, not against one reference lineup.")
-    d5.metric("Max Pair Repeat",f"{float(candidate_diag.get('max_pair_pct',0)):.1f}%")
-    d6.metric("Max 3-Core Repeat",f"{float(candidate_diag.get('max_triple_pct',0)):.1f}%")
-    st.caption(f"Generated {float(candidate_diag.get('fill_pct',0)):.1f}% of requested candidates · {int(candidate_diag.get('games',0))} games represented · Avg salary ${float(candidate_diag.get('avg_salary',0)):,.0f} · Shared-player overlap: median {float(candidate_diag.get('median_overlap',0)):.1f}, 95th percentile {float(candidate_diag.get('p95_overlap',0)):.1f}, max {int(candidate_diag.get('max_overlap_seen',0))}.")
-
-if results is not None and not results.empty:
-    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["🏆 CONTEST SIM","🧬 PORTFOLIO","☢️ NUKEM LINEUPS","🧭 PATHS","👤 EXPOSURE","🔗 COMBOS",f"📤 {'FD' if site=='FD' else 'DK'} EXPORT","🧠 MODEL NOTES"])
+if results is not None and sim_players is not None:
+    tabs=st.tabs(["Contest SIM","Portfolio","NUKEM Lineups","Path Mix","Exposure","Combos","Export","About"])
+    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=tabs
     with tab1:
-        if contest_results is not None and not contest_results.empty:
-            m1,m2,m3,m4,m5,m6=st.columns(6)
-            m1.metric("Field",f"{int(contest_summary.get('field_size',0)):,}")
-            m2.metric("Entry",f"${float(contest_summary.get('entry_fee',0)):,.2f}")
-            m3.metric("Paid Places",f"{int(contest_summary.get('paid_places',0)):,}")
-            m4.metric("Contest Sims",f"{int(contest_summary.get('iterations',0)):,}")
-            m5.metric("Lineups Simmed",f"{len(contest_results):,}")
-            m6.metric("Field Model",str(contest_summary.get("field_model","")))
-            contest_roster=add_dk_roster_columns(sim_players,contest_results,site=site)
-            defense_col="D" if site=="FD" else "DST"
-            left=["QB","RB1","RB2","WR1","WR2","WR3","TE","FLEX",defense_col,"FLEX Pos","Stack"]
-            stats=["Contest Rank","Sim ROI %","1st %","Top 0.1%","Top 1%","Cash %","Avg Finish","Expected Duplicates","Avg Payout","Strongest Path","Path Score","Lineup Thesis","NUKE Score","Ceiling 95","Salary"]
-            contest_show=contest_roster[[c for c in left+stats if c in contest_roster.columns]].copy()
-            st.dataframe(contest_show,use_container_width=True,hide_index=True)
-
-            contest_download=contest_show.copy()
-            if site=="FD":
-                fd_slots=pd.DataFrame(
-                    [lineup_to_fd_slots(sim_players,lu,ids_only=True) for lu in contest_results["_indices"]],
-                    columns=ANALYSIS_ROSTER_HEADERS,
-                )
-                for col in ANALYSIS_ROSTER_HEADERS:
-                    if col in contest_download.columns and col in fd_slots.columns:
-                        contest_download[col]=fd_slots[col].values
-                contest_label="Download Contest SIM + FanDuel IDs CSV"
-                contest_filename="nuke_contest_sim_fanduel_ids.csv"
-            else:
-                contest_label="Download Contest SIM + DraftKings Lineups CSV"
-                contest_filename="nuke_contest_sim_draftkings_lineups.csv"
-            st.download_button(contest_label,contest_download.to_csv(index=False).encode("utf-8-sig"),contest_filename,"text/csv")
+        st.dataframe(contest_results.drop(columns=["_indices"],errors="ignore") if contest_results is not None else pd.DataFrame(),use_container_width=True,hide_index=True)
     with tab2:
         if portfolio is not None and not portfolio.empty:
             st.subheader("Portfolio Manager")

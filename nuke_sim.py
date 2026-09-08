@@ -1,11 +1,40 @@
 import numpy as np
 import pandas as pd
+import inspect
+import os
+import streamlit as st
 from dfs_platform import get_platform, player_name_series
 
 DK_SLOTS = ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX", "DST"]
 ROLE_ADJUST = {"AUTO":0.00,"QB1":0.08,"RB1":0.18,"RB2":-0.05,"RB3":-0.18,"WR1":0.14,"WR2":0.04,"WR3":-0.07,"TE1":0.12,"BACKUP":-0.20}
 INACTIVE_STATUSES = {"OUT","IR","INACTIVE","SUSPENDED"}
 AUTO_ROLE_MULTIPLIER = {"QB1":1.00,"QB2+":0.12,"RB1":1.08,"RB2":0.93,"RB3":0.78,"RB4+":0.62,"WR1":1.06,"WR2":1.00,"WR3":0.91,"WR4+":0.72,"TE1":1.04,"TE2+":0.76,"DST":1.00}
+
+def _running_inside_nuke_sim():
+    try:
+        for fi in inspect.stack()[1:15]:
+            if os.path.basename(str(fi.filename or "")) == "6_SIM.py":
+                return True
+    except Exception:
+        return False
+    return False
+
+def _render_engine_flex_control():
+    if not _running_inside_nuke_sim():
+        return
+    try:
+        with st.sidebar:
+            st.markdown("### FLEX RULE")
+            st.selectbox(
+                "FLEX position",
+                ["ANY","RB","WR","TE"],
+                key="nuke_engine_flex_position",
+                help="ANY leaves FLEX unrestricted. RB forces 3 RB total, WR forces 4 WR total, and TE forces 2 TE total. Applies to DraftKings and FanDuel. Rerun NUKE SIM after changing this.",
+            )
+    except Exception:
+        pass
+
+_render_engine_flex_control()
 
 def _norm_pos(v):
     p=str(v).upper().strip(); return "DST" if p in {"D","DEF","DST"} else p.split("/")[0]
@@ -95,7 +124,11 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",fle
     rng=np.random.default_rng(seed); p=players.reset_index(drop=True)
     if p.empty:return []
     cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)
-    flex_position=str(flex_position or "ANY").upper().strip()
+    try:
+        engine_flex=str(st.session_state.get("nuke_engine_flex_position","") or "").upper().strip()
+    except Exception:
+        engine_flex=""
+    flex_position=str(engine_flex or flex_position or "ANY").upper().strip()
     if flex_position not in {"ANY","RB","WR","TE"}: flex_position="ANY"
     locked=[]
     for i in (locked_indices or []):

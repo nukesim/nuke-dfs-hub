@@ -34,7 +34,7 @@ def _caller_is_nuke_sim():
     try:
         for frame_info in inspect.stack()[1:12]:
             filename=os.path.basename(str(frame_info.filename or ""))
-            if filename in {"6_SIM.py","6_SIM_LIVE.py"}:
+            if filename in {"6_SIM.py","6_SIM_LIVE.py","14_NUKE_SIM.py"}:
                 return True
     except Exception:
         pass
@@ -85,7 +85,7 @@ def render_nav():
 
     with st.sidebar:
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
-        st.page_link("pages/6_SIM_LIVE.py", label="NUKE Sim", icon="☢️")
+        st.page_link("pages/14_NUKE_SIM.py", label="NUKE Sim", icon="☢️")
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 

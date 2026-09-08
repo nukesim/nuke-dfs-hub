@@ -68,7 +68,7 @@ def simulate_player_matrix(players,n_sims=1500,seed=26,mode="NUKEM"):
             pts=_sample_points(row,rng,mode); pts += (.72*gf.get(row.Game,0)+.48*tf.get(row.Team,0)) if row.Position!="DST" else -.30*gf.get(row.Game,0); mat[s,i]=max(-6 if row.Position=="DST" else 0,pts)
     return mat
 
-def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK",no_offense_vs_dst=False):
+def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK",no_offense_vs_dst=True):
     if max_salary is None: max_salary=get_platform(site).salary_cap
     if len(indices)!=9 or len(set(indices))!=9:return False
     r=p.iloc[indices]; sal=int(r.Salary.sum()); c=r.Position.value_counts().to_dict()
@@ -82,13 +82,16 @@ def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK",no_offense_vs_d
             if ((r.Game.eq(dr.Game)) & (~r.Team.eq(dr.Team)) & r.Position.ne("DST")).any():return False
     q=r[r.Position.eq("QB")]; return not("auto_qb_eligible" in q.columns and not bool(q.iloc[0].auto_qb_eligible))
 
-def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None,locked_indices=None,no_offense_vs_dst=False):
+def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None,locked_indices=None,no_offense_vs_dst=True):
     """Candidate Engine V3: salary-aware tournament construction.
 
     Builds the first eight roster spots under the existing stack/profile rules, then solves
     the final FLEX directly inside the legal salary window instead of repeatedly creating
     full lineups that must be rejected afterward.
     """
+    # Hard rule: offense vs opposing defense is never allowed on DK or FD.
+    # Keep the argument for backward compatibility, but do not allow callers to disable the rule.
+    no_offense_vs_dst=True
     rng=np.random.default_rng(seed); p=players.reset_index(drop=True)
     if p.empty:return []
     cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)

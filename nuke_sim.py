@@ -76,7 +76,7 @@ def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK"):
     if not(c.get("QB",0)==1 and c.get("RB",0)>=2 and c.get("WR",0)>=3 and c.get("TE",0)>=1 and c.get("DST",0)==1):return False
     q=r[r.Position.eq("QB")]; return not("auto_qb_eligible" in q.columns and not bool(q.iloc[0].auto_qb_eligible))
 
-def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None):
+def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None,locked_indices=None):
     """Candidate Engine V3: salary-aware tournament construction.
 
     Builds the first eight roster spots under the existing stack/profile rules, then solves
@@ -88,7 +88,17 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",fle
     cfg=get_platform(site); salary_cap=int(cfg.salary_cap); min_salary=int(cfg.default_min_salary if min_salary is None else min_salary); n_lineups=int(n_lineups)
     flex_position=str(flex_position or "ANY").upper().strip()
     if flex_position not in {"ANY","RB","WR","TE"}: flex_position="ANY"
+    locked=[]
+    for i in (locked_indices or []):
+        try: i=int(i)
+        except Exception: continue
+        if 0<=i<len(p) and i not in locked: locked.append(i)
     pos=p.Position.astype(str).to_numpy(); team=p.Team.astype(str).to_numpy(); game=p.Game.astype(str).to_numpy(); sal=p.Salary.to_numpy(int)
+    if len(locked)>9:return []
+    if locked:
+        lc={k:int(np.sum(pos[np.asarray(locked,dtype=int)]==k)) for k in ["QB","RB","WR","TE","DST"]}
+        if lc.get("QB",0)>1 or lc.get("DST",0)>1 or lc.get("RB",0)>3 or lc.get("WR",0)>4 or lc.get("TE",0)>2:return []
+        if int(sal[np.asarray(locked,dtype=int)].sum())>salary_cap:return []
     market=p.market_score.to_numpy(float); usage=p.usage_multiplier.to_numpy(float); auto=p.auto_role_multiplier.to_numpy(float)
     gen_boost=pd.to_numeric(p.get("generation_boost",0.0),errors="coerce").fillna(0).clip(-3,3).to_numpy(float)
     qbmask=pos=="QB"; qbmask &= p.auto_qb_eligible.fillna(False).to_numpy(bool) if "auto_qb_eligible" in p.columns else qbmask
@@ -124,19 +134,28 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",fle
         if seen:
             exposure=player_counts/len(seen)
             w*=np.exp(-crowd_strength*np.clip(exposure-.18,0,None)*4.0)
-        qbids=pools["QB"]; qweights=w[qbids]; qsum=qweights.sum()
-        if qsum<=0:continue
-        qb=int(rng.choice(qbids,p=qweights/qsum))
+        chosen=list(locked)
+        locked_qbs=[i for i in chosen if pos[i]=="QB"]
+        if locked_qbs:
+            qb=int(locked_qbs[0])
+            if not bool(qbmask[qb]): continue
+        else:
+            qbids=pools["QB"]; qweights=w[qbids]; qsum=qweights.sum()
+            if qsum<=0:continue
+            qb=int(rng.choice(qbids,p=qweights/qsum)); chosen.append(qb)
         nmates,nbring=stack_shapes[int(rng.choice(5,p=shape_probs/shape_probs.sum()))]
         mates,opp=qb_cache[qb]
-        if len(mates)<nmates or len(opp)<nbring:continue
-        chosen=[qb]
-        if nmates:
-            mw=w[mates]; chosen+=list(map(int,rng.choice(mates,nmates,replace=False,p=mw/mw.sum())))
-        if nbring:
-            avail=opp[~np.isin(opp,chosen)]
-            if len(avail)<nbring:continue
-            ow=w[avail]; chosen+=list(map(int,rng.choice(avail,nbring,replace=False,p=ow/ow.sum())))
+        have_mates=sum((team[i]==team[qb]) and (pos[i] in {"WR","TE"}) for i in chosen)
+        have_bring=sum((game[i]==game[qb]) and (team[i]!=team[qb]) and (pos[i] in {"RB","WR","TE"}) for i in chosen)
+        need_mates=max(0,nmates-have_mates); need_bring=max(0,nbring-have_bring)
+        avail_mates=mates[~np.isin(mates,chosen)]
+        if len(avail_mates)<need_mates:continue
+        if need_mates:
+            mw=w[avail_mates]; chosen+=list(map(int,rng.choice(avail_mates,need_mates,replace=False,p=mw/mw.sum())))
+        avail=opp[~np.isin(opp,chosen)]
+        if len(avail)<need_bring:continue
+        if need_bring:
+            ow=w[avail]; chosen+=list(map(int,rng.choice(avail,need_bring,replace=False,p=ow/ow.sum())))
         # Fill position minimums, but stop at eight players so FLEX becomes a direct salary solve.
         failed=False
         for k,minimum in [("RB",2),("WR",3),("TE",1),("DST",1)]:
@@ -146,7 +165,18 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",fle
             if len(ids)<need: failed=True; break
             if need:
                 pw=w[ids]; chosen+=list(map(int,rng.choice(ids,need,replace=False,p=pw/pw.sum())))
-        if failed or len(chosen)>8:continue
+        if failed or len(chosen)>9:continue
+        if len(chosen)==9:
+            arr=np.asarray(chosen,dtype=int); key=tuple(sorted(chosen)); total=int(sal[arr].sum())
+            if total<min_salary or total>salary_cap or key in keys or not _valid_lineup(chosen,p,min_salary,max_salary=salary_cap,site=site):continue
+            if flex_position!="ANY":
+                counts={k:int(np.sum(pos[arr]==k)) for k in ["RB","WR","TE"]}
+                if counts.get(flex_position,0)!={"RB":3,"WR":4,"TE":2}[flex_position]:continue
+            dst_ids=[i for i in chosen if pos[i]=="DST"]
+            if dst_ids:
+                d=dst_ids[0]; opposing=sum((game[i]==game[d]) and (team[i]!=team[d]) and pos[i]!="DST" for i in chosen)
+                if opposing>=2:continue
+            keys.add(key); seen.append(chosen); player_counts[arr]+=1.0; continue
         # If stacking already supplied extra FLEX-eligible players, fill only until eight.
         while len(chosen)<8:
             ids=flex[~np.isin(flex,chosen)]

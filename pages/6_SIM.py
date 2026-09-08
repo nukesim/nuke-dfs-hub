@@ -293,7 +293,7 @@ if (hub_pool or hub_adjust) and hub_signature!=last_hub_signature:
 for _,row in players.iterrows():
     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
     auto_exclude=bool(row.get("Auto Exclude",False))
-    pool_state.setdefault(key,{"include":not auto_exclude,"role":"AUTO","usage":1.0})
+    pool_state.setdefault(key,{"include":not auto_exclude,"role":"AUTO","usage":1.0,"lock":False})
 
 updated_state=dict(pool_state)
 needs_rerun=False
@@ -383,11 +383,11 @@ with pool_game_tab:
                         rows=[]
                         for idx,row in tp.iterrows():
                             key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-                            cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
-                            rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":f"${int(row.Salary):,}","Model Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
+                            cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+                            rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Lock":bool(cfg.get("lock",False)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":f"${int(row.Salary):,}","Model Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
                         edit_df=pd.DataFrame(rows).set_index("_row")
                         all_available=bool(len(edit_df)) and edit_df["Status"].astype(str).str.lower().eq("available").all()
-                        visible_cols=["Include","Pos","Player"]
+                        visible_cols=["Include","Lock","Pos","Player"]
                         disabled_cols=["Pos","Player","Salary","Model Role"]
                         if not all_available:
                             visible_cols.append("Status")
@@ -399,6 +399,7 @@ with pool_game_tab:
                             column_order=visible_cols,
                             column_config={
                                 "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active SIM pool."),
+                                "Lock":st.column_config.CheckboxColumn("🔒",width="small",help="Force this player into every generated NUKE SIM candidate lineup. Use for confirmed value starters or other must-play stands."),
                                 "Pos":st.column_config.TextColumn("Pos",width="small"),
                                 "Player":st.column_config.TextColumn("Player",width="medium"),
                                 "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. Healthy players are hidden from this column to reduce clutter."),
@@ -419,11 +420,13 @@ with pool_game_tab:
                 for idx,erow in edited_team.iterrows():
                     key=str(edit_df.loc[idx,"_key"])
                     include=bool(erow["Include"])
+                    lock=bool(erow.get("Lock",False))
                     if action=="✅ Include all": include=True
                     elif action=="🚫 Exclude all": include=False
                     if game_action=="✅ Include entire game": include=True
                     elif game_action=="🚫 Exclude entire game": include=False
-                    updated_state[key]={"include":include,"role":str(erow["Role"]),"usage":float(erow["Usage x"])}
+                    if lock: include=True
+                    updated_state[key]={"include":include,"role":str(erow["Role"]),"usage":float(erow["Usage x"]),"lock":lock}
             st.session_state["nuke_pregame_pool"]=updated_state
             st.session_state["nuke_pool_editor_version"]=editor_version+1
             st.rerun()
@@ -435,7 +438,7 @@ with pool_current_tab:
     pool_rows=[]
     for _,row in players.iterrows():
         key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-        pcfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
+        pcfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
         if not bool(pcfg.get("include",True)):
             continue
         override=str(pcfg.get("role","AUTO")).upper()
@@ -448,6 +451,7 @@ with pool_current_tab:
             "Salary":int(row.Salary),
             "Role":role,
             "Usage":float(pcfg.get("usage",1.0)),
+            "Locked":"🔒" if bool(pcfg.get("lock",False)) else "",
         })
     current_pool=pd.DataFrame(pool_rows)
     if current_pool.empty:
@@ -470,20 +474,22 @@ with pool_current_tab:
                 view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
                 view["Salary"]=view["Salary"].map(lambda x:f"${int(x):,}")
                 view["Usage"]=view["Usage"].map(lambda x:f"{float(x):.2f}x")
-                st.dataframe(view[["Player","Team","Salary","Role","Usage"]],use_container_width=True,hide_index=True,height=min(520,70+35*len(view)))
+                st.dataframe(view[["Locked","Player","Team","Salary","Role","Usage"]],use_container_width=True,hide_index=True,height=min(520,70+35*len(view)))
 st.session_state["nuke_pregame_pool"]=updated_state
 active_rows=[]
 for _,row in players.iterrows():
     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-    cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0})
+    cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
     if cfg.get("include",True):
         r=row.copy()
         r["role_override"]=str(cfg.get("role","AUTO")).upper()
         r["usage_multiplier"]=float(cfg.get("usage",1.0))
+        r["sim_lock"]=bool(cfg.get("lock",False))
         active_rows.append(r)
 players=pd.DataFrame(active_rows).reset_index(drop=True) if active_rows else players.iloc[0:0].copy()
 if not players.empty:
-    st.caption(f"Active pool: {len(players):,} players")
+    locked_count=int(players.get("sim_lock",pd.Series(False,index=players.index)).fillna(False).astype(bool).sum())
+    st.caption(f"Active pool: {len(players):,} players" + (f" · 🔒 {locked_count} locked" if locked_count else ""))
 
 if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     run_started=time.perf_counter()
@@ -492,13 +498,21 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     if len(players)<9:
         st.error("Not enough active players.")
         st.stop()
+    locked_indices=np.where(players.get("sim_lock",pd.Series(False,index=players.index)).fillna(False).astype(bool).to_numpy())[0].tolist()
+    if locked_indices:
+        locked_names=players.iloc[locked_indices]["Name"].astype(str).tolist()
+        st.info("🔒 Locked into every candidate: "+", ".join(locked_names))
+        lc=players.iloc[locked_indices]["Position"].value_counts().to_dict()
+        if len(locked_indices)>9 or lc.get("QB",0)>1 or lc.get("DST",0)>1 or lc.get("RB",0)>3 or lc.get("WR",0)>4 or lc.get("TE",0)>2:
+            st.error("Locked-player combination cannot fit a legal lineup. Reduce the number of locks at one or more positions.")
+            st.stop()
     with st.status("NUKE SIM is running...",expanded=True) as status:
         stage=time.perf_counter()
         st.write(f"1/5 · Generating correlated {get_platform(site).name} candidates...")
         generation_target=int(candidates)
         if site=="FD" and flex_position!="ANY":
             generation_target=min(5000,max(int(candidates)*4,int(candidates)+500))
-        lineups=generate_lineups(players,generation_target,int(min_salary),int(seed),site=site)
+        lineups=generate_lineups(players,generation_target,int(min_salary),int(seed),site=site,locked_indices=locked_indices)
         if site=="FD" and flex_position!="ANY":
             required_count={"RB":3,"WR":4,"TE":2}[flex_position]
             lineups=[lu for lu in lineups if int((players.iloc[list(lu)]["Position"]==flex_position).sum())==required_count][:int(candidates)]

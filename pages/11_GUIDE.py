@@ -25,10 +25,15 @@ with c2:
         st.markdown("### ☢️ NUKE Sim")
         st.write("Generate candidate lineups, simulate NFL outcomes and contest environments, and build a diversified tournament portfolio.")
         st.markdown("**Typical workflow**")
-        st.markdown("1. Choose DraftKings or FanDuel.\n2. Confirm the current slate.\n3. Adjust the player pool and role/usage assumptions.\n4. Set contest and portfolio controls.\n5. Run NUKE Sim.\n6. Review results, paths, exposures, and portfolio intelligence.\n7. Send the portfolio to the Lineup Builder when you want to work with it there.")
+        st.markdown("1. Choose DraftKings or FanDuel.\n2. Confirm the current slate.\n3. Adjust the player pool, role/usage assumptions, and any player locks.\n4. Set contest and portfolio controls.\n5. Run NUKE Sim.\n6. Review results, paths, exposures, and portfolio intelligence.\n7. Send the portfolio to the Lineup Builder when you want to work with it there.")
         st.info("NUKE Sim is designed to model ranges of outcomes, not predict one exact future result.")
         st.caption("FanDuel: use **FLEX position** to choose Any, RB, WR, or TE. Selecting RB forces every generated lineup to use 3 RBs, placing an RB in FLEX. Because this changes candidate construction, rerun NUKE Sim after changing the FLEX position setting.")
         st.page_link("pages/6_SIM.py",label="OPEN NUKE SIM",icon="☢️",use_container_width=True)
+
+st.markdown("#### 🔒 Locking a player in NUKE Sim")
+st.write("Use **Lock** when late news creates a player you intentionally want in every generated main-slate lineup — for example, a newly announced starter whose salary was set before the role change. A locked player is forced into the candidate lineups themselves, which is different from setting a high minimum exposure after the simulation.")
+st.warning("**Locks make the lineup-building problem more restrictive.** After locking a player, review your portfolio sliders and constraints — especially **Max overlap, Max player %, Max QB %, Max team %, Max game %, FLEX position, salary floor, and other exposure limits**. A lock can make an otherwise reasonable set of limits mathematically impossible or leave too few eligible combinations to build the requested portfolio. If NUKE cannot fill all requested lineups, loosen the conflicting slider/constraint rather than treating the partial portfolio as a SIM failure.")
+st.info("**Expect locked-player runs to take longer.** NUKE must generate legal candidates around the locked player, then run those candidates through the football and contest simulations. The smaller constrained lineup universe can require more generation attempts, so both lineup generation and contest simulation may take longer than an unrestricted run. After adding or removing a lock, rerun NUKE Sim so the candidate universe is rebuilt with the new requirement.")
 
 st.divider()
 st.markdown("### ⚡ NFL Showdown — DraftKings & FanDuel")

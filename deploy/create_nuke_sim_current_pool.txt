@@ -1,0 +1,1 @@
+Create fresh NUKE Sim page with editable Current Player Pool for both DraftKings and FanDuel.

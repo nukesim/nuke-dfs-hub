@@ -1,0 +1,28 @@
+name: Create Fresh NUKE Sim Live Page
+on:
+  push:
+    paths:
+      - 'deploy/create_live_nuke_sim_trigger.txt'
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create fresh live page from current NUKE Sim
+        run: cp pages/6_SIM.py pages/6_SIM_LIVE.py
+      - name: Verify current player pool editor exists
+        run: |
+          grep -q 'INCLUDE ALL' pages/6_SIM_LIVE.py
+          grep -q 'REMOVE ALL' pages/6_SIM_LIVE.py
+          grep -q 'APPLY {pos} PLAYER POOL' pages/6_SIM_LIVE.py
+          grep -q 'Game-by-Game tab' pages/6_SIM_LIVE.py
+          python -m py_compile pages/6_SIM_LIVE.py
+      - name: Commit fresh live page
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM_LIVE.py
+          git diff --cached --quiet || git commit -m 'Create fresh NUKE Sim live page'
+          git push

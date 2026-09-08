@@ -1,0 +1,26 @@
+name: Force Lineup Rules Sidebar
+on:
+  push:
+    paths:
+      - 'tools/force_lineup_rules_sidebar_patch.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/force_lineup_rules_sidebar_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile pages/6_SIM.py
+          grep -q 'LINEUP RULES' pages/6_SIM.py
+          grep -q 'No players vs opposing defense' pages/6_SIM.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py
+          git diff --cached --quiet || git commit -m 'Make lineup rules visible in NUKE SIM sidebar'
+          git push

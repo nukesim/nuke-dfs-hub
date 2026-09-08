@@ -225,16 +225,25 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",fle
             w=profile_weights[profile_i].copy()
             if seen:
                 exposure=player_counts/len(seen); w*=np.exp(-crowd_strength*np.clip(exposure-.18,0,None)*4.0)
-            qbids=pools["QB"]; qw=w[qbids]/w[qbids].sum(); qb=int(rng.choice(qbids,p=qw))
+            chosen=list(locked)
+            fallback_locked_qbs=[i for i in chosen if pos[i]=="QB"]
+            if fallback_locked_qbs:
+                qb=int(fallback_locked_qbs[0])
+                if not bool(qbmask[qb]): continue
+            else:
+                qbids=pools["QB"]; qw=w[qbids]/w[qbids].sum(); qb=int(rng.choice(qbids,p=qw)); chosen.append(qb)
             nmates,nbring=stack_shapes[int(rng.choice(5,p=shape_probs/shape_probs.sum()))]; mates,opp=qb_cache[qb]
-            if len(mates)<nmates or len(opp)<nbring:continue
-            chosen=[qb]
-            if nmates:
-                mw=w[mates]; chosen+=list(map(int,rng.choice(mates,nmates,replace=False,p=mw/mw.sum())))
-            if nbring:
-                avail=opp[~np.isin(opp,chosen)];
-                if len(avail)<nbring:continue
-                ow=w[avail]; chosen+=list(map(int,rng.choice(avail,nbring,replace=False,p=ow/ow.sum())))
+            have_mates=sum((team[i]==team[qb]) and (pos[i] in {"WR","TE"}) for i in chosen)
+            have_bring=sum((game[i]==game[qb]) and (team[i]!=team[qb]) and (pos[i] in {"RB","WR","TE"}) for i in chosen)
+            need_mates=max(0,nmates-have_mates); need_bring=max(0,nbring-have_bring)
+            avail_mates=mates[~np.isin(mates,chosen)]
+            if len(avail_mates)<need_mates:continue
+            if need_mates:
+                mw=w[avail_mates]; chosen+=list(map(int,rng.choice(avail_mates,need_mates,replace=False,p=mw/mw.sum())))
+            avail=opp[~np.isin(opp,chosen)]
+            if len(avail)<need_bring:continue
+            if need_bring:
+                ow=w[avail]; chosen+=list(map(int,rng.choice(avail,need_bring,replace=False,p=ow/ow.sum())))
             for k,minimum in [("RB",2),("WR",3),("TE",1),("DST",1)]:
                 have=sum(pos[i]==k for i in chosen); need=max(0,minimum-have); ids0=pools[k][~np.isin(pools[k],chosen)]
                 if len(ids0)<need: chosen=[]; break

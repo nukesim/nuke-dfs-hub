@@ -20,6 +20,41 @@ def _clean_player_takes(field):
     st.rerun()
 
 
+def _render_sim_flex_control():
+    """Fallback FLEX control for NUKE SIM sessions.
+
+    This lives in shared nav so the selector remains available even if Streamlit is
+    temporarily serving an older cached copy of pages/6_SIM.py.
+    """
+    is_sim_session=(
+        "nuke_sim_active_site" in st.session_state
+        or "sim_preset" in st.session_state
+        or "candidate_lineups" in st.session_state
+    )
+    if not is_sim_session:
+        return
+    site=str(st.session_state.get("dfs_site",st.session_state.get("nuke_sim_active_site","DK")) or "DK").upper()
+    if site not in {"DK","FD"}:
+        site="DK"
+    key=f"nuke_flex_position_{site}"
+    # Preserve the legacy FD selector when loading older workspaces/sessions.
+    legacy_key="nuke_fd_flex_position" if site=="FD" else None
+    default_value=str(st.session_state.get(key,st.session_state.get(legacy_key,"ANY") if legacy_key else "ANY") or "ANY").upper()
+    options=["ANY","RB","WR","TE"]
+    if default_value not in options:
+        default_value="ANY"
+    st.markdown("### SIM ROSTER RULES")
+    st.selectbox(
+        "FLEX position",
+        options,
+        index=options.index(default_value),
+        key=key,
+        help="ANY leaves FLEX unrestricted. RB forces 3 RB total, WR forces 4 WR total, and TE forces 2 TE total. Rerun NUKE SIM after changing this.",
+    )
+    if site=="FD":
+        st.session_state["nuke_fd_flex_position"]=st.session_state.get(key,"ANY")
+
+
 def render_nav():
     st.markdown("""
         <style>
@@ -36,6 +71,8 @@ def render_nav():
         st.page_link("pages/6_SIM.py", label="NUKE Sim", icon="☢️")
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
+
+        _render_sim_flex_control()
 
         if st.session_state.get("nuke_player_takes"):
             st.divider(); st.markdown("### SIM Player Takes"); st.caption("Clear every saved override in one click.")

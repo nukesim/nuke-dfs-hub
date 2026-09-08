@@ -1,0 +1,26 @@
+name: DraftKings FLEX Position
+on:
+  push:
+    paths:
+      - 'tools/dk_flex_position_trigger.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/dk_flex_position_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile pages/6_SIM.py
+          grep -q 'nuke_flex_position_DK' pages/6_SIM.py
+          grep -q 'nuke_flex_position_FD' pages/6_SIM.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py
+          git diff --cached --quiet || git commit -m 'Add FLEX position control to DraftKings NUKE SIM'
+          git push

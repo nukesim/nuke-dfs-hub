@@ -1,0 +1,25 @@
+name: Main SIM Player Lock Fallback
+on:
+  push:
+    paths:
+      - 'tools/main_sim_player_lock_fallback_patch.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply fallback lock patch
+        run: python tools/main_sim_player_lock_fallback_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile nuke_sim.py pages/6_SIM.py
+          grep -q 'fallback_locked_qbs' nuke_sim.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nuke_sim.py
+          git diff --cached --quiet || git commit -m 'Enforce player locks in fallback candidate generation'
+          git push

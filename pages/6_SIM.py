@@ -370,47 +370,103 @@ with pool_game_tab:
 
 with pool_current_tab:
     st.markdown("### 👥 Current Player Pool")
-    st.caption("A clean snapshot of everyone currently eligible to enter NUKE lineups. Apply game changes, then return here to verify the pool before running the SIM.")
-    pool_rows=[]
-    for _,row in players.iterrows():
+    st.caption("Build the active SIM pool here or use the Game-by-Game tab. Both views edit the same player pool, so you can use either workflow or mix them.")
+
+    # Global pool actions. Preserve role/usage settings; removing all also clears locks
+    # because a locked player must remain included.
+    pool_action_c1,pool_action_c2,pool_action_c3=st.columns([1,1,3])
+    include_all_clicked=pool_action_c1.button("✅ INCLUDE ALL",use_container_width=True,key=f"pool_include_all_{editor_version}")
+    remove_all_clicked=pool_action_c2.button("🚫 REMOVE ALL",use_container_width=True,key=f"pool_remove_all_{editor_version}")
+    if include_all_clicked or remove_all_clicked:
+        new_include=bool(include_all_clicked)
+        for _,row in players.iterrows():
+            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+            cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+            updated_state[key]={
+                "include":new_include,
+                "role":str(cfg.get("role","AUTO")),
+                "usage":float(cfg.get("usage",1.0)),
+                "lock":bool(cfg.get("lock",False)) if new_include else False,
+            }
+        st.session_state["nuke_pregame_pool"]=updated_state
+        st.session_state["nuke_pool_editor_version"]=editor_version+1
+        st.rerun()
+
+    all_pool_rows=[]
+    for idx,row in players.iterrows():
         key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
         pcfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
-        if not bool(pcfg.get("include",True)):
-            continue
         override=str(pcfg.get("role","AUTO")).upper()
         model_role=str(getattr(row,"auto_role","AUTO"))
         role=model_role if override=="AUTO" else override
-        pool_rows.append({
+        all_pool_rows.append({
+            "_row":int(idx),
+            "_key":key,
+            "Include":bool(pcfg.get("include",True)),
+            "Locked":bool(pcfg.get("lock",False)),
             "Player":str(row.Name),
             "Team":str(row.Team),
             "Pos":str(row.Position),
             "Salary":int(row.Salary),
             "Role":role,
             "Usage":float(pcfg.get("usage",1.0)),
-            "Locked":"🔒" if bool(pcfg.get("lock",False)) else "",
         })
-    current_pool=pd.DataFrame(pool_rows)
-    if current_pool.empty:
-        st.warning("No players are currently included in the SIM pool.")
-    else:
-        pos_order=["QB","RB","WR","TE","DST"]
-        counts=current_pool["Pos"].value_counts().to_dict()
-        m0,m1,m2,m3,m4,m5=st.columns(6)
-        m0.metric("Active",f"{len(current_pool):,}")
-        for col,pos in zip([m1,m2,m3,m4,m5],pos_order):
-            col.metric(pos,f"{int(counts.get(pos,0)):,}")
-        st.markdown("#### Active by Position")
-        pos_tabs=st.tabs([f"{pos} · {int(counts.get(pos,0))}" for pos in pos_order])
-        for tab,pos in zip(pos_tabs,pos_order):
-            with tab:
-                view=current_pool[current_pool["Pos"].eq(pos)].copy()
-                if view.empty:
-                    st.caption(f"No {pos} players are currently included.")
-                    continue
-                view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
-                view["Salary"]=view["Salary"].map(lambda x:f"${int(x):,}")
-                view["Usage"]=view["Usage"].map(lambda x:f"{float(x):.2f}x")
-                st.dataframe(view[["Locked","Player","Team","Salary","Role","Usage"]],use_container_width=True,hide_index=True,height=min(520,70+35*len(view)))
+    all_pool=pd.DataFrame(all_pool_rows)
+    included_pool=all_pool[all_pool["Include"]].copy() if not all_pool.empty else all_pool.copy()
+    pos_order=["QB","RB","WR","TE","DST"]
+    counts=included_pool["Pos"].value_counts().to_dict() if not included_pool.empty else {}
+    m0,m1,m2,m3,m4,m5=st.columns(6)
+    m0.metric("Active",f"{len(included_pool):,}")
+    for col,pos in zip([m1,m2,m3,m4,m5],pos_order):
+        col.metric(pos,f"{int(counts.get(pos,0)):,}")
+
+    st.markdown("#### Manage by Position")
+    st.caption("Check or uncheck individual players below, then click Apply for that position. Excluded players stay visible so they can be added back at any time.")
+    total_by_pos=all_pool["Pos"].value_counts().to_dict() if not all_pool.empty else {}
+    pos_tabs=st.tabs([f"{pos} · {int(counts.get(pos,0))}/{int(total_by_pos.get(pos,0))}" for pos in pos_order])
+    for tab,pos in zip(pos_tabs,pos_order):
+        with tab:
+            view=all_pool[all_pool["Pos"].eq(pos)].copy()
+            if view.empty:
+                st.caption(f"No {pos} players available on this slate.")
+                continue
+            view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
+            source=view.set_index("_row")
+            edit_view=source[["Include","Locked","Player","Team","Salary","Role","Usage"]].copy()
+            edit_view["Salary"]=edit_view["Salary"].map(lambda x:f"${int(x):,}")
+            with st.form(f"current_pool_form_{pos}_{editor_version}",border=False):
+                edited=st.data_editor(
+                    edit_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=["Player","Team","Salary","Role","Usage"],
+                    column_config={
+                        "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active NUKE SIM pool."),
+                        "Locked":st.column_config.CheckboxColumn("🔒",width="small",help="Force this player into every generated candidate lineup. A locked player is automatically included."),
+                        "Player":st.column_config.TextColumn("Player",width="medium"),
+                        "Team":st.column_config.TextColumn("Team",width="small"),
+                        "Salary":st.column_config.TextColumn("Salary",width="small"),
+                        "Role":st.column_config.TextColumn("Role",width="small"),
+                        "Usage":st.column_config.NumberColumn("Usage",format="%.2fx",width="small"),
+                    },
+                    key=f"current_pool_editor_{pos}_{editor_version}",
+                )
+                apply_pos=st.form_submit_button(f"APPLY {pos} PLAYER POOL",type="primary",use_container_width=True)
+            if apply_pos:
+                for original_idx,erow in zip(source.index.tolist(),edited.to_dict("records")):
+                    key=str(source.loc[original_idx,"_key"])
+                    old_cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+                    lock=bool(erow.get("Locked",False))
+                    include=bool(erow.get("Include",True)) or lock
+                    updated_state[key]={
+                        "include":include,
+                        "role":str(old_cfg.get("role","AUTO")),
+                        "usage":float(old_cfg.get("usage",1.0)),
+                        "lock":lock,
+                    }
+                st.session_state["nuke_pregame_pool"]=updated_state
+                st.session_state["nuke_pool_editor_version"]=editor_version+1
+                st.rerun()
 st.session_state["nuke_pregame_pool"]=updated_state
 active_rows=[]
 for _,row in players.iterrows():

@@ -94,8 +94,29 @@ def build_workspace(session_state, slate_label=""):
     }
 
 
+def _workspace_signature(session_state, slate_label=""):
+    """Cheap change detector so downloading a workspace does not serialize the full SIM twice.
+
+    Streamlit reruns the script after many widget interactions, including downloads on versions
+    where download_button triggers a rerun. Completed SIM objects are normally replaced when a
+    run/rebuild changes them, so object identity is a cheap and reliable invalidation signal here.
+    """
+    controls = tuple((k, repr(session_state.get(k))) for k in CONTROL_KEYS)
+    state = tuple((k, id(session_state.get(k))) for k in STATE_KEYS)
+    results = tuple((k, id(session_state.get(k))) for k in RESULT_KEYS)
+    return (str(slate_label or ""), controls, state, results)
+
+
 def workspace_bytes(session_state, slate_label=""):
-    return json.dumps(build_workspace(session_state, slate_label), indent=2, sort_keys=True).encode("utf-8")
+    signature = _workspace_signature(session_state, slate_label)
+    cache_key = "_nuke_workspace_export_cache"
+    cached = session_state.get(cache_key)
+    if isinstance(cached, dict) and cached.get("signature") == signature and isinstance(cached.get("data"), bytes):
+        return cached["data"]
+
+    data = json.dumps(build_workspace(session_state, slate_label), indent=2, sort_keys=True).encode("utf-8")
+    session_state[cache_key] = {"signature": signature, "data": data}
+    return data
 
 
 def load_workspace_bytes(data):
@@ -110,6 +131,9 @@ def load_workspace_bytes(data):
 
 
 def apply_workspace(session_state, workspace):
+    # Never reuse export bytes from the workspace that was open before this load.
+    session_state.pop("_nuke_workspace_export_cache", None)
+
     controls = workspace.get("controls", {}) or {}
     for key, value in controls.items():
         if key in CONTROL_KEYS:

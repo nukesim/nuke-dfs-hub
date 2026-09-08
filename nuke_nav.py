@@ -30,16 +30,11 @@ def _sync_flex_from_nav(site, nav_key):
 
 
 def _caller_is_nuke_sim():
-    """Detect NUKE SIM from the file that called render_nav().
-
-    render_nav() executes before NUKE SIM creates its session-state controls, so session-state
-    detection is too early. Inspect the caller stack instead so the FLEX control renders on the
-    first pass every time.
-    """
+    """Detect NUKE SIM from the file that called render_nav()."""
     try:
         for frame_info in inspect.stack()[1:12]:
             filename=os.path.basename(str(frame_info.filename or ""))
-            if filename=="6_SIM.py":
+            if filename in {"6_SIM.py","6_SIM_LIVE.py"}:
                 return True
     except Exception:
         pass
@@ -90,7 +85,7 @@ def render_nav():
 
     with st.sidebar:
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
-        st.page_link("pages/6_SIM.py", label="NUKE Sim", icon="☢️")
+        st.page_link("pages/6_SIM_LIVE.py", label="NUKE Sim", icon="☢️")
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 

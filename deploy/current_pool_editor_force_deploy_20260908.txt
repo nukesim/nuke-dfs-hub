@@ -1,0 +1,2 @@
+Force Streamlit redeploy after Current Player Pool editor landed on main.
+This commit intentionally occurs after the page update so the deployed tree includes the editable Current Player Pool UI.

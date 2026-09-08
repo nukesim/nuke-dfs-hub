@@ -1,0 +1,27 @@
+name: Engine FLEX Control
+on:
+  push:
+    paths:
+      - 'tools/engine_flex_control_trigger.txt'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python tools/engine_flex_control_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile nuke_sim.py
+          grep -q '### FLEX RULE' nuke_sim.py
+          grep -q 'nuke_engine_flex_position' nuke_sim.py
+          grep -q 'engine_flex=str(st.session_state.get' nuke_sim.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nuke_sim.py
+          git diff --cached --quiet || git commit -m 'Render FLEX control from lineup engine and enforce selection'
+          git push

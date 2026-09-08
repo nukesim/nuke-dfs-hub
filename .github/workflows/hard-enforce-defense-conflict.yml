@@ -1,0 +1,26 @@
+name: Hard Enforce Defense Conflict Rule
+on:
+  push:
+    paths:
+      - 'tools/hard_enforce_defense_conflict_patch.py'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply hard rule patch
+        run: python tools/hard_enforce_defense_conflict_patch.py
+      - name: Verify
+        run: |
+          python -m py_compile nuke_sim.py pages/6_SIM.py
+          grep -q 'no_offense_vs_dst=True' nuke_sim.py
+          grep -q 'Hard rule: offense vs opposing defense is never allowed' nuke_sim.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nuke_sim.py
+          git diff --cached --quiet || git commit -m 'Hard enforce no offense vs opposing defense'
+          git push

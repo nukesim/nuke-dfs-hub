@@ -1,0 +1,30 @@
+name: Sync NUKE SIM Live
+on:
+  push:
+    paths:
+      - 'tools/sync_nuke_sim_live.trigger'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace canonical NUKE Sim with corrected live page
+        run: cp pages/6_SIM_LIVE.py pages/6_SIM.py
+      - name: Verify player-pool controls exist
+        run: |
+          grep -q 'INCLUDE ALL' pages/6_SIM.py
+          grep -q 'REMOVE ALL' pages/6_SIM.py
+          grep -q 'Manage by Position' pages/6_SIM.py
+          grep -q 'CheckboxColumn("In"' pages/6_SIM.py
+      - name: Compile
+        run: python -m py_compile pages/6_SIM.py
+      - name: Commit canonical page
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/6_SIM.py
+          git diff --cached --quiet || git commit -m 'Replace canonical NUKE Sim with corrected player pool UI'
+          git push

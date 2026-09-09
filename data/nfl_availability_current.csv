@@ -1,11 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
-25411,Rome Odunze,CHI,Questionable,Q,DNP,0.14109,,Leg,2026-09-08 00:00:00,2026-09-08T18:33:01+00:00
-23065,TreVeyon Henderson,NE,,,DNP / DNP,0.17904,,,,2026-09-08T18:33:01+00:00
-26035,Jordyn Tyson,NO,OUT,O,,,injured,,2026-08-31 12:00:00,2026-09-08T18:33:01+00:00
-26335,AJ Barner,SEA,,,Full / Full,0.95518,,,,2026-09-08T18:33:01+00:00
-23152,Zach Charbonnet,SEA,PUP,PUP,,,,,2026-09-08 18:20:01,2026-09-08T18:33:01+00:00
-24333,Isiah Pacheco,DET,IR,IR,,,,,2026-09-08 18:20:01,2026-09-08T18:33:01+00:00
-25361,Tank Dell,HOU,IR,IR,,,,,2026-09-08 18:20:01,2026-09-08T18:33:01+00:00
-16447,James Conner,ARI,OUT,O,,,injured,,2026-08-31 12:00:00,2026-09-08T18:33:01+00:00
-25885,Emanuel Wilson,SEA,,,Full / Full,0.9485,,,,2026-09-08T18:33:01+00:00
-17268,Christian Kirk,SF,IR,IR,,,,,2026-09-08 18:20:01,2026-09-08T18:33:01+00:00
+25411,Rome Odunze,CHI,Questionable,Q,,0.31,,Leg,2026-09-08 00:00:00,2026-09-09T00:39:12+00:00
+23065,TreVeyon Henderson,NE,OUT,O,DNP / DNP / DNP,0,,Ankle,2026-09-08 00:00:00,2026-09-09T00:39:12+00:00
+26035,Jordyn Tyson,NO,OUT,O,,,injured,,2026-08-31 12:00:00,2026-09-09T00:39:12+00:00
+16499,George Kittle,SF,,,Limit,0.75981,,,,2026-09-09T00:39:12+00:00
+26335,AJ Barner,SEA,,,Full / Full / Full,1,,,,2026-09-09T00:39:12+00:00
+23152,Zach Charbonnet,SEA,PUP,PUP,,,,,2026-09-09 00:30:02,2026-09-09T00:39:12+00:00
+24333,Isiah Pacheco,DET,IR,IR,,,,,2026-09-09 00:30:01,2026-09-09T00:39:12+00:00
+25361,Tank Dell,HOU,OUT,O,,,injured,,2026-08-31 12:00:00,2026-09-09T00:39:12+00:00
+16447,James Conner,ARI,OUT,O,,,injured,,2026-08-31 12:00:00,2026-09-09T00:39:12+00:00
+25885,Emanuel Wilson,SEA,,,Full / Full / Full,1,,,,2026-09-09T00:39:12+00:00

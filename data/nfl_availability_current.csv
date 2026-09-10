@@ -1,11 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
-19788,Ja'Marr Chase,CIN,,,Full,0.93768,,,,2026-09-10T00:35:16+00:00
-25989,Ashton Jeanty,LV,,,Full,0.88349,,,,2026-09-10T00:35:16+00:00
-22982,Breece Hall,NYJ,,,Full,0.96,,,,2026-09-10T00:35:16+00:00
-22916,Zay Flowers,BAL,Questionable,Q,Limit,0.68924,,Hamstring,2026-09-09 00:00:00,2026-09-10T00:35:16+00:00
-25403,Jeremiyah Love,ARI,Questionable,Q,Limit,0.47295,,Ankle,2026-09-09 00:00:00,2026-09-10T00:35:16+00:00
-25409,Malik Nabers,NYG,,,Full,0.93455,,,,2026-09-10T00:35:16+00:00
-22955,Brock Bowers,LV,OUT,O,DNP,0.04137,injured,,2026-09-09 12:00:00,2026-09-10T00:35:16+00:00
-19211,Tee Higgins,CIN,,,Full,0.93768,,,,2026-09-10T00:35:16+00:00
-23062,Emeka Egbuka,TB,,,Full,0.9188,,,,2026-09-10T00:35:16+00:00
-26148,Jonathon Brooks,CAR,,,Limit,0.65635,,,,2026-09-10T00:35:16+00:00
+19788,Ja'Marr Chase,CIN,,,Full,0.93768,,,,2026-09-10T06:35:06+00:00
+25989,Ashton Jeanty,LV,,,Full,0.93,,,,2026-09-10T06:35:06+00:00
+22982,Breece Hall,NYJ,,,Full,0.96,,,,2026-09-10T06:35:06+00:00
+22916,Zay Flowers,BAL,Questionable,Q,Limit,0.68924,,Hamstring,2026-09-09 00:00:00,2026-09-10T06:35:06+00:00
+25403,Jeremiyah Love,ARI,Questionable,Q,Limit,0.47295,,Ankle,2026-09-09 00:00:00,2026-09-10T06:35:06+00:00
+25409,Malik Nabers,NYG,,,Full,0.93455,,,,2026-09-10T06:35:06+00:00
+22955,Brock Bowers,LV,OUT,O,DNP,0.04137,injured,,2026-09-09 12:00:00,2026-09-10T06:35:06+00:00
+19211,Tee Higgins,CIN,,,Full,0.93768,,,,2026-09-10T06:35:06+00:00
+23062,Emeka Egbuka,TB,,,Full,0.9188,,,,2026-09-10T06:35:06+00:00
+26148,Jonathon Brooks,CAR,Questionable,Q,Limit,0.65635,,Groin,2026-09-09 00:00:00,2026-09-10T06:35:06+00:00

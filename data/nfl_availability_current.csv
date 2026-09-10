@@ -1,11 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
-25411,Rome Odunze,CHI,Questionable,Q,,0.31,,Leg,2026-09-08 00:00:00,2026-09-09T18:32:46+00:00
-23065,TreVeyon Henderson,NE,OUT,O,DNP / DNP / DNP,0,,Ankle,2026-09-08 00:00:00,2026-09-09T18:32:46+00:00
-26035,Jordyn Tyson,NO,IR,IR,,,,,2026-09-09 17:34:34,2026-09-09T18:32:46+00:00
-16499,George Kittle,SF,,,Limit / Limit,0.75981,,,,2026-09-09T18:32:46+00:00
-26335,AJ Barner,SEA,,,Full / Full / Full,1,,,,2026-09-09T18:32:46+00:00
-23152,Zach Charbonnet,SEA,PUP,PUP,,,,,2026-09-09 18:20:02,2026-09-09T18:32:46+00:00
-24333,Isiah Pacheco,DET,IR,IR,,,,,2026-09-09 18:20:01,2026-09-09T18:32:46+00:00
-25361,Tank Dell,HOU,IR,IR,,,,,2026-09-09 17:35:05,2026-09-09T18:32:46+00:00
-16447,James Conner,ARI,IR,IR,,,,,2026-09-09 17:34:46,2026-09-09T18:32:46+00:00
-25885,Emanuel Wilson,SEA,,,Full / Full / Full,1,,,,2026-09-09T18:32:46+00:00
+19788,Ja'Marr Chase,CIN,,,Full,0.93768,,,,2026-09-10T00:35:16+00:00
+25989,Ashton Jeanty,LV,,,Full,0.88349,,,,2026-09-10T00:35:16+00:00
+22982,Breece Hall,NYJ,,,Full,0.96,,,,2026-09-10T00:35:16+00:00
+22916,Zay Flowers,BAL,Questionable,Q,Limit,0.68924,,Hamstring,2026-09-09 00:00:00,2026-09-10T00:35:16+00:00
+25403,Jeremiyah Love,ARI,Questionable,Q,Limit,0.47295,,Ankle,2026-09-09 00:00:00,2026-09-10T00:35:16+00:00
+25409,Malik Nabers,NYG,,,Full,0.93455,,,,2026-09-10T00:35:16+00:00
+22955,Brock Bowers,LV,OUT,O,DNP,0.04137,injured,,2026-09-09 12:00:00,2026-09-10T00:35:16+00:00
+19211,Tee Higgins,CIN,,,Full,0.93768,,,,2026-09-10T00:35:16+00:00
+23062,Emeka Egbuka,TB,,,Full,0.9188,,,,2026-09-10T00:35:16+00:00
+26148,Jonathon Brooks,CAR,,,Limit,0.65635,,,,2026-09-10T00:35:16+00:00

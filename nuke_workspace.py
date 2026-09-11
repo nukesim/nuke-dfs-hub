@@ -139,6 +139,14 @@ def apply_workspace(session_state, workspace):
         if key in CONTROL_KEYS:
             session_state[key] = _restore_json(value)
 
+    # Keep the SIM's active-platform guard aligned with the platform restored by the
+    # workspace. Otherwise loading an FD workspace while the current session is on DK
+    # looks like a manual platform switch on the next rerun and clears the restored
+    # player pool/results immediately.
+    restored_site = session_state.get("dfs_site")
+    if restored_site in ("DK", "FD"):
+        session_state["nuke_sim_active_site"] = restored_site
+
     state = workspace.get("state", {}) or {}
     for key, value in state.items():
         if key not in STATE_KEYS:

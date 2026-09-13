@@ -78305,3 +78305,15 @@ Snapshot UTC,Event ID,Commence Time UTC,Team,Opponent,Home/Away,Spread,Game Tota
 2026-09-13T21:24:09+00:00,3e646c7479c57f5d9752d8c7dfe7059b,2026-09-14T00:20:00Z,DAL,NYG,AWAY,-3.0,47.5,25.25,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,220,280,2
 2026-09-13T21:24:09+00:00,5ad8135dc2b5f27de0b777acd317855a,2026-09-15T00:15:00Z,KC,DEN,HOME,-2.5,43.5,23.0,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,220,280,2
 2026-09-13T21:24:09+00:00,5ad8135dc2b5f27de0b777acd317855a,2026-09-15T00:15:00Z,DEN,KC,AWAY,2.5,43.5,20.5,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,220,280,2
+2026-09-13T22:09:48+00:00,17885cb8dcade8f6c3bce14b2de805e8,2026-09-13T20:25:26Z,PHI,WAS,HOME,-7.5,43.5,25.5,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,17885cb8dcade8f6c3bce14b2de805e8,2026-09-13T20:25:26Z,WAS,PHI,AWAY,7.5,43.5,18.0,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,cb77efed7e711d25a72c1a2a0a1af119,2026-09-13T20:25:29Z,MIN,GB,HOME,9.5,49.25,19.88,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,cb77efed7e711d25a72c1a2a0a1af119,2026-09-13T20:25:29Z,GB,MIN,AWAY,-9.5,49.25,29.38,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,c5d95f48a16849ab6bebc68fbbfcb74a,2026-09-13T20:25:36Z,LV,MIA,HOME,-6.5,49.75,28.12,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,c5d95f48a16849ab6bebc68fbbfcb74a,2026-09-13T20:25:36Z,MIA,LV,AWAY,6.5,49.75,21.62,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,1edfa5ceaa1ad2cb57df1c1b908731f6,2026-09-13T20:25:44Z,LAC,ARI,HOME,2.5,43.0,20.25,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,1edfa5ceaa1ad2cb57df1c1b908731f6,2026-09-13T20:25:44Z,ARI,LAC,AWAY,-2.5,43.0,22.75,6,BetMGM | BetRivers | Bovada | DraftKings | FanDuel | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,3e646c7479c57f5d9752d8c7dfe7059b,2026-09-14T00:20:00Z,NYG,DAL,HOME,3.0,47.5,22.25,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,3e646c7479c57f5d9752d8c7dfe7059b,2026-09-14T00:20:00Z,DAL,NYG,AWAY,-3.0,47.5,25.25,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,5ad8135dc2b5f27de0b777acd317855a,2026-09-15T00:15:00Z,KC,DEN,HOME,-2.5,43.5,23.0,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,218,282,2
+2026-09-13T22:09:48+00:00,5ad8135dc2b5f27de0b777acd317855a,2026-09-15T00:15:00Z,DEN,KC,AWAY,2.5,43.5,20.5,9,BetMGM | BetOnline.ag | BetRivers | BetUS | Bovada | DraftKings | FanDuel | LowVig.ag | MyBookie.ag,218,282,2

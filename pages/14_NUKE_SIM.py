@@ -501,15 +501,19 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
     with st.status("NUKE SIM is running...",expanded=True) as status:
         stage=time.perf_counter()
         st.write(f"1/5 · Generating correlated {get_platform(site).name} candidates...")
-        generation_target=int(candidates)
-        if site=="FD" and flex_position!="ANY":
-            generation_target=min(5000,max(int(candidates)*4,int(candidates)+500))
-        lineups=generate_lineups(players,generation_target,int(min_salary),int(seed),site=site,locked_indices=locked_indices,no_offense_vs_dst=no_offense_vs_dst)
-        if site=="FD" and flex_position!="ANY":
-            required_count={"RB":3,"WR":4,"TE":2}[flex_position]
-            lineups=[lu for lu in lineups if int((players.iloc[list(lu)]["Position"]==flex_position).sum())==required_count][:int(candidates)]
-            if len(lineups)<int(candidates):
-                st.caption(f"FLEX {flex_position} filter produced {len(lineups):,} eligible candidates from {generation_target:,} generated lineups.")
+        # Build the requested FLEX construction inside the candidate engine. The old
+        # FanDuel path generated as many as 5,000 unrestricted lineups and filtered
+        # them afterward, which made a 1,450-lineup workspace needlessly take minutes.
+        lineups=generate_lineups(
+            players,
+            int(candidates),
+            int(min_salary),
+            int(seed),
+            site=site,
+            flex_position=flex_position,
+            locked_indices=locked_indices,
+            no_offense_vs_dst=no_offense_vs_dst,
+        )
         stage_times["Candidate Generation"]=time.perf_counter()-stage
         st.write(f"Candidate generation: {stage_times['Candidate Generation']:.1f}s")
         if not lineups:

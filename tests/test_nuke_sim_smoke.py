@@ -75,3 +75,21 @@ def test_full_nuke_sim_pipeline():
     portfolio = build_portfolio(contest, size=min(8, len(contest)), max_overlap=7, path_balance=1.25)
     assert not portfolio.empty
     assert "Portfolio Slot" in portfolio.columns
+
+
+def test_fanduel_fixed_flex_is_built_directly():
+    players = prepare_slate(_synthetic_slate(), site="FD")
+    lineups = generate_lineups(
+        players,
+        n_lineups=40,
+        min_salary=50000,
+        seed=26,
+        site="FD",
+        flex_position="RB",
+    )
+
+    assert len(lineups) == 40
+    for lineup in lineups:
+        roster = players.iloc[lineup]
+        assert int((roster.Position == "RB").sum()) == 3
+        assert 50000 <= int(roster.Salary.sum()) <= 60000

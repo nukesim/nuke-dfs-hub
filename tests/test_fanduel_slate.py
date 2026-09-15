@@ -20,9 +20,11 @@ def test_fanduel_week2_repository_slate_loads():
 
 def test_fanduel_week2_games_receive_sportsbook_totals():
     players=prepare_slate(load_fanduel_slate(),site="FD")
-    environment=game_environment(players,load_current_odds())
+    odds=load_current_odds()
+    environment=game_environment(players,odds)
     assert environment["Game"].nunique()==13
     assert environment["Source"].eq("Sportsbook Consensus").all()
     jacksonville=environment[environment["Team"].eq("JAC")].iloc[0]
+    sportsbook=odds[(odds["Team"].eq("JAX")) & (odds["Opponent"].eq("DEN"))].iloc[0]
     assert jacksonville["Opponent"]=="DEN"
-    assert jacksonville["Game Total"]==44.5
+    assert jacksonville["Game Total"]==sportsbook["Game Total"]

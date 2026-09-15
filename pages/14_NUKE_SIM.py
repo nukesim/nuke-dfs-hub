@@ -222,12 +222,16 @@ except Exception as e:
 
 st.session_state["nuke_workspace_slate_label"]=slate_source
 players=prepare_slate(raw_slate,site=site)
-players["Availability"]=availability_status(players)
-env=game_environment(players)
+players,availability_summary=availability_status(players)
+current_odds=load_current_odds()
+env=game_environment(players,current_odds)
 odds_history=load_odds_history()
-rendered_odds_status=odds_status(env)
-if rendered_odds_status:
-    st.caption(rendered_odds_status)
+rendered_odds_status=odds_status(current_odds)
+if rendered_odds_status.get("available"):
+    st.caption(
+        f"Sportsbook consensus loaded for {rendered_odds_status.get('games',0)} NFL games"
+        + (f" · Updated {rendered_odds_status.get('snapshot','')}" if rendered_odds_status.get("snapshot") else "")
+    )
 
 # Bring across hand-builder pool choices when they match this slate.
 sync_hub_pool_to_sim(st.session_state,players)

@@ -234,9 +234,22 @@ if rendered_odds_status.get("available"):
     )
 
 # Bring across hand-builder pool choices when they match this slate.
-sync_hub_pool_to_sim(st.session_state,players)
 pool_state=st.session_state.get("nuke_pregame_pool",{})
+if not isinstance(pool_state,dict):
+    pool_state={}
 editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
+hub_pool=st.session_state.get("pool_ids",[])
+hub_pool=list(hub_pool) if isinstance(hub_pool,(list,tuple,set)) else []
+hub_adjust=st.session_state.get("projection_overrides",{})
+hub_adjust=dict(hub_adjust) if isinstance(hub_adjust,dict) else {}
+hub_signature=(tuple(sorted(map(str,hub_pool))),tuple(sorted((str(k),float(v)) for k,v in hub_adjust.items())))
+last_hub_signature=st.session_state.get("nuke_sim_hub_signature")
+if (hub_pool or hub_adjust) and hub_signature!=last_hub_signature:
+    pool_state=sync_hub_pool_to_sim(players,pool_state,hub_pool,hub_adjust)
+    st.session_state["nuke_pregame_pool"]=pool_state
+    st.session_state["nuke_sim_hub_signature"]=hub_signature
+    st.session_state["nuke_pool_editor_version"]=editor_version+1
+    editor_version+=1
 updated_state=dict(pool_state)
 needs_rerun=False
 

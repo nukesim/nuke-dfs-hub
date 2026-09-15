@@ -31,7 +31,14 @@ def _market_team_score(players):
 def _sportsbook_row(odds, team, opp):
     if odds is None or odds.empty or "Team" not in odds.columns or "Opponent" not in odds.columns:
         return None
-    m = odds[odds["Team"].astype(str).eq(str(team)) & odds["Opponent"].astype(str).eq(str(opp))].copy()
+    # FanDuel uses JAC while most sportsbook feeds use JAX. Compare canonical
+    # abbreviations so Jacksonville receives live totals instead of a salary fallback.
+    aliases = {"JAC": "JAX"}
+    canonical_team = aliases.get(str(team).upper(), str(team).upper())
+    canonical_opp = aliases.get(str(opp).upper(), str(opp).upper())
+    odds_team = odds["Team"].astype(str).str.upper().replace(aliases)
+    odds_opp = odds["Opponent"].astype(str).str.upper().replace(aliases)
+    m = odds[odds_team.eq(canonical_team) & odds_opp.eq(canonical_opp)].copy()
     if m.empty:
         return None
     if "Snapshot UTC" in m.columns:

@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 YEAR = int(os.environ.get("NFL_SEASON", "2026"))
-WEEK = int(os.environ.get("NFL_WEEK", "1"))
+WEEK = int(os.environ.get("NFL_WEEK", "2"))
 KEY = os.environ.get("FANTASYPROS_API_KEY", "").strip()
 OUT = Path("data/nfl_availability_current.csv")
 

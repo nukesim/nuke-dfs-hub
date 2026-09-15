@@ -17,7 +17,7 @@ jobs:
         env:
           FANTASYPROS_API_KEY: ${{ secrets.FANTASYPROS_API_KEY }}
           NFL_SEASON: '2026'
-          NFL_WEEK: '1'
+          NFL_WEEK: '2'
         run: python tools/fetch_nfl_availability.py
       - name: Commit refreshed availability
         run: |

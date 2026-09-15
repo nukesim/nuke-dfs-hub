@@ -1,3 +1,4 @@
+# Deployment refresh: FanDuel Week 2 · 2026-09-15
 import streamlit as st
 from nuke_nav import render_nav
 import pandas as pd

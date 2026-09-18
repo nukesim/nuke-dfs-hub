@@ -1,5 +1,3 @@
-import inspect
-import os
 import streamlit as st
 
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/nukedfs"
@@ -22,56 +20,6 @@ def _clean_player_takes(field):
     st.rerun()
 
 
-def _sync_flex_from_nav(site, nav_key):
-    value=str(st.session_state.get(nav_key,"ANY") or "ANY").upper()
-    st.session_state[f"nuke_flex_position_{site}"]=value
-    if site=="FD":
-        st.session_state["nuke_fd_flex_position"]=value
-
-
-def _caller_is_nuke_sim():
-    """Detect NUKE SIM from the file that called render_nav()."""
-    try:
-        for frame_info in inspect.stack()[1:12]:
-            filename=os.path.basename(str(frame_info.filename or ""))
-            if filename in {"6_SIM.py","6_SIM_LIVE.py","14_NUKE_SIM.py"}:
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def _render_sim_flex_control():
-    if not _caller_is_nuke_sim():
-        return
-
-    site=str(st.session_state.get("dfs_site",st.session_state.get("nuke_sim_active_site","DK")) or "DK").upper()
-    if site not in {"DK","FD"}:
-        site="DK"
-
-    canonical_key=f"nuke_flex_position_{site}"
-    legacy_key="nuke_fd_flex_position" if site=="FD" else None
-    default_value=str(st.session_state.get(canonical_key,st.session_state.get(legacy_key,"ANY") if legacy_key else "ANY") or "ANY").upper()
-    options=["ANY","RB","WR","TE"]
-    if default_value not in options:
-        default_value="ANY"
-
-    nav_key=f"nuke_nav_flex_position_{site}"
-    if nav_key not in st.session_state:
-        st.session_state[nav_key]=default_value
-
-    st.markdown("### SIM ROSTER RULES")
-    st.selectbox(
-        "FLEX position",
-        options,
-        key=nav_key,
-        on_change=_sync_flex_from_nav,
-        args=(site,nav_key),
-        help="ANY leaves FLEX unrestricted. RB forces 3 RB total, WR forces 4 WR total, and TE forces 2 TE total. Rerun NUKE SIM after changing this.",
-    )
-    _sync_flex_from_nav(site,nav_key)
-
-
 def render_nav():
     st.markdown("""
         <style>
@@ -89,7 +37,6 @@ def render_nav():
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
-        _render_sim_flex_control()
 
         if st.session_state.get("nuke_player_takes"):
             st.divider(); st.markdown("### SIM Player Takes"); st.caption("Clear every saved override in one click.")

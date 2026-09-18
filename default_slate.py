@@ -4,7 +4,7 @@ import lzma
 from pathlib import Path
 import pandas as pd
 
-SLATE_LABEL = "2026 Week 3 Sunday Main · Updated 2026-09-16"
+SLATE_LABEL = "2026 Week 2 Sunday Main · Updated 2026-09-18"
 
 _PARTS = [
     Path(__file__).parent / "data" / f"dk_nfl_current.csv.xz.b64.part{i}"

@@ -1,11 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
-16393,Christian McCaffrey,SF,,,DNP,,,,,2026-09-17T18:32:12+00:00
-25989,Ashton Jeanty,LV,,,Full,0.98053,,,,2026-09-17T18:32:12+00:00
-20130,Nico Collins,HOU,Questionable,Q,Limit,0.82142,,Hamstring,2026-09-16 00:00:00,2026-09-17T18:32:12+00:00
-19210,D'Andre Swift,CHI,Questionable,Q,Limit,0.93448,,Ankle,2026-09-16 00:00:00,2026-09-17T18:32:12+00:00
-22916,Zay Flowers,BAL,Questionable,Q,DNP,0.36366,,Hamstring,2026-09-16 00:00:00,2026-09-17T18:32:12+00:00
-22936,Trey McBride,ARI,Questionable,Q,DNP,,,Back,2026-09-16 00:00:00,2026-09-17T18:32:12+00:00
-23113,Rashee Rice,KC,,,Full,0.97744,,,,2026-09-17T18:32:12+00:00
-22955,Brock Bowers,LV,Questionable,Q,DNP,0.03899,,Knee,2026-09-16 00:00:00,2026-09-17T18:32:12+00:00
-26122,Ladd McConkey,LAC,Questionable,Q,DNP,0.42591,,Rib,2026-09-16 00:00:00,2026-09-17T18:32:12+00:00
-18218,A.J. Brown,NE,IR,IR,,,,,2026-09-17 18:20:02,2026-09-17T18:32:12+00:00
+16393,Christian McCaffrey,SF,,,DNP / Full,,,,,2026-09-18T00:34:48+00:00
+25989,Ashton Jeanty,LV,,,Full / Full,0.99629,,,,2026-09-18T00:34:48+00:00
+20130,Nico Collins,HOU,Questionable,Q,Limit / DNP,0.27489,,Hamstring,2026-09-17 00:00:00,2026-09-18T00:34:48+00:00
+20111,Chris Olave,NO,Questionable,Q,-- / Limit,0.73989,,Hamstring,2026-09-17 00:00:00,2026-09-18T00:34:48+00:00
+19210,D'Andre Swift,CHI,Questionable,Q,Limit / Limit,0.92576,,Ankle,2026-09-17 00:00:00,2026-09-18T00:34:48+00:00
+22916,Zay Flowers,BAL,Questionable,Q,DNP / DNP,0.124,,Hamstring,2026-09-17 00:00:00,2026-09-18T00:34:48+00:00
+22936,Trey McBride,ARI,,,DNP / Full,,,,,2026-09-18T00:34:48+00:00
+23113,Rashee Rice,KC,,,Full / Full,0.99629,,,,2026-09-18T00:34:48+00:00
+22955,Brock Bowers,LV,Questionable,Q,DNP / DNP,0.00362,,Knee,2026-09-17 00:00:00,2026-09-18T00:34:48+00:00
+26122,Ladd McConkey,LAC,Questionable,Q,DNP / DNP,0.13308,,Rib,2026-09-17 00:00:00,2026-09-18T00:34:48+00:00

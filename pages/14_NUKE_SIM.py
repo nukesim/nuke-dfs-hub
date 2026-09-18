@@ -486,6 +486,7 @@ with pool_current_tab:
                 st.session_state["nuke_pool_editor_version"]=editor_version+1
                 st.rerun()
 st.session_state["nuke_pregame_pool"]=updated_state
+payouts_override=None
 active_rows=[]
 for _,row in players.iterrows():
     key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"

@@ -4,6 +4,7 @@ from nuke_sim import prepare_slate, generate_lineups, simulate_player_matrix, ev
 from nuke_paths import attach_path_labels
 from nuke_contest import simulate_contest
 from nuke_portfolio import build_portfolio
+from fd_export import add_fd_roster_columns, build_fd_lineup_only_csv
 
 
 def _synthetic_slate():
@@ -93,3 +94,20 @@ def test_fanduel_fixed_flex_is_built_directly():
         roster = players.iloc[lineup]
         assert int((roster.Position == "RB").sum()) == 3
         assert 50000 <= int(roster.Salary.sum()) <= 60000
+
+    matrix = simulate_player_matrix(players, n_sims=20, seed=26)
+    results = evaluate_lineups(players, lineups, matrix)
+    results = attach_path_labels(players, results)
+    contest, _ = simulate_contest(
+        results, matrix, field_size=20, entry_fee=5.0, first_prize=50.0,
+        user_lineups=len(results), iterations=10, seed=126, players=players,
+    )
+    portfolio = build_portfolio(contest, size=8, max_overlap=8, players=players)
+    exported = add_fd_roster_columns(players, portfolio)
+
+    assert set(results["FLEX Pos"]) == {"RB"}
+    assert set(exported["FLEX Pos"]) == {"RB"}
+    flex_names = set(exported["FLEX"])
+    rb_names = set(players.loc[players.Position.eq("RB"), "Name"])
+    assert flex_names <= {f"{name} ({players.loc[players.Name.eq(name), 'ID'].iloc[0]})" for name in rb_names}
+    assert build_fd_lineup_only_csv(players, portfolio).decode("utf-8-sig").splitlines()[0] == "QB,RB,RB,WR,WR,WR,TE,FLEX,D"

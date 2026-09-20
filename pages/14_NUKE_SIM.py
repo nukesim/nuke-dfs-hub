@@ -22,7 +22,7 @@ from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
 from nuke_availability import availability_status
 from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS, build_fd_lineup_only_csv
-from nuke_workspace import workspace_bytes, load_workspace_bytes, apply_workspace
+from nuke_workspace import workspace_bytes, load_workspace_bytes, apply_workspace, invalidate_sim_results
 
 @st.fragment
 def render_player_takes_fragment(sim_players, portfolio, contest_results, portfolio_stats, manage_size, manage_overlap, manage_player, manage_qb, manage_path, manage_team, manage_game):
@@ -158,9 +158,12 @@ with st.sidebar:
     min_salary=st.number_input("Minimum salary",cfg.min_salary_input,cfg.max_salary_input,cfg.default_min_salary,100,key=f"min_salary_{site}")
     flex_position=st.selectbox(
         "FLEX position", ["ANY","RB","WR","TE"], index=0, key=f"nuke_flex_position_{site}",
+        on_change=invalidate_sim_results,
+        args=(st.session_state,),
         help=(
             "Choose which position must occupy FLEX. RB = 3 RB total, WR = 4 WR total, TE = 2 TE total. "
-            "ANY leaves FLEX unrestricted. Changing this requires a new NUKE SIM run."
+            "ANY leaves FLEX unrestricted. Changing this clears the prior results so they cannot be "
+            "displayed or exported under the new setting; run NUKE SIM again."
         )
     )
     candidates=st.number_input("Candidate lineups",100,5000,candidates,100,key="candidate_lineups")

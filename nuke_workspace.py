@@ -30,6 +30,22 @@ RESULT_KEYS = [
 ]
 
 
+def invalidate_sim_results(session_state):
+    """Remove outputs that were built under a previous lineup construction setting.
+
+    Controls such as the required FLEX position change the candidate universe. Keeping
+    completed results after one of those controls changes makes the UI label and the
+    displayed/exported lineups disagree.
+    """
+    removed = []
+    for key in RESULT_KEYS:
+        if key in session_state:
+            del session_state[key]
+            removed.append(key)
+    session_state.pop("_nuke_workspace_export_cache", None)
+    return removed
+
+
 def _json_safe(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value

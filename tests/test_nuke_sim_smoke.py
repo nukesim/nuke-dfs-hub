@@ -53,6 +53,13 @@ def test_full_nuke_sim_pipeline():
         assert "BACKUP QB" not in qb.Name
         mates = r[(r.Team.eq(qb.Team)) & (r.Position.isin(["WR", "TE"]))]
         assert len(mates) >= 1
+        pass_catchers = r[r.Position.isin(["WR", "TE"])]
+        for pass_team, group in pass_catchers.groupby("Team"):
+            has_pair = int(group.Position.eq("WR").sum()) >= 2 or (
+                int(group.Position.eq("WR").sum()) >= 1
+                and int(group.Position.eq("TE").sum()) >= 1
+            )
+            assert not has_pair or pass_team == qb.Team
         assert 47000 <= int(r.Salary.sum()) <= 50000
 
     matrix = simulate_player_matrix(players, n_sims=80, seed=26)
@@ -93,6 +100,14 @@ def test_fanduel_fixed_flex_is_built_directly():
     for lineup in lineups:
         roster = players.iloc[lineup]
         assert int((roster.Position == "RB").sum()) == 3
+        qb_team = roster.loc[roster.Position.eq("QB"), "Team"].iloc[0]
+        pass_catchers = roster[roster.Position.isin(["WR", "TE"])]
+        for pass_team, group in pass_catchers.groupby("Team"):
+            has_pair = int(group.Position.eq("WR").sum()) >= 2 or (
+                int(group.Position.eq("WR").sum()) >= 1
+                and int(group.Position.eq("TE").sum()) >= 1
+            )
+            assert not has_pair or pass_team == qb_team
         assert 50000 <= int(roster.Salary.sum()) <= 60000
 
     matrix = simulate_player_matrix(players, n_sims=20, seed=26)

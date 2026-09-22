@@ -68,12 +68,25 @@ def simulate_player_matrix(players,n_sims=1500,seed=26,mode="NUKEM"):
             pts=_sample_points(row,rng,mode); pts += (.72*gf.get(row.Game,0)+.48*tf.get(row.Team,0)) if row.Position!="DST" else -.30*gf.get(row.Game,0); mat[s,i]=max(-6 if row.Position=="DST" else 0,pts)
     return mat
 
+def _has_unstacked_pass_catcher_pair(rows):
+    """Reject WR+WR or WR+TE team pairings that omit that team's QB."""
+    qbs=set(rows.loc[rows.Position.eq("QB"),"Team"].astype(str))
+    pass_catchers=rows[rows.Position.isin(["WR","TE"])]
+    for pass_team,group in pass_catchers.groupby("Team"):
+        wr_count=int(group.Position.eq("WR").sum())
+        te_count=int(group.Position.eq("TE").sum())
+        if (wr_count>=2 or (wr_count>=1 and te_count>=1)) and str(pass_team) not in qbs:
+            return True
+    return False
+
+
 def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK",no_offense_vs_dst=True):
     if max_salary is None: max_salary=get_platform(site).salary_cap
     if len(indices)!=9 or len(set(indices))!=9:return False
     r=p.iloc[indices]; sal=int(r.Salary.sum()); c=r.Position.value_counts().to_dict()
     if sal<min_salary or sal>max_salary:return False
     if not(c.get("QB",0)==1 and c.get("RB",0)>=2 and c.get("WR",0)>=3 and c.get("TE",0)>=1 and c.get("DST",0)==1):return False
+    if _has_unstacked_pass_catcher_pair(r):return False
     if get_platform(site).code=="FD" and int(r.Team.value_counts().max())>4:return False
     if no_offense_vs_dst:
         d=r[r.Position.eq("DST")]
@@ -224,6 +237,7 @@ def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",fle
         if get_platform(site).code=="FD":
             team_counts=pd.Series(team[arr]).value_counts()
             if not team_counts.empty and team_counts.max()>4:continue
+        if _has_unstacked_pass_catcher_pair(p.iloc[lineup]):continue
         if flex_position!="ANY" and counts.get(flex_position,0)!={"RB":3,"WR":4,"TE":2}[flex_position]:continue
         if dst:
             d=dst[0]; opposing=sum((game[i]==game[d]) and (team[i]!=team[d]) and pos[i]!="DST" for i in lineup)

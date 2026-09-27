@@ -13,7 +13,7 @@ from default_slate import load_default_slate, SLATE_LABEL
 from nuke_bridge import portable_to_hub_lineup
 from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, FD_SLATE_LABEL
-from nuke_odds import load_odds_history
+from nuke_odds import load_current_odds, load_odds_history
 
 st.set_page_config(page_title="NUKE NFL DFS Hub", page_icon="🏈", layout="wide")
 render_nav()
@@ -458,6 +458,35 @@ def parse_gametotals_xlsx(source):
             "game_time":game_time
         }
     return games
+
+
+def current_slate_odds(slate):
+    """Convert the repository odds snapshot to the Hub's game format."""
+    odds=load_current_odds()
+    if slate is None or odds.empty:
+        return {}, ""
+    matchups={frozenset((str(r["Team"]),str(r["Opp"]))) for _,r in slate.iterrows()}
+    games={}
+    for _,home in odds[odds["Home/Away"].eq("HOME")].iterrows():
+        away_team=str(home["Opponent"])
+        home_team=str(home["Team"])
+        if frozenset((away_team,home_team)) not in matchups:
+            continue
+        away_rows=odds[(odds["Team"].eq(away_team)) & (odds["Opponent"].eq(home_team))]
+        if away_rows.empty:
+            continue
+        away=away_rows.iloc[0]
+        key="|".join(sorted((away_team,home_team)))
+        games[key]={
+            "away":away_team,"home":home_team,
+            "away_name":away_team,"home_name":home_team,
+            "away_spread":float(away["Spread"]),"home_spread":float(home["Spread"]),
+            "total":float(home["Game Total"]),"away_ml":None,"home_ml":None,
+            "away_implied":float(away["Team Total"]),"home_implied":float(home["Team Total"]),
+            "game_time":str(home.get("Commence Time UTC", "")),
+        }
+    snapshot=str(odds["Snapshot UTC"].iloc[0]) if games else ""
+    return games,snapshot
 
 
 @st.cache_data(show_spinner=False)
@@ -1847,11 +1876,16 @@ with st.sidebar:
             if parsed:
                 st.session_state.game_totals=parsed
                 st.session_state.game_totals_source=odds_up.name
-        elif local_totals.exists():
-            parsed=cached_parse_gametotals_file(str(local_totals),local_totals.stat().st_mtime)
+        else:
+            parsed,snapshot=current_slate_odds(st.session_state.slate)
             if parsed:
                 st.session_state.game_totals=parsed
-                st.session_state.game_totals_source="gametotals.xlsx (local)"
+                st.session_state.game_totals_source=f"NFL sportsbook snapshot · {snapshot}"
+            elif local_totals.exists():
+                parsed=cached_parse_gametotals_file(str(local_totals),local_totals.stat().st_mtime)
+                if parsed:
+                    st.session_state.game_totals=parsed
+                    st.session_state.game_totals_source="gametotals.xlsx (local)"
     except Exception as e:
         st.warning(f"Could not read game totals: {e}")
 
@@ -3096,4 +3130,3 @@ with exptab:
         dg=saved_duplicate_groups()
         if dg:
             st.error("Duplicate saved lineup groups: "+"; ".join(", ".join(f"L{x}" for x in g) for g in dg))
-

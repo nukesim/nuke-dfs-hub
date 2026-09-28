@@ -250,6 +250,10 @@ with st.sidebar:
     portfolio_n=st.number_input("Portfolio lineups",1,150,20,1,key="pga_portfolio")
     min_salary=st.number_input("Minimum salary",30000,50000,49600,100,key="pga_min_salary")
     max_player=st.slider("Max golfer exposure",1,100,60,key="pga_max_exp")
+    max_pair=st.slider("Max pair exposure",10,100,30,5,key="pga_max_pair",
+                       help="Maximum share of portfolio lineups that may contain the same 2-golfer combination.")
+    max_triple=st.slider("Max 3-golfer combo exposure",5,100,20,5,key="pga_max_triple",
+                         help="Maximum share of portfolio lineups that may contain the same 3-golfer combination.")
     field_size=st.number_input("Contest field size",2,1000000,2378,1,key="pga_field")
     entry_fee=st.number_input("Entry fee ($)",0.0,10000.0,3.0,1.0,key="pga_fee")
     first_prize=st.number_input("1st prize ($)",0.0,10000000.0,600.0,100.0,key="pga_first")
@@ -277,20 +281,32 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
         results=results.sort_values("NUKE Score",ascending=False).reset_index(drop=True)
         # greedy diversified portfolio honoring max exposure + per-golfer max/min as best effort
         counts={int(x):0 for x in golfers["ID"]}
+        pair_counts={}
+        triple_counts={}
         selected=[]
         target=int(portfolio_n)
         personal_max=dict(zip(edited["ID"].astype(int),edited["Max %"].astype(float)))
+        pair_cap=max(1,int(np.floor(target*float(max_pair)/100+1e-9)))
+        triple_cap=max(1,int(np.floor(target*float(max_triple)/100+1e-9)))
         for _,r in results.iterrows():
             c=cands[int(r["_candidate"])]
-            ids=[int(golfers.iloc[i]["ID"]) for i in c["idx"]]
+            ids=sorted(int(golfers.iloc[i]["ID"]) for i in c["idx"])
+            pairs=[(ids[a],ids[b]) for a in range(6) for b in range(a+1,6)]
+            triples=[(ids[a],ids[b],ids[c3]) for a in range(6) for b in range(a+1,6) for c3 in range(b+1,6)]
             ok=True
             for pid in ids:
                 cap=min(float(max_player),personal_max.get(pid,100.0))
                 if counts.get(pid,0)+1 > max(1,int(np.floor(target*cap/100+1e-9))):
                     ok=False; break
+            if ok and any(pair_counts.get(combo,0)+1 > pair_cap for combo in pairs):
+                ok=False
+            if ok and any(triple_counts.get(combo,0)+1 > triple_cap for combo in triples):
+                ok=False
             if ok:
                 selected.append(r)
                 for pid in ids: counts[pid]=counts.get(pid,0)+1
+                for combo in pairs: pair_counts[combo]=pair_counts.get(combo,0)+1
+                for combo in triples: triple_counts[combo]=triple_counts.get(combo,0)+1
             if len(selected)>=target: break
         portfolio=pd.DataFrame(selected)
         st.session_state["pga_results"]=(results,cands,portfolio,golfers,own,cut_prob,seed)

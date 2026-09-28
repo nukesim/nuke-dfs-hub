@@ -109,6 +109,58 @@ def evaluate(cands,sims,own):
     r["NUKE Score"]=1.0*r["_z_Mean"]+1.25*r["_z_P95"]+.9*r["_z_Top 1%"]+.25*lev
     return r.sort_values("NUKE Score",ascending=False).reset_index(drop=True)
 
+def simulate_contest_metrics(results,cands,sims,cut_prob,field_size,entry_fee,first_prize,seed):
+    """Approximate large-field contest outcomes against ownership-weighted field lineups."""
+    if results.empty:
+        return results
+    rng=np.random.default_rng(seed+4242)
+    n_sims=sims.shape[0]
+    # Evaluate a practical field sample, then use percentile thresholds to represent the full contest.
+    sample_n=int(min(max(250,field_size),5000))
+    candidate_scores=np.empty((len(cands),n_sims),dtype=np.float32)
+    six6=np.empty(len(cands),dtype=float)
+    five6=np.empty(len(cands),dtype=float)
+    for j,c in enumerate(cands):
+        candidate_scores[j]=sims[:,c["idx"]].sum(axis=1)
+        probs=cut_prob[c["idx"]]
+        six6[j]=float(np.prod(probs))
+        five6[j]=float(sum(np.prod(np.delete(probs,k))*(1-probs[k]) for k in range(6)))
+    dup=np.array([max(c["own_product"],1e-12) for c in cands],dtype=float)
+    quality=np.array([max(float(x),1e-9) for x in results.set_index("_candidate").reindex(range(len(cands)))["NUKE Score"].fillna(-5)+8])
+    field_w=np.power(dup,.32)*np.exp(np.clip(quality-quality.mean(),-3,3)*.12)
+    field_w=field_w/field_w.sum()
+    field_idx=rng.choice(len(cands),size=sample_n,replace=True,p=field_w)
+    field_scores=candidate_scores[field_idx]
+    # Per-universe field thresholds.
+    win_thr=np.max(field_scores,axis=0)
+    top1_thr=np.quantile(field_scores,.99,axis=0)
+    cash_thr=np.quantile(field_scores,.80,axis=0)
+    out=results.copy()
+    wins=[]; top1=[]; cash=[]; roi=[]; s6=[]; s5=[]; dup_est=[]
+    for _,row in out.iterrows():
+        j=int(row["_candidate"]); sc=candidate_scores[j]
+        w=float(np.mean(sc>=win_thr)); t=float(np.mean(sc>=top1_thr)); ca=float(np.mean(sc>=cash_thr))
+        # Transparent payout approximation when no full payout table is supplied.
+        top1_pay=max(entry_fee*4.0, first_prize/max(1,field_size*.01))
+        cash_pay=max(entry_fee*1.8, entry_fee)
+        expected=w*first_prize + max(0,t-w)*top1_pay + max(0,ca-t)*cash_pay
+        wins.append(w*100); top1.append(t*100); cash.append(ca*100)
+        roi.append(((expected-entry_fee)/entry_fee*100) if entry_fee>0 else np.nan)
+        s6.append(six6[j]*100); s5.append((six6[j]+five6[j])*100)
+        dup_est.append(max(1.0,float(field_size)*dup[j]))
+    out["Win %"]=np.round(wins,3)
+    out["Top 1% %"]=np.round(top1,2)
+    out["Cash %"]=np.round(cash,1)
+    out["Est. ROI %"]=np.round(roi,1)
+    out["6/6 %"]=np.round(s6,1)
+    out["5+/6 %"]=np.round(s5,1)
+    out["Est. Duplicates"]=np.round(dup_est,1)
+    # Contest score emphasizes actual simulated tournament success.
+    for col in ["Win %","Top 1% %","6/6 %"]:
+        z=(out[col]-out[col].mean())/(out[col].std()+1e-9)
+        out["NUKE Score"]=out["NUKE Score"] + (1.0 if col=="Win %" else .45)*z
+    return out.sort_values("NUKE Score",ascending=False).reset_index(drop=True)
+
 def lineup_names(c,d):
     return [str(d.iloc[i]["Name"]) for i in c["idx"]]
 
@@ -185,6 +237,7 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
         sims,cut_prob=simulate_golfers(golfers,int(universes),seed)
         own=ownership_estimate(golfers)
         results=evaluate(cands,sims,own)
+        results=simulate_contest_metrics(results,cands,sims,cut_prob,int(field_size),float(entry_fee),float(first_prize),seed)
         # apply user boosts to selection score
         boosts=dict(zip(edited["ID"].astype(int),edited["Boost %"].astype(float)))
         for ri in results.index:
@@ -221,8 +274,9 @@ if "pga_results" in st.session_state:
     for rank,r in portfolio.reset_index(drop=True).iterrows():
         cand=cands[int(r["_candidate"])]
         show.append({"#":rank+1,"Golfers":" · ".join(lineup_names(cand,golfers)),"Salary":int(r["Salary"]),
-                     "Mean":r["Mean"],"P95":r["P95"],"Top 1%":r["Top 1%"],
-                     "Own Sum %":r["Ownership Sum"],"NUKE Score":round(float(r["NUKE Score"]),3)})
+                     "Mean":r["Mean"],"P95":r["P95"],"Top 1%":r["Top 1%"],"6/6 %":r["6/6 %"],"5+/6 %":r["5+/6 %"],
+                     "Win %":r["Win %"],"Top 1% %":r["Top 1% %"],"Cash %":r["Cash %"],"Est. ROI %":r["Est. ROI %"],
+                     "Est. Duplicates":r["Est. Duplicates"],"Own Sum %":r["Ownership Sum"],"NUKE Score":round(float(r["NUKE Score"]),3)})
     st.dataframe(pd.DataFrame(show),hide_index=True,use_container_width=True,height=430)
     st.download_button("DOWNLOAD PGA PORTFOLIO + STATS CSV",export_csv(portfolio,cands,golfers),
                        file_name="nuke_pga_portfolio.csv",mime="text/csv",type="primary",use_container_width=True)
@@ -245,5 +299,5 @@ if "pga_results" in st.session_state:
         for rank,r in results.head(100).iterrows():
             cand=cands[int(r["_candidate"])]
             top.append({"Rank":rank+1,"Golfers":" · ".join(lineup_names(cand,golfers)),"Salary":int(r["Salary"]),
-                        "Mean":r["Mean"],"P95":r["P95"],"Top 1%":r["Top 1%"],"NUKE Score":round(float(r["NUKE Score"]),3)})
+                        "Mean":r["Mean"],"P95":r["P95"],"Top 1%":r["Top 1%"],"6/6 %":r["6/6 %"],"Win %":r["Win %"],"Top 1% %":r["Top 1% %"],"Cash %":r["Cash %"],"Est. ROI %":r["Est. ROI %"],"Est. Duplicates":r["Est. Duplicates"],"NUKE Score":round(float(r["NUKE Score"]),3)})
         st.dataframe(pd.DataFrame(top),hide_index=True,use_container_width=True)

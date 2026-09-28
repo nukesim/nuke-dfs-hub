@@ -217,11 +217,11 @@ with st.sidebar:
     candidates_n=st.number_input("Candidate lineups",500,20000,5000,500, key="pga_candidates")
     universes=st.number_input("Tournament universes",250,10000,3000,250,key="pga_universes")
     portfolio_n=st.number_input("Portfolio lineups",1,150,20,1,key="pga_portfolio")
-    min_salary=st.number_input("Minimum salary",30000,50000,49000,100,key="pga_min_salary")
+    min_salary=st.number_input("Minimum salary",30000,50000,49600,100,key="pga_min_salary")
     max_player=st.slider("Max golfer exposure",1,100,60,key="pga_max_exp")
-    field_size=st.number_input("Contest field size",2,1000000,4444,1,key="pga_field")
-    entry_fee=st.number_input("Entry fee ($)",0.0,10000.0,100.0,1.0,key="pga_fee")
-    first_prize=st.number_input("1st prize ($)",0.0,10000000.0,100000.0,1000.0,key="pga_first")
+    field_size=st.number_input("Contest field size",2,1000000,2378,1,key="pga_field")
+    entry_fee=st.number_input("Entry fee ($)",0.0,10000.0,3.0,1.0,key="pga_fee")
+    first_prize=st.number_input("1st prize ($)",0.0,10000000.0,600.0,100.0,key="pga_first")
 
 if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=True):
     included=set(edited.loc[edited["In"],"ID"].astype(int))

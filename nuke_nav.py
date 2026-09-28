@@ -35,6 +35,7 @@ def render_nav():
         st.page_link("app.py", label="Lineup Builder", icon="🏈")
         st.page_link("pages/14_NUKE_SIM.py", label="NUKE Sim", icon="☢️")
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
+        st.page_link("pages/15_PGA_SIM.py", label="PGA Sim", icon="⛳")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
 

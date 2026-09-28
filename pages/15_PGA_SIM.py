@@ -171,8 +171,19 @@ def export_csv(portfolio,cands,d):
         ps=d.iloc[c["idx"]].sort_values("Salary",ascending=False)
         vals=[f'{r["Name"]} ({int(r["ID"])})' for _,r in ps.iterrows()]
         rows.append({**{f"G{i+1}":vals[i] for i in range(6)},
-                     "Salary":int(row["Salary"]),"NUKE Score":round(float(row["NUKE Score"]),3),
-                     "Mean":row["Mean"],"P95":row["P95"],"Top 1%":row["Top 1%"]})
+                     "Salary":int(row["Salary"]),
+                     "Mean":row["Mean"],
+                     "P95":row["P95"],
+                     "Top 1%":row["Top 1%"],
+                     "6/6 %":row["6/6 %"],
+                     "5+/6 %":row["5+/6 %"],
+                     "Win %":row["Win %"],
+                     "Top 1% %":row["Top 1% %"],
+                     "Cash %":row["Cash %"],
+                     "Est. ROI %":row["Est. ROI %"],
+                     "Est. Duplicates":row["Est. Duplicates"],
+                     "Own Sum %":row["Ownership Sum"],
+                     "NUKE Score":round(float(row["NUKE Score"]),3)})
     return pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
 
 st.title("⛳ NUKE PGA")

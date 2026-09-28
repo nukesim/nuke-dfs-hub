@@ -199,6 +199,8 @@ m1.metric("Golfers",len(golfers)); m2.metric("Roster","6 G"); m3.metric("Salary 
 st.subheader("🏌️ Golfer Pool")
 st.caption("Include/exclude golfers, lock golfers into every candidate lineup, and optionally boost or limit portfolio exposure.")
 editor=golfers[["ID","Name","Salary","AvgPointsPerGame"]].copy()
+# Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
+editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
 editor.insert(0,"In",True); editor.insert(1,"Lock",False); editor["Boost %"]=0; editor["Min %"]=0; editor["Max %"]=100
 edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430,
     disabled=["ID","Name","Salary","AvgPointsPerGame"],
@@ -207,6 +209,7 @@ edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430
       "Lock":st.column_config.CheckboxColumn("🔒 Lock"),
       "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
       "AvgPointsPerGame":st.column_config.NumberColumn("DK FPPG",format="%.1f"),
+      "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%",disabled=True),
       "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),
       "Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=5),
       "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=5),

@@ -202,6 +202,23 @@ editor=golfers[["ID","Name","Salary","AvgPointsPerGame"]].copy()
 # Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
 editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
 editor.insert(0,"In",True); editor.insert(1,"Lock",False); editor["Boost %"]=0; editor["Min %"]=0; editor["Max %"]=100
+
+# Fast bulk controls for the PGA player pool.
+bulk1, bulk2, bulk_spacer = st.columns([1,1,6])
+with bulk1:
+    if st.button("✅ ADD ALL", use_container_width=True, key="pga_add_all"):
+        st.session_state["pga_pool_bulk_in"] = True
+        st.session_state.pop("pga_pool_editor", None)
+        st.rerun()
+with bulk2:
+    if st.button("🚫 REMOVE ALL", use_container_width=True, key="pga_remove_all"):
+        st.session_state["pga_pool_bulk_in"] = False
+        st.session_state.pop("pga_pool_editor", None)
+        st.rerun()
+
+if "pga_pool_bulk_in" in st.session_state:
+    editor["In"] = bool(st.session_state.pop("pga_pool_bulk_in"))
+
 edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430,
     disabled=["ID","Name","Salary","AvgPointsPerGame"],
     column_config={

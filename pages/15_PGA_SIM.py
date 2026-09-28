@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import re
+import requests
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
 from nuke_nav import render_nav
 
@@ -40,6 +44,139 @@ def ownership_estimate(d):
     # six roster spots across the field -> ownership sums to ~600%
     return raw/raw.sum()*600
 
+
+def _norm_name(x):
+    return re.sub(r"[^a-z0-9]","",str(x).lower())
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_pga_context(event_name):
+    """Best-effort automatic event/venue/tee-time discovery from ESPN public golf data."""
+    out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
+    try:
+        sb=requests.get("https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard",timeout=8).json()
+        choices=[]
+        for ev in sb.get("events",[]):
+            choices.append((ev.get("id"),ev.get("name",""),ev))
+        for cal in (sb.get("leagues") or [{}])[0].get("calendar",[]):
+            choices.append((cal.get("id"),cal.get("label",""),cal))
+        if not choices: return out
+        wanted=_norm_name(event_name)
+        def sim(x):
+            n=_norm_name(x[1])
+            return SequenceMatcher(None,wanted,n).ratio() + (0.5 if (wanted in n or n in wanted) else 0)
+        eid,ename,raw=max(choices,key=sim)
+        if sim((eid,ename,raw))<0.35: return out
+        out["event_id"]=str(eid); out["event_name"]=ename or event_name
+        # Event detail usually carries venue/address even before play begins.
+        try:
+            core=requests.get(f"https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/{eid}",timeout=8).json()
+            comp=(core.get("competitions") or [{}])[0]
+            venue=comp.get("venue") or core.get("venue") or {}
+            out["course"]=venue.get("fullName") or venue.get("name") or ""
+            addr=venue.get("address") or {}
+            city=addr.get("city",""); state=addr.get("state",""); country=addr.get("country","")
+            out["location"]=", ".join(x for x in [city,state,country] if x)
+            geo=venue.get("geo") or venue.get("location") or {}
+            out["lat"]=geo.get("latitude"); out["lon"]=geo.get("longitude")
+        except Exception: pass
+        # Site summary/leaderboard can expose teeTime alongside athlete records once pairings are published.
+        payloads=[]
+        for url in [
+            f"https://site.api.espn.com/apis/site/v2/sports/golf/pga/summary?event={eid}",
+            f"https://site.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard?tournamentId={eid}"
+        ]:
+            try: payloads.append(requests.get(url,timeout=8).json())
+            except Exception: pass
+        def walk(obj):
+            if isinstance(obj,dict):
+                athlete=obj.get("athlete") if isinstance(obj.get("athlete"),dict) else obj
+                name=athlete.get("displayName") or athlete.get("fullName") or obj.get("displayName")
+                tt=obj.get("teeTime") or obj.get("startTime") or obj.get("date")
+                period=obj.get("period") or obj.get("round") or 1
+                if name and tt and "T" in str(tt):
+                    key=_norm_name(name)
+                    rec=out["tee_times"].setdefault(key,{})
+                    try: rec[int(period)]=str(tt)
+                    except Exception: rec.setdefault(1,str(tt))
+                for v in obj.values(): walk(v)
+            elif isinstance(obj,list):
+                for v in obj: walk(v)
+        for p in payloads: walk(p)
+        if out["tee_times"]: out["status"]="Tee times loaded automatically"
+    except Exception:
+        pass
+    return out
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def geocode_location(location):
+    if not location: return None,None
+    try:
+        j=requests.get("https://geocoding-api.open-meteo.com/v1/search",params={"name":location,"count":1,"language":"en","format":"json"},timeout=8).json()
+        x=(j.get("results") or [None])[0]
+        return (x.get("latitude"),x.get("longitude")) if x else (None,None)
+    except Exception: return None,None
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_hourly_weather(lat,lon):
+    if lat is None or lon is None: return pd.DataFrame()
+    try:
+        j=requests.get("https://api.open-meteo.com/v1/forecast",params={
+            "latitude":lat,"longitude":lon,"timezone":"auto","forecast_days":10,
+            "temperature_unit":"fahrenheit","wind_speed_unit":"mph","precipitation_unit":"inch",
+            "hourly":"temperature_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m"
+        },timeout=10).json()
+        h=j.get("hourly",{})
+        df=pd.DataFrame(h)
+        if len(df): df["time"]=pd.to_datetime(df["time"])
+        return df
+    except Exception: return pd.DataFrame()
+
+def weather_severity(row):
+    wind=float(row.get("wind_speed_10m",0) or 0); gust=float(row.get("wind_gusts_10m",0) or 0)
+    rain=float(row.get("precipitation_probability",0) or 0); amt=float(row.get("precipitation",0) or 0)
+    temp=float(row.get("temperature_2m",70) or 70)
+    return wind*.55 + max(0,gust-15)*.35 + rain*.035 + amt*18 + max(0,45-temp)*.08 + max(0,temp-95)*.06
+
+def weather_dot(sev):
+    if sev < 8: return "🟢"
+    if sev < 13: return "🟡"
+    if sev < 18: return "🟠"
+    return "🔴"
+
+def attach_tee_weather(d,ctx,weather):
+    x=d.copy()
+    x["R1 Tee"]="—"; x["R2 Tee"]="—"; x["Wave"]="TBD"; x["Weather"]="⚪ TBD"; x["Weather Edge"]=0.0
+    for i,row in x.iterrows():
+        rec=ctx.get("tee_times",{}).get(_norm_name(row["Name"]),{})
+        parsed=[]
+        for rnd in [1,2]:
+            raw=rec.get(rnd)
+            if not raw: continue
+            try:
+                dt=pd.to_datetime(raw)
+                if getattr(dt,"tzinfo",None) is not None: dt=dt.tz_convert(None)
+                x.at[i,f"R{rnd} Tee"]=dt.strftime("%-I:%M %p") if hasattr(dt,"strftime") else str(raw)
+                parsed.append((rnd,dt))
+            except Exception: pass
+        if parsed:
+            hr=parsed[0][1].hour
+            x.at[i,"Wave"]="AM" if hr<12 else "PM"
+            sevs=[]
+            for _,dt in parsed:
+                if not weather.empty:
+                    mask=(weather["time"]>=dt.floor("h")) & (weather["time"]<=dt+pd.Timedelta(hours=5))
+                    if mask.any(): sevs.extend([weather_severity(r) for _,r in weather.loc[mask].iterrows()])
+            if sevs:
+                sev=float(np.mean(sevs))
+                x.at[i,"Weather"]=f"{weather_dot(sev)} {sev:.1f}"
+                # Positive edge = easier than field average; populated relative to all players below.
+                x.at[i,"Weather Edge"]=-sev
+    vals=x.loc[x["Weather Edge"]!=0,"Weather Edge"]
+    if len(vals):
+        baseline=float(vals.mean())
+        x.loc[x["Weather Edge"]!=0,"Weather Edge"]=(x.loc[x["Weather Edge"]!=0,"Weather Edge"]-baseline)*0.22
+    return x
+
 def generate_candidates(d,n,min_salary,seed,locked_ids,excluded_ids):
     rng=np.random.default_rng(seed)
     ids=d["ID"].astype(int).to_numpy()
@@ -74,6 +211,9 @@ def generate_candidates(d,n,min_salary,seed,locked_ids,excluded_ids):
 def simulate_golfers(d,n_sims,seed):
     rng=np.random.default_rng(seed+991)
     mu=base_projection(d)
+    # Tee-time weather edge is deliberately modest and uncertain rather than treated as certain points.
+    edge=pd.to_numeric(d.get("Weather Edge",pd.Series(np.zeros(len(d)))),errors="coerce").fillna(0).to_numpy(float)
+    mu=mu+edge
     salary=d["Salary"].to_numpy(float)
     # salary/form-informed cut probability; missed cuts score much lower
     strength=.55*(mu-mu.mean())/(mu.std()+1e-9)+.45*(salary-salary.mean())/(salary.std()+1e-9)
@@ -204,12 +344,32 @@ except Exception as e:
 event=str(golfers["Game Info"].iloc[0]) if "Game Info" in golfers.columns and len(golfers) else "PGA"
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
 
+ctx=fetch_pga_context(event)
+lat,lon=ctx.get("lat"),ctx.get("lon")
+if lat is None or lon is None:
+    lat,lon=geocode_location(ctx.get("location",""))
+weather=fetch_hourly_weather(lat,lon)
+golfers=attach_tee_weather(golfers,ctx,weather)
+
+course_label=ctx.get("course") or ctx.get("location") or "Course locating automatically"
+tee_ready=bool(ctx.get("tee_times"))
+wcols=st.columns([2,2,2])
+wcols[0].info(f"📍 {course_label}" + (f" · {ctx.get('location')}" if ctx.get("location") else ""))
+wcols[1].info(("✅ " if tee_ready else "⏳ ") + ctx.get("status","Tee times not released"))
+if tee_ready and (golfers["Weather Edge"]!=0).any():
+    am=golfers.loc[golfers["Wave"]=="AM","Weather Edge"].mean(); pm=golfers.loc[golfers["Wave"]=="PM","Weather Edge"].mean()
+    leader="AM" if am>pm else "PM"; gap=abs(float(am-pm))
+    dot="🟢" if gap<.5 else ("🟡" if gap<1.25 else ("🟠" if gap<2.25 else "🔴"))
+    wcols[2].info(f"{dot} Wave edge: {leader} +{gap:.2f} sim pts")
+else:
+    wcols[2].info("⚪ Weather/wave edge activates when tee times are published")
+
 m1,m2,m3,m4=st.columns(4)
 m1.metric("Golfers",len(golfers)); m2.metric("Roster","6 G"); m3.metric("Salary Cap","$50,000"); m4.metric("Event",event)
 
 st.subheader("🏌️ Golfer Pool")
 st.caption("Include/exclude golfers, lock golfers into every candidate lineup, and optionally boost or limit portfolio exposure.")
-editor=golfers[["ID","Name","Salary","AvgPointsPerGame"]].copy()
+editor=golfers[["ID","Name","Salary","AvgPointsPerGame","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
 # Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
 editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
 editor.insert(0,"In",True); editor.insert(1,"Lock",False); editor["Boost %"]=0; editor["Min %"]=0; editor["Max %"]=100
@@ -231,13 +391,14 @@ if "pga_pool_bulk_in" in st.session_state:
     editor["In"] = bool(st.session_state.pop("pga_pool_bulk_in"))
 
 edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430,
-    disabled=["ID","Name","Salary","AvgPointsPerGame"],
+    disabled=["ID","Name","Salary","AvgPointsPerGame","pOwn%","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
     column_config={
       "In":st.column_config.CheckboxColumn("In"),
       "Lock":st.column_config.CheckboxColumn("🔒 Lock"),
       "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
       "AvgPointsPerGame":st.column_config.NumberColumn("DK FPPG",format="%.1f"),
-      "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%",disabled=True),
+      "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
+      "Weather Edge":st.column_config.NumberColumn("Wx Edge",format="%+.2f"),
       "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),
       "Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=5),
       "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=5),
@@ -254,6 +415,22 @@ with st.sidebar:
                        help="Maximum share of portfolio lineups that may contain the same 2-golfer combination.")
     max_triple=st.slider("Max 3-golfer combo exposure",5,100,20,5,key="pga_max_triple",
                          help="Maximum share of portfolio lineups that may contain the same 3-golfer combination.")
+    st.markdown("### 🌦️ Wave Construction")
+    st.caption("Set the exact mix of Thursday AM/PM golfer counts. Must total 100%. Ignored until tee times load.")
+    wave_mix={}
+    wc1,wc2=st.columns(2)
+    with wc1:
+        wave_mix[6]=st.number_input("6 AM / 0 PM %",0,100,0,5,key="wave60")
+        wave_mix[5]=st.number_input("5 AM / 1 PM %",0,100,20,5,key="wave51")
+        wave_mix[4]=st.number_input("4 AM / 2 PM %",0,100,40,5,key="wave42")
+        wave_mix[3]=st.number_input("3 AM / 3 PM %",0,100,20,5,key="wave33")
+    with wc2:
+        wave_mix[2]=st.number_input("2 AM / 4 PM %",0,100,20,5,key="wave24")
+        wave_mix[1]=st.number_input("1 AM / 5 PM %",0,100,0,5,key="wave15")
+        wave_mix[0]=st.number_input("0 AM / 6 PM %",0,100,0,5,key="wave06")
+    wave_total=sum(wave_mix.values())
+    if wave_total==100: st.success("Wave mix: 100%")
+    else: st.warning(f"Wave mix totals {wave_total}% — set to 100% before running once tee times are live.")
     field_size=st.number_input("Contest field size",2,1000000,2378,1,key="pga_field")
     entry_fee=st.number_input("Entry fee ($)",0.0,10000.0,3.0,1.0,key="pga_fee")
     first_prize=st.number_input("1st prize ($)",0.0,10000000.0,600.0,100.0,key="pga_first")
@@ -288,6 +465,16 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
         personal_max=dict(zip(edited["ID"].astype(int),edited["Max %"].astype(float)))
         pair_cap=max(1,int(np.floor(target*float(max_pair)/100+1e-9)))
         triple_cap=max(1,int(np.floor(target*float(max_triple)/100+1e-9)))
+        waves=golfers["Wave"].astype(str).to_numpy()
+        wave_active=tee_ready and set(waves).intersection({"AM","PM"})=={"AM","PM"} and wave_total==100
+        wave_targets={}
+        if wave_active:
+            raw_targets={k:target*float(v)/100 for k,v in wave_mix.items()}
+            wave_targets={k:int(np.floor(v)) for k,v in raw_targets.items()}
+            remain=target-sum(wave_targets.values())
+            for k in sorted(raw_targets,key=lambda z:raw_targets[z]-wave_targets[z],reverse=True)[:remain]:
+                wave_targets[k]+=1
+        wave_used={k:0 for k in range(7)}
         for _,r in results.iterrows():
             c=cands[int(r["_candidate"])]
             ids=sorted(int(golfers.iloc[i]["ID"]) for i in c["idx"])
@@ -302,8 +489,12 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
                 ok=False
             if ok and any(triple_counts.get(combo,0)+1 > triple_cap for combo in triples):
                 ok=False
+            am_count=sum(1 for idx in c["idx"] if waves[idx]=="AM")
+            if ok and wave_active and wave_used.get(am_count,0)>=wave_targets.get(am_count,0):
+                ok=False
             if ok:
                 selected.append(r)
+                if wave_active: wave_used[am_count]=wave_used.get(am_count,0)+1
                 for pid in ids: counts[pid]=counts.get(pid,0)+1
                 for combo in pairs: pair_counts[combo]=pair_counts.get(combo,0)+1
                 for combo in triples: triple_counts[combo]=triple_counts.get(combo,0)+1
@@ -325,6 +516,16 @@ if "pga_results" in st.session_state:
                      "Win %":r["Win %"],"Top 1% %":r["Top 1% %"],"Cash %":r["Cash %"],"Est. ROI %":r["Est. ROI %"],
                      "Est. Duplicates":r["Est. Duplicates"],"Own Sum %":r["Ownership Sum"],"NUKE Score":round(float(r["NUKE Score"]),3)})
     st.dataframe(pd.DataFrame(show),hide_index=True,use_container_width=True,height=430)
+    if tee_ready and len(portfolio):
+        wave_rows=[]
+        for am_n in range(6,-1,-1):
+            ct=0
+            for _,rr in portfolio.iterrows():
+                cc=cands[int(rr["_candidate"])]
+                if sum(1 for ix in cc["idx"] if str(golfers.iloc[ix]["Wave"])=="AM")==am_n: ct+=1
+            wave_rows.append({"Construction":f"{am_n} AM / {6-am_n} PM","Lineups":ct,"Portfolio %":round(ct/len(portfolio)*100,1)})
+        st.markdown("#### 🌦️ Portfolio Wave Construction")
+        st.dataframe(pd.DataFrame(wave_rows),hide_index=True,use_container_width=True)
     st.download_button("DOWNLOAD PGA PORTFOLIO + STATS CSV",export_csv(portfolio,cands,golfers),
                        file_name="nuke_pga_portfolio.csv",mime="text/csv",type="primary",use_container_width=True)
 

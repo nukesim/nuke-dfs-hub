@@ -372,6 +372,9 @@ st.caption("Include/exclude golfers, lock golfers into every candidate lineup, a
 editor=golfers[["ID","Name","Salary","AvgPointsPerGame","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
 # Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
 editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
+# Keep projected ownership directly beside the golfer name for quick scanning.
+pown = editor.pop("pOwn%")
+editor.insert(editor.columns.get_loc("Name") + 1, "pOwn%", pown)
 editor.insert(0,"In",True); editor.insert(1,"Lock",False); editor["Boost %"]=0; editor["Min %"]=0; editor["Max %"]=100
 
 # Fast bulk controls for the PGA player pool.

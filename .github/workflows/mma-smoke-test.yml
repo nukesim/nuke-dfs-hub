@@ -1,0 +1,34 @@
+name: MMA Sim smoke test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pages/17_MMA_SIM.py"
+      - "nuke_nav.py"
+      - "data/mma_current.csv"
+      - ".github/workflows/mma-smoke-test.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile MMA page
+        run: python -m py_compile pages/17_MMA_SIM.py nuke_nav.py
+      - name: Validate bundled MMA slate
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          p="data/mma_current.csv"
+          d=pd.read_csv(p)
+          req={"Name","ID","Salary","Game Info","AvgPointsPerGame"}
+          assert req.issubset(d.columns), d.columns
+          assert len(d)>=12, len(d)
+          assert d["Game Info"].nunique()>=6
+          print(f"{len(d)} fighters / {d['Game Info'].nunique()} fights")
+          PY

@@ -6,6 +6,7 @@ import re
 import csv
 import io
 import itertools
+import time
 from pathlib import Path
 from datetime import datetime
 from html.parser import HTMLParser
@@ -184,6 +185,8 @@ def enrich_context(d):
                 pass
     goalies=x.loc[x["Pos"]=="G","Name"].astype(str).tolist()
     gs=fetch_goalie_status(_slate_date(x),goalies) if goalies else {}
+    x.loc[x["Pos"]=="G","Line"]="—"
+    x.loc[x["Pos"]=="G","PP"]="—"
     x["G Status"]="-"
     # DraftKings sometimes includes a Starting flag in the salary CSV. Use it first,
     # then let the live goalie feed overwrite it when a more explicit status is available.
@@ -272,7 +275,8 @@ def build_group_cache(d):
         tmp["_rank"]=base_projection(tmp)+np.where(tmp["PP"].eq("PP1"),3.2,0)+np.where(tmp["Line"].isin(["F1","F2"]),2.2,0)
         pool=tmp.sort_values("_rank",ascending=False).head(13)
         idxs=pool.index.tolist()
-        known_roles=bool(((pool["Line"]!="?") | (pool["PP"].isin(["PP1","PP2"]))).any())
+        role_coverage=float(((pool["Line"]!="?") | (pool["PP"].isin(["PP1","PP2"]))).mean()) if len(pool) else 0.0
+        known_roles=role_coverage>=0.60
         for size in [1,2,3,4,5]:
             strict=[]; fallback=[]
             for combo in itertools.combinations(idxs,size):
@@ -366,13 +370,21 @@ def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_s
     own=ownership_estimate(active)
     posmap={idx:k for k,idx in enumerate(active.index)}
     seen=set(); out=[]; attempts=0
-    # The old pandas-heavy generator could spend several minutes chasing 5,000 candidates.
-    # This fast loop can try far more combinations cheaply, but stops if the legal universe is exhausted.
-    max_attempts=max(40000,n*35)
-    stale=0
+    # Candidate count is a target, not a reason to hang the app. A strong 20-lineup
+    # portfolio does not need the generator to chase the final few rare combinations forever.
+    max_attempts=max(25000,n*12)
+    min_viable=min(n,max(1000,n//3))
+    started=time.monotonic()
+    soft_seconds=12.0
+    hard_seconds=22.0
 
     while len(out)<n and attempts<max_attempts:
-        attempts+=1; stale+=1
+        attempts+=1
+        elapsed=time.monotonic()-started
+        if elapsed>=hard_seconds and len(out)>=500:
+            break
+        if elapsed>=soft_seconds and len(out)>=min_viable:
+            break
         shape=str(rng.choice(shapes,p=sw))
         counts=_shape_counts(shape)
         chosen=list(rng.choice(teams,size=len(counts),replace=False,p=tw))
@@ -415,7 +427,7 @@ def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_s
         if key in seen:
             continue
 
-        seen.add(key); stale=0
+        seen.add(key)
         own_idx=[posmap[i] for i in sk_idx+[gm["idx"]]]
         out.append({
             "idx":sk_idx+[gm["idx"]],
@@ -425,8 +437,6 @@ def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_s
             "own_product":float(np.prod(np.clip(own[own_idx]/100,.002,.95))),
         })
 
-        if stale>25000 and len(out)>=max(500,min(n,1500)):
-            break
 
     return out
 
@@ -609,8 +619,10 @@ line_cov=float((players.loc[players["Pos"]!="G","Line"]!="?").mean()*100) if (pl
 goalie_cov=float(players.loc[players["Pos"]=="G","G Status"].str.lower().isin(["confirmed","likely","probable","projected","unconfirmed"]).mean()*100) if (players["Pos"]=="G").any() else 0
 
 m1,m2,m3,m4=st.columns(4)
-m1.metric("Players",len(players)); m2.metric("Teams",players["Team"].nunique()); m3.metric("Line Match",f"{line_cov:.0f}%"); m4.metric("Salary Cap","$50,000")
-st.caption(f"Slate date detected: {_slate_date(players)} · Role data: Daily Faceoff best-effort live match")
+m1.metric("Players",len(players)); m2.metric("Teams",players["Team"].nunique()); m3.metric("Skater Line Match",f"{line_cov:.0f}%"); m4.metric("Salary Cap","$50,000")
+st.caption(f"Slate date detected: {_slate_date(players)} · Role data: Daily Faceoff best-effort live match · Goalies intentionally show — under Line/PP.")
+if line_cov < 60:
+    st.warning("⚠️ Line-combination coverage is currently low. NUKE will automatically fall back to team/PP correlation instead of waiting on missing line data.")
 
 with st.expander("🧠 How NUKE is constructing NHL GPP lineups", expanded=False):
     st.markdown("""
@@ -697,7 +709,7 @@ if st.button("☢️ RUN NHL GPP SIM",type="primary",use_container_width=True):
         if not cands:
             run_status.update(label="No legal candidates generated",state="error")
             st.error("No legal NHL lineups were generated. Loosen the pool/exposure rules or lower the minimum salary."); st.stop()
-        st.write(f"✅ Generated {len(cands):,} legal candidates. Simulating {int(universes):,} slate outcomes...")
+        st.write(f"✅ Generated {len(cands):,} legal candidates (target {int(candidates_n):,}). Simulating {int(universes):,} slate outcomes...")
         sims=simulate_players(run_players,int(universes),seed)
         own=ownership_estimate(run_players)
         st.write("Scoring ceiling, leverage and tournament outcomes...")

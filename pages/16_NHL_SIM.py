@@ -9,6 +9,7 @@ import itertools
 import time
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from nuke_nav import render_nav
@@ -21,6 +22,7 @@ ROSTER = 9
 SKATERS = 8
 DEFAULT_MIN_SALARY = 49600
 DEFAULT = Path(__file__).resolve().parents[1] / "data" / "nhl_current.csv"
+AUTO_REFRESH_SECONDS = 600  # line / PP / goalie data re-checks every 10 minutes
 
 TEAM_SLUGS = {
     "ANA":"anaheim-ducks","BOS":"boston-bruins","BUF":"buffalo-sabres","CGY":"calgary-flames",
@@ -107,7 +109,7 @@ def load_csv(src):
     return d
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _fetch_text(url):
+def _fetch_text(url, refresh_token=0):
     try:
         r=requests.get(url,timeout=9,headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"})
         if r.ok: return _html_text(r.text)
@@ -131,10 +133,10 @@ def _find_order(section, names):
     return [name for _,name in sorted(hits)]
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_team_roles(team, names):
+def fetch_team_roles(team, names, refresh_token=0):
     slug=TEAM_SLUGS.get(_norm_team(team))
     if not slug: return {}
-    txt=_fetch_text(f"https://www.dailyfaceoff.com/teams/{slug}/line-combinations")
+    txt=_fetch_text(f"https://www.dailyfaceoff.com/teams/{slug}/line-combinations",refresh_token)
     if not txt: return {}
     names=list(names)
     out={n:{"Line":"?","PP":"-"} for n in names}
@@ -152,8 +154,8 @@ def fetch_team_roles(team, names):
     return out
 
 @st.cache_data(ttl=600, show_spinner=False)
-def fetch_goalie_status(date_str, goalie_names):
-    txt=_fetch_text(f"https://www.dailyfaceoff.com/starting-goalies/{date_str}")
+def fetch_goalie_status(date_str, goalie_names, refresh_token=0):
+    txt=_fetch_text(f"https://www.dailyfaceoff.com/starting-goalies/{date_str}",refresh_token)
     out={n:"Unknown" for n in goalie_names}
     low=txt.lower()
     for n in goalie_names:
@@ -164,14 +166,14 @@ def fetch_goalie_status(date_str, goalie_names):
         if m: out[n]=m.group(1).title()
     return out
 
-def enrich_context(d):
+def enrich_context(d, refresh_token=0):
     x=d.copy()
     x["Line"]="?"
     x["PP"]="-"
     teams=sorted(x.loc[x["Pos"]!="G","Team"].dropna().unique())
     def job(t):
         names=x.loc[(x["Team"]==t)&(x["Pos"]!="G"),"Name"].astype(str).tolist()
-        return t,fetch_team_roles(t,names)
+        return t,fetch_team_roles(t,names,refresh_token)
     with ThreadPoolExecutor(max_workers=min(8,max(1,len(teams)))) as ex:
         futs=[ex.submit(job,t) for t in teams]
         for f in as_completed(futs):
@@ -184,7 +186,7 @@ def enrich_context(d):
             except Exception:
                 pass
     goalies=x.loc[x["Pos"]=="G","Name"].astype(str).tolist()
-    gs=fetch_goalie_status(_slate_date(x),goalies) if goalies else {}
+    gs=fetch_goalie_status(_slate_date(x),goalies,refresh_token) if goalies else {}
     x.loc[x["Pos"]=="G","Line"]="—"
     x.loc[x["Pos"]=="G","PP"]="—"
     x["G Status"]="-"
@@ -607,11 +609,17 @@ except Exception as e:
 slate_games=sorted(golfers["Game Info"].astype(str).unique().tolist()) if "Game Info" in golfers.columns else []
 st.success(f"{source}: {_slate_date(golfers)} · {len(golfers)} active players · {golfers['Team'].nunique()} teams")
 
-if st.sidebar.button("🔄 Refresh NHL lines / goalies",use_container_width=True):
-    st.cache_data.clear(); st.rerun()
+refresh_nonce=int(st.session_state.get("nhl_refresh_nonce",0))
+auto_bucket=int(time.time()//AUTO_REFRESH_SECONDS)
+refresh_token=f"{auto_bucket}:{refresh_nonce}"
 
 with st.spinner("Matching current NHL lines, power-play units and goalie status..."):
-    players=enrich_context(golfers)
+    players=enrich_context(golfers,refresh_token)
+
+if st.session_state.get("nhl_context_token")!=refresh_token:
+    now=datetime.now(ZoneInfo("America/Chicago"))
+    st.session_state["nhl_context_token"]=refresh_token
+    st.session_state["nhl_context_updated_at"]=now.strftime("%b %d, %Y at %I:%M %p %Z").replace(" 0"," ")
 
 own=ownership_estimate(players)
 players["pOwn%"]=np.round(own,1)
@@ -620,6 +628,8 @@ goalie_cov=float(players.loc[players["Pos"]=="G","G Status"].str.lower().isin(["
 
 m1,m2,m3,m4=st.columns(4)
 m1.metric("Players",len(players)); m2.metric("Teams",players["Team"].nunique()); m3.metric("Skater Line Match",f"{line_cov:.0f}%"); m4.metric("Salary Cap","$50,000")
+last_refresh=st.session_state.get("nhl_context_updated_at","Just now")
+st.caption(f"🕒 Player pool last refreshed: **{last_refresh}** · Auto-checks every 10 minutes while the page is active.")
 st.caption(f"Slate date detected: {_slate_date(players)} · Role data: Daily Faceoff best-effort live match · Goalies intentionally show — under Line/PP.")
 if line_cov < 60:
     st.warning("⚠️ Line-combination coverage is currently low. NUKE will automatically fall back to team/PP correlation instead of waiting on missing line data.")
@@ -644,13 +654,29 @@ st.caption("Lines and PP roles matter in NHL GPPs because linemates and power-pl
 editor=players[["ID","Name","Pos","Team","Opp","Salary","pOwn%","FPPG","Line","PP","G Status"]].copy()
 editor.insert(0,"In",True); editor.insert(1,"Lock",False); editor["Boost %"]=0; editor["Min %"]=0; editor["Max %"]=100
 
-b1,b2,b3=st.columns([1,1,6])
+# Restore the user's pool choices after live role/goalie refreshes.
+prefs=st.session_state.get("nhl_pool_prefs",{})
+if prefs:
+    for i,row in editor.iterrows():
+        p=prefs.get(str(int(row["ID"])))
+        if not p: continue
+        for col in ["In","Lock","Boost %","Min %","Max %"]:
+            if col in p: editor.at[i,col]=p[col]
+
+b1,b2,b3=st.columns([1,1,2])
 with b1:
     if st.button("✅ ADD ALL",use_container_width=True,key="nhl_add_all"):
         st.session_state["nhl_bulk"]=True; st.session_state.pop("nhl_pool_editor",None); st.rerun()
 with b2:
     if st.button("🚫 REMOVE ALL",use_container_width=True,key="nhl_remove_all"):
         st.session_state["nhl_bulk"]=False; st.session_state.pop("nhl_pool_editor",None); st.rerun()
+with b3:
+    if st.button("🔄 REFRESH PLAYER POOL",use_container_width=True,key="nhl_refresh_pool",
+                 help="Force a fresh line / PP / goalie check without changing who you included, excluded, locked, boosted, or capped."):
+        st.session_state["nhl_refresh_nonce"]=int(st.session_state.get("nhl_refresh_nonce",0))+1
+        _fetch_text.clear(); fetch_team_roles.clear(); fetch_goalie_status.clear()
+        st.session_state.pop("nhl_pool_editor",None)
+        st.rerun()
 if "nhl_bulk" in st.session_state:
     editor["In"]=bool(st.session_state.pop("nhl_bulk"))
 
@@ -668,6 +694,17 @@ edited=st.data_editor(
         "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=5),
     },key="nhl_pool_editor"
 )
+
+st.session_state["nhl_pool_prefs"]={
+    str(int(row["ID"])):{
+        "In":bool(row["In"]),
+        "Lock":bool(row["Lock"]),
+        "Boost %":float(row["Boost %"]),
+        "Min %":float(row["Min %"]),
+        "Max %":float(row["Max %"]),
+    }
+    for _,row in edited.iterrows()
+}
 
 with st.sidebar:
     st.markdown("## 🏒 NHL SIM")

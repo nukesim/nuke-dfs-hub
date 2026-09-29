@@ -1,0 +1,20 @@
+name: NHL Sim smoke test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pages/16_NHL_SIM.py"
+      - "nuke_nav.py"
+      - ".github/workflows/nhl-smoke-test.yml"
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile NHL page
+        run: python -m py_compile pages/16_NHL_SIM.py nuke_nav.py

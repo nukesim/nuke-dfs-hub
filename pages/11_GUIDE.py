@@ -73,6 +73,16 @@ st.warning("NHL line combinations and starting goalies can change close to puck 
 st.page_link("pages/16_NHL_SIM.py",label="OPEN NHL SIM",icon="🏒",use_container_width=True)
 
 st.divider()
+st.markdown("### 🥊 MMA Sim — DraftKings Large-Field GPP")
+st.write("MMA Sim builds **6-fighter DraftKings Classic lineups under the $50,000 cap** and simulates the fight card as linked outcomes rather than treating every fighter independently.")
+st.markdown("**NUKE MMA workflow**")
+st.markdown("1. NUKE automatically loads the bundled weekly DraftKings MMA salary CSV.\n2. Review the fighter pool, estimated ownership, win probability, finish probability, DK FPPG and five-round designation.\n3. Include/exclude or lock fighters and set Boost %, Min %, or Max %.\n4. Set salary range, max exposure, minimum uniques, contest field size and simulation count.\n5. Run MMA GPP SIM.\n6. Review P95/P99, Optimal %, simulated Win %, Top 1% %, ownership and portfolio exposure.\n7. Download the DraftKings lineup CSV.")
+st.info("Large-field defaults intentionally differ from a cash-game optimizer: **no same-fight pairing**, a **$49,800 default maximum salary**, **40% max fighter exposure**, and portfolio diversification. The model rewards one or two leverage fighters without forcing an entire lineup of low-owned plays.")
+st.write("Historical perfect-lineup and GPP research supports leaving some salary unused, emphasizing finish/volume ceiling, treating five-round underdogs as meaningful tournament leverage when they win, and avoiding unnecessary same-fight pairing in tournaments.")
+st.warning("Win %, Finish %, pOwn% and simulation results are model estimates when live betting/projection feeds are unavailable. Salary and DraftKings FPPG are used as priors; these values are not sportsbook lines and do not guarantee outcomes.")
+st.page_link("pages/17_MMA_SIM.py",label="OPEN MMA SIM",icon="🥊",use_container_width=True)
+
+st.divider()
 st.markdown("### 💾 Save your work")
 st.write("Use **Save workspace** when you want to stop and continue later. Download the workspace JSON file to your computer. When you return, upload that file and choose **Restore/Load workspace**.")
 st.markdown("**Lineup Builder workspace:** restores your platform, player pool, QB plan, BUILD drafts, Saved Lineups portfolio, role adjustments, and related builder settings.\n\n**NUKE Sim workspace:** restores your SIM settings, player pool, Player Takes, portfolio controls, and completed simulation results saved in that workspace.\n\n**Showdown workspace:** restores the selected platform, player exclusions, player-level controls, simulation settings, construction preferences, and completed Showdown results for that game. DraftKings and FanDuel workspaces are kept platform-specific to prevent incompatible roster settings from being mixed.")

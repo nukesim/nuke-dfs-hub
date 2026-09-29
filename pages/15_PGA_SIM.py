@@ -104,6 +104,18 @@ def _bank_utah_2026_pairings():
             dt=pd.Timestamp(f"{day} {tm}",tz="America/New_York")
             for name in names.split("|"):
                 out.setdefault(_norm_name(name),{})[rnd]=dt.isoformat()
+
+    # DraftKings naming variants -> published pairing names.
+    aliases={
+        "Jordan L. Smith":"Jordan Smith",
+        "Kris Ventura":"Kristoffer Ventura",
+        "Zachary Bauchou":"Zach Bauchou",
+        "Cameron Davis":"Cam Davis",
+        "Zach J. Johnson":"Zach Johnson",
+    }
+    for dk_name,published_name in aliases.items():
+        src=out.get(_norm_name(published_name))
+        if src: out[_norm_name(dk_name)]=dict(src)
     return out
 
 @st.cache_data(ttl=1800, show_spinner=False)

@@ -5,10 +5,10 @@ st.set_page_config(page_title="NUKE DFS Guide", page_icon="❓", layout="wide")
 render_nav()
 
 st.title("❓ NUKE DFS GUIDE")
-st.caption("A quick guide to building, simulating, saving, and managing your NFL DFS lineups.")
+st.caption("A quick guide to building, simulating, saving, and managing your NFL, NHL, and PGA DFS lineups.")
 
 st.markdown("### What is NUKE?")
-st.write("NUKE is a free NFL DFS research, lineup-building, and simulation toolkit for DraftKings and FanDuel. Use the Lineup Builder when you want full manual control over your portfolio, NUKE Sim for full-slate tournament simulation, or NFL Showdown for single-game DraftKings and FanDuel contests.")
+st.write("NUKE is a free DFS research, lineup-building, and simulation toolkit. NFL includes a hand builder, full-slate sim, and Showdown sim; PGA and NHL have dedicated DraftKings tournament simulators.")
 
 c1,c2=st.columns(2,gap="large")
 with c1:
@@ -62,6 +62,15 @@ st.info("**FanDuel AnyFLEX Lock:** Use **Lock AnyFLEX** when you want a specific
 st.write("**Exclude** removes a player from candidate generation entirely, so that player cannot appear in any generated lineup. Use Exclude when you do not want the player in your portfolio at all. **Boost %** changes how strongly NUKE treats a player's baseline opportunity. **Min % / Max %** control portfolio exposure when the player remains eligible. **Max CPT/MVP exposure** limits how frequently a player can occupy the multiplier position. **Construction Mix** controls the desired team split across 5-1, 4-2, and 3-3 lineups. Salary controls can intentionally leave salary unused to create more differentiated constructions.")
 st.write("NUKE models multiple correlated game environments — including balanced games, shootouts, low-scoring outcomes, team-control scripts, passing spikes, rushing-control outcomes, and chaos — rather than assuming the game unfolds one way.")
 st.page_link("pages/13_SHOWDOWN_SIM.py",label="OPEN NFL SHOWDOWN",icon="⚡",use_container_width=True)
+
+st.divider()
+st.markdown("### 🏒 NHL Sim — DraftKings GPP")
+st.write("NHL Sim is built around correlated tournament construction rather than treating nine roster spots as independent plays. DraftKings Classic uses **2 C · 3 W · 2 D · 1 G · 1 UTIL** under a **$50,000 salary cap**.")
+st.markdown("**NUKE NHL workflow**")
+st.markdown("1. Upload the DraftKings NHL salary CSV for the slate.\n2. NUKE matches current forward lines, defensive pairings, power-play units, and starting-goalie status where available.\n3. Review the player pool and goalie confirmations.\n4. Set exposure, minimum uniqueness, and stack-construction mix.\n5. Run the GPP SIM.\n6. Review ceiling, simulated win/top-1% rates, player exposure, and stack mix.\n7. Download the full stats portfolio or DK lineup-only CSV.")
+st.info("The default portfolio emphasizes **4-3-1** and **3-3-2** correlated skater constructions. NUKE rewards same-line and power-play overlap, prefers goalie correlation with the primary stack, and blocks skaters against your own goalie by default.")
+st.warning("NHL line combinations and starting goalies can change close to puck drop. Use **Refresh NHL lines / goalies** before finalizing entries, especially on large slates.")
+st.page_link("pages/16_NHL_SIM.py",label="OPEN NHL SIM",icon="🏒",use_container_width=True)
 
 st.divider()
 st.markdown("### 💾 Save your work")

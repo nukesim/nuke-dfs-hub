@@ -3137,3 +3137,5 @@ with exptab:
 # NUKE deploy marker: MMA live data
 
 # NUKE deploy marker: PGA tee times
+
+# NUKE deploy marker: PGA published pairings

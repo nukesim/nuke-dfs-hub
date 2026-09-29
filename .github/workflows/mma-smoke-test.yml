@@ -23,12 +23,14 @@ jobs:
       - name: Validate bundled MMA slate
         run: |
           python - <<'PY'
-          import pandas as pd
+          import csv
           p="data/mma_current.csv"
-          d=pd.read_csv(p)
+          with open(p,newline="",encoding="utf-8-sig") as f:
+              rows=list(csv.DictReader(f))
           req={"Name","ID","Salary","Game Info","AvgPointsPerGame"}
-          assert req.issubset(d.columns), d.columns
-          assert len(d)>=12, len(d)
-          assert d["Game Info"].nunique()>=6
-          print(f"{len(d)} fighters / {d['Game Info'].nunique()} fights")
+          assert rows and req.issubset(rows[0]), rows[0].keys() if rows else "empty"
+          assert len(rows)>=12, len(rows)
+          fights={r["Game Info"] for r in rows}
+          assert len(fights)>=6, len(fights)
+          print(f"{len(rows)} fighters / {len(fights)} fights")
           PY

@@ -1,8 +1,13 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import itertools, re
+import itertools, re, time, html, unicodedata
+import requests
+from urllib.parse import quote_plus
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from nuke_nav import render_nav
 
 st.set_page_config(page_title="NUKE MMA Sim",page_icon="🥊",layout="wide")
@@ -33,20 +38,193 @@ def load_csv(src):
     d["Rounds"]=np.where(d["_start"].eq(d["_start"].max()),5,3)
     return d
 
+
+def _norm_name(x):
+    x=unicodedata.normalize("NFKD",str(x)).encode("ascii","ignore").decode()
+    return re.sub(r"[^a-z0-9]","",x.lower())
+
+def _slug_name(x):
+    x=unicodedata.normalize("NFKD",str(x)).encode("ascii","ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+","-",x).strip("-")
+
+def _strip_html(x):
+    x=re.sub(r"(?is)<script.*?</script>|<style.*?</style>"," ",x)
+    x=re.sub(r"(?s)<[^>]+>"," ",x)
+    return re.sub(r"\s+"," ",html.unescape(x)).strip()
+
+def _american_prob(odds):
+    try: o=float(odds)
+    except Exception: return np.nan
+    if o<0: return (-o)/((-o)+100.0)
+    if o>0: return 100.0/(o+100.0)
+    return np.nan
+
+@st.cache_data(ttl=900,show_spinner=False)
+def fetch_fight_market(name_a,name_b,refresh_token=0):
+    """Best-effort DK moneyline from UFCalendar, falling back to its multi-book consensus."""
+    headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"}
+    orders=[(name_a,name_b),(name_b,name_a)]
+    for a,b in orders:
+        url=f"https://www.ufcalendar.com/fights/{_slug_name(a)}-vs-{_slug_name(b)}"
+        try:
+            r=requests.get(url,timeout=7,headers=headers)
+            if not r.ok: continue
+            txt=_strip_html(r.text)
+            low=txt.lower()
+            if _norm_name(a) not in _norm_name(txt) or _norm_name(b) not in _norm_name(txt): continue
+
+            # Prefer the DraftKings row from the line-movement table.
+            pos=low.find("draftkings")
+            source="DraftKings"
+            odds=[]
+            if pos>=0:
+                window=txt[pos:pos+260]
+                odds=re.findall(r"(?<!\d)([+-]\d{3,4})(?!\d)",window)
+            # If DK is not present/parsable, use the page's displayed consensus lines.
+            if len(odds)<2:
+                source="Consensus"
+                p=low.find("betting odds")
+                window=txt[p:p+1200] if p>=0 else txt[:1600]
+                odds=re.findall(r"(?<!\d)([+-]\d{3,4})(?!\d)",window)
+            if len(odds)<2: continue
+
+            o1,o2=int(odds[0]),int(odds[1])
+            p1,p2=_american_prob(o1),_american_prob(o2)
+            if not np.isfinite(p1) or not np.isfinite(p2) or not (.80<=p1+p2<=1.35): continue
+            fair1=p1/(p1+p2); fair2=p2/(p1+p2)
+            return {
+                _norm_name(a):{"Moneyline":o1,"Market Win %":fair1*100,"Odds Source":source},
+                _norm_name(b):{"Moneyline":o2,"Market Win %":fair2*100,"Odds Source":source},
+            }
+        except Exception:
+            continue
+    return {}
+
+@st.cache_data(ttl=21600,show_spinner=False)
+def fetch_ufcstats(name,refresh_token=0):
+    """Pull career striking/grappling rates from UFCStats. Missing/debut fighters safely fall back."""
+    headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"}
+    detail_url=None
+    try:
+        q=quote_plus(str(name))
+        urls=[
+            f"http://ufcstats.com/statistics/fighters/search?query={q}",
+            f"http://ufcstats.com/statistics/fighters?char={_slug_name(name)[:1]}&page=all",
+        ]
+        for url in urls:
+            r=requests.get(url,timeout=7,headers=headers)
+            if not r.ok: continue
+            links=re.findall(r'href=["\'](https?://ufcstats\.com/fighter-details/[a-zA-Z0-9]+)["\'][^>]*>(.*?)</a>',r.text,re.I|re.S)
+            exact=[]
+            for href,label in links:
+                label_txt=_strip_html(label)
+                if label_txt and _norm_name(label_txt) in _norm_name(name):
+                    exact.append(href)
+            if exact:
+                detail_url=exact[0]; break
+            # Search-page rows sometimes split first/last names into separate anchors to the same URL.
+            for href,_ in links:
+                ix=r.text.find(href)
+                row=_strip_html(r.text[max(0,ix-500):ix+900])
+                if _norm_name(name) in _norm_name(row):
+                    detail_url=href; break
+            if detail_url: break
+        if not detail_url: return {}
+
+        d=requests.get(detail_url,timeout=7,headers=headers)
+        if not d.ok: return {}
+        txt=_strip_html(d.text)
+        def grab(label):
+            m=re.search(re.escape(label)+r"\s*([0-9.]+)%?",txt,re.I)
+            return float(m.group(1)) if m else np.nan
+        return {
+            "SLpM":grab("SLpM:"),
+            "SApM":grab("SApM:"),
+            "TD Avg":grab("TD Avg.:"),
+            "TD Acc %":grab("TD Acc.:"),
+            "TD Def %":grab("TD Def.:"),
+            "Sub Avg":grab("Sub. Avg.:"),
+            "Stats Source":"UFCStats",
+        }
+    except Exception:
+        return {}
+
+def enrich_live_context(d,refresh_token=0):
+    x=d.copy()
+    # Moneylines: one request per fight, in parallel.
+    market={}
+    fights=[]
+    for _,g in x.groupby("Fight"):
+        if len(g)==2:
+            fights.append((str(g.iloc[0]["Name"]),str(g.iloc[1]["Name"])))
+    with ThreadPoolExecutor(max_workers=min(8,max(1,len(fights)))) as ex:
+        futs=[ex.submit(fetch_fight_market,a,b,refresh_token) for a,b in fights]
+        for f in as_completed(futs):
+            try: market.update(f.result() or {})
+            except Exception: pass
+
+    stats={}
+    names=x["Name"].astype(str).tolist()
+    with ThreadPoolExecutor(max_workers=min(10,max(1,len(names)))) as ex:
+        futs={ex.submit(fetch_ufcstats,n,refresh_token):n for n in names}
+        for f in as_completed(futs):
+            n=futs[f]
+            try: stats[_norm_name(n)]=f.result() or {}
+            except Exception: stats[_norm_name(n)]={}
+
+    for col,default in [
+        ("Moneyline",np.nan),("Market Win %",np.nan),("Odds Source","Fallback"),
+        ("SLpM",np.nan),("SApM",np.nan),("TD Avg",np.nan),("TD Acc %",np.nan),
+        ("TD Def %",np.nan),("Sub Avg",np.nan),("Stats Source","Fallback")
+    ]: x[col]=default
+
+    for i,row in x.iterrows():
+        k=_norm_name(row["Name"])
+        for col,val in market.get(k,{}).items(): x.at[i,col]=val
+        for col,val in stats.get(k,{}).items(): x.at[i,col]=val
+    return x
+
 def model(d):
     sal=d["Salary"].to_numpy(float); fppg=d["FPPG"].to_numpy(float)
-    win=np.full(len(d),.5)
+
+    # Salary-implied prior, then market moneyline if available.
+    win=np.full(len(d),.5,dtype=float)
     for _,idxs in d.groupby("Fight").groups.items():
         z=list(idxs)
         if len(z)==2:
-            a,b=z; pa=1/(1+np.exp(-(float(d.loc[a,"Salary"])-float(d.loc[b,"Salary"]))/1850))
+            a,b=z
+            pa=1/(1+np.exp(-(float(d.loc[a,"Salary"])-float(d.loc[b,"Salary"]))/1850))
             win[a]=pa; win[b]=1-pa
-    strength=np.clip((sal-6500)/3200,0,1)
-    finish=np.clip(.32+.20*strength+.10*np.abs(win-.5)*2+.06*(d["Rounds"].to_numpy()==5),.25,.72)
-    proj=win*(82+42*finish+8*(d["Rounds"].to_numpy()==5))+(1-win)*(34+9*(d["Rounds"].to_numpy()==5))
-    proj=np.where(fppg>0,.72*proj+.28*fppg,proj)
-    z=.50*(sal-sal.mean())/(sal.std()+1e-9)+.35*(proj-proj.mean())/(proj.std()+1e-9)+.15*(win-win.mean())/(win.std()+1e-9)
-    raw=np.exp(np.clip(.68*z,-2,2)); own=raw/raw.sum()*600
+            ma=float(d.loc[a,"Market Win %"]) if pd.notna(d.loc[a,"Market Win %"]) else np.nan
+            mb=float(d.loc[b,"Market Win %"]) if pd.notna(d.loc[b,"Market Win %"]) else np.nan
+            if np.isfinite(ma) and np.isfinite(mb) and ma>0 and mb>0:
+                total=ma+mb; win[a]=(ma/total); win[b]=(mb/total)
+
+    # UFCStats adds style/volume context. Missing stats stay neutral.
+    def zfill(col):
+        a=pd.to_numeric(d.get(col,pd.Series(np.nan,index=d.index)),errors="coerce").to_numpy(float)
+        med=np.nanmedian(a) if np.isfinite(a).any() else 0.0
+        a=np.where(np.isfinite(a),a,med)
+        sd=np.nanstd(a)
+        return (a-np.nanmean(a))/(sd+1e-9)
+
+    z_slpm=zfill("SLpM"); z_sapm=zfill("SApM"); z_td=zfill("TD Avg"); z_sub=zfill("Sub Avg"); z_tddef=zfill("TD Def %")
+    pressure=.48*z_slpm+.32*z_td+.20*z_sub
+    defense=.55*z_tddef-.45*z_sapm
+    five=(d["Rounds"].to_numpy()==5)
+
+    # Finish probability is a ceiling prior, not a sportsbook prop.
+    favorite=np.abs(win-.5)*2
+    finish=np.clip(.34+.15*favorite+.065*pressure-.025*defense+.055*five,.22,.78)
+
+    # Projection blends DK FPPG with market win probability and style scoring opportunity.
+    style_pts=4.5*z_slpm+4.0*z_td+2.2*z_sub
+    market_proj=win*(82+43*finish+9*five)+(1-win)*(33+8*five)+style_pts
+    proj=np.where(fppg>0,.58*market_proj+.42*fppg,market_proj)
+
+    # Ownership estimate uses salary + projection + market strength, then normalizes to 600%.
+    z=.43*(sal-sal.mean())/(sal.std()+1e-9)+.35*(proj-proj.mean())/(proj.std()+1e-9)+.22*(win-win.mean())/(win.std()+1e-9)
+    raw=np.exp(np.clip(.72*z,-2.4,2.4)); own=raw/raw.sum()*600
     return win,finish,proj,own
 
 def simulate_card(d,n,seed):
@@ -66,11 +244,18 @@ def simulate_card(d,n,seed):
             fr=np.zeros(len(rows),dtype=int)
             if fin.any(): fr[fin]=rng.choice(np.arange(1,len(probs)+1),size=int(fin.sum()),p=probs)
             wh=float(d.loc[w,"FPPG"]); lh=float(d.loc[l,"FPPG"])
-            wadj=float(np.clip((wh-75)*.18 if wh>0 else 0,-10,12))
-            ladj=float(np.clip((lh-70)*.08 if lh>0 else 0,-6,7))
+            wadj=float(np.clip((wh-75)*.12 if wh>0 else 0,-7,9))
+            ladj=float(np.clip((lh-70)*.06 if lh>0 else 0,-4,5))
+            wstyle=0.0; lstyle=0.0
+            for col,wt in [("SLpM",2.0),("TD Avg",2.6),("Sub Avg",1.8)]:
+                vals=pd.to_numeric(d[col],errors="coerce") if col in d.columns else pd.Series(np.nan,index=d.index)
+                med=float(vals.median()) if vals.notna().any() else 0.0
+                sd=float(vals.std()) if vals.notna().any() else 1.0
+                wstyle+=wt*((float(d.loc[w,col]) if pd.notna(d.loc[w,col]) else med)-med)/(sd+1e-9)
+                lstyle+=wt*((float(d.loc[l,col]) if pd.notna(d.loc[l,col]) else med)-med)/(sd+1e-9)
             bonus=np.array([119,104,92,86,82],float)
-            wbase=np.where(fin,bonus[np.maximum(fr-1,0)],96 if is5 else 78)+wadj
-            lbase=np.where(fin,10+fr*12,66 if is5 else 48)+ladj
+            wbase=np.where(fin,bonus[np.maximum(fr-1,0)],96 if is5 else 78)+wadj+wstyle
+            lbase=np.where(fin,10+fr*12,66 if is5 else 48)+ladj+lstyle
             scores[rows,w]=np.clip(wbase+rng.normal(0,10,len(rows)),0,170)
             scores[rows,l]=np.clip(lbase+rng.normal(0,10,len(rows)),0,110)
     return scores
@@ -173,13 +358,37 @@ try:
 except Exception as e:
     st.error(str(e)); st.stop()
 
-winp,finishp,proj,pown=model(fighters)
-fighters["Win %"]=np.round(winp*100,1); fighters["Finish %"]=np.round(finishp*100,1)
-fighters["Projection"]=np.round(proj,1); fighters["pOwn%"]=np.round(pown,1)
 event_date=""
 m=re.search(r"(\d{1,2}/\d{1,2}/\d{4})",str(fighters["Game Info"].iloc[0])) if len(fighters) else None
 if m: event_date=m.group(1)
+refresh_nonce=int(st.session_state.get("mma_live_refresh_nonce",0))
+refresh_token=f"{int(time.time()//900)}:{refresh_nonce}"
+with st.spinner("Pulling current MMA moneylines and UFCStats style data..."):
+    fighters=enrich_live_context(fighters,refresh_token)
+
+if st.session_state.get("mma_live_context_token")!=refresh_token:
+    now=datetime.now(ZoneInfo("America/Chicago"))
+    st.session_state["mma_live_context_token"]=refresh_token
+    st.session_state["mma_live_updated_at"]=now.strftime("%b %d, %Y at %I:%M %p %Z").replace(" 0"," ")
+
+winp,finishp,proj,pown=model(fighters)
+fighters["Win %"]=np.round(winp*100,1); fighters["Finish %"]=np.round(finishp*100,1)
+fighters["Projection"]=np.round(proj,1); fighters["pOwn%"]=np.round(pown,1)
+
 st.success(f"{source}: {event_date or 'current card'} · {len(fighters)} fighters · {fighters['Fight'].nunique()} fights")
+odds_cov=int(fighters["Market Win %"].notna().sum())
+stats_cov=int(fighters["SLpM"].notna().sum())
+last_live=st.session_state.get("mma_live_updated_at","Just now")
+c1,c2,c3=st.columns([1,1,2])
+c1.metric("Live odds",f"{odds_cov}/{len(fighters)}")
+c2.metric("UFCStats",f"{stats_cov}/{len(fighters)}")
+c3.caption(f"🕒 Live data last refreshed: **{last_live}** · auto-checks every 15 minutes while active.")
+if odds_cov<len(fighters):
+    st.caption("Missing odds safely fall back to DraftKings salary-implied win probability. Missing UFCStats stay neutral in the style model.")
+if st.button("🔄 REFRESH LIVE MMA DATA",use_container_width=True,key="mma_refresh_live"):
+    st.session_state["mma_live_refresh_nonce"]=refresh_nonce+1
+    fetch_fight_market.clear(); fetch_ufcstats.clear()
+    st.rerun()
 
 m1,m2,m3,m4=st.columns(4)
 m1.metric("Fighters",len(fighters)); m2.metric("Fights",fighters["Fight"].nunique()); m3.metric("Roster","6 F"); m4.metric("Salary Cap","$50,000")
@@ -191,12 +400,14 @@ with st.expander("🧠 Large-field GPP construction baked into NUKE",expanded=Fa
 - The final scheduled fight is automatically treated as five rounds, adding ceiling to both sides.
 - Salary is not forced to $50K. Historical perfect lineups often leave salary unused; NUKE defaults to a $49,800 maximum.
 - One or two leverage fighters are useful; forcing an entire lineup of low-owned darts is not.
+- **Current moneylines** are pulled automatically when available and de-vigged into fair market win probabilities.
+- **UFCStats style data** (SLpM, SApM, takedowns, takedown defense, submission attempts) changes fighter ceiling and score distributions.
 - Max exposure, Min/Max fighter exposure and minimum uniques build a portfolio across different card outcomes.
 """)
-    st.caption("When live betting/projection feeds are unavailable, salary and DK FPPG are used as model priors. pOwn%, Win% and Finish% are estimates.")
+    st.caption("Moneylines are live market inputs when available. Finish %, pOwn%, projections and tournament outputs remain model estimates, not sportsbook props.")
 
 st.subheader("🥋 Fighter Pool")
-ed=fighters[["ID","Name","Opp","Salary","pOwn%","FPPG","Win %","Finish %","Projection","Rounds","Fight"]].copy()
+ed=fighters[["ID","Name","Opp","Salary","Moneyline","Market Win %","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"]].copy()
 ed.insert(0,"In",True); ed.insert(1,"Lock",False); ed["Boost %"]=0; ed["Min %"]=0; ed["Max %"]=100
 prefs=st.session_state.get("mma_prefs",{})
 for i,row in ed.iterrows():
@@ -208,9 +419,10 @@ if b1.button("✅ ADD ALL",use_container_width=True): st.session_state["mma_bulk
 if b2.button("🚫 REMOVE ALL",use_container_width=True): st.session_state["mma_bulk"]=False; st.session_state.pop("mma_editor",None); st.rerun()
 if "mma_bulk" in st.session_state: ed["In"]=bool(st.session_state.pop("mma_bulk"))
 edited=st.data_editor(ed,hide_index=True,use_container_width=True,height=520,column_order=[c for c in ed.columns if c!="ID"],
-    disabled=["ID","Name","Opp","Salary","pOwn%","FPPG","Win %","Finish %","Projection","Rounds","Fight"],
+    disabled=["ID","Name","Opp","Salary","Moneyline","Market Win %","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"],
     column_config={"In":st.column_config.CheckboxColumn("In"),"Lock":st.column_config.CheckboxColumn("🔒 Lock"),
-    "Salary":st.column_config.NumberColumn("Salary",format="$%d"),"pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
+    "Salary":st.column_config.NumberColumn("Salary",format="$%d"),"Moneyline":st.column_config.NumberColumn("Odds",format="%d"),
+    "Market Win %":st.column_config.NumberColumn("Market Win",format="%.1f%%"),"pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
     "FPPG":st.column_config.NumberColumn("DK FPPG",format="%.1f"),"Win %":st.column_config.NumberColumn("Win %",format="%.1f%%"),
     "Finish %":st.column_config.NumberColumn("Finish %",format="%.1f%%"),"Projection":st.column_config.NumberColumn("Proj",format="%.1f"),
     "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),

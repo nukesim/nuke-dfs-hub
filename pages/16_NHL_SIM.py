@@ -184,8 +184,15 @@ def enrich_context(d):
     goalies=x.loc[x["Pos"]=="G","Name"].astype(str).tolist()
     gs=fetch_goalie_status(_slate_date(x),goalies) if goalies else {}
     x["G Status"]="-"
+    # DraftKings sometimes includes a Starting flag in the salary CSV. Use it first,
+    # then let the live goalie feed overwrite it when a more explicit status is available.
+    if "Starting" in x.columns:
+        start=x["Starting"].fillna("").astype(str).str.upper().str.strip()
+        x.loc[(x["Pos"]=="G") & start.isin(["P","PROBABLE","PROJECTED"]),"G Status"]="Probable"
+        x.loc[(x["Pos"]=="G") & start.isin(["C","CONFIRMED","Y","YES"]),"G Status"]="Confirmed"
     for n,status in gs.items():
-        x.loc[x["Name"].astype(str)==str(n),"G Status"]=status
+        if status and str(status).lower()!="unknown":
+            x.loc[x["Name"].astype(str)==str(n),"G Status"]=status
     return x
 
 def base_projection(d):

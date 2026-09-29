@@ -49,95 +49,132 @@ def ownership_estimate(d):
 def _norm_name(x):
     return re.sub(r"[^a-z0-9]","",str(x).lower())
 
+def _bank_utah_2026_pairings():
+    """Published Golf Channel R1/R2 tee sheet, stored as a current-event fallback."""
+    rounds={
+        1:[
+            ("9:35 AM","Peter Malnati|Doug Ghim|Vince Whaley"),("9:35 AM","Patton Kizzire|Dylan Wu|Johnny Keefer"),
+            ("9:46 AM","Rafael Campos|Denny McCarthy|Patrick Rodgers"),("9:46 AM","Tom Hoge|Mac Meissner|Sudarshan Yellamaraju"),
+            ("9:57 AM","Mark Hubbard|David Lipsky|David Skinns"),("9:57 AM","Max Greyserman|Rasmus Højgaard|Jackson Suber"),
+            ("10:08 AM","Garrick Higgo|Kevin Yu|Aaron Wise"),("10:08 AM","Michael Brennan|Jackson Koivun|Benjamin James"),
+            ("10:19 AM","Davis Thompson|Davis Riley|Stephan Jaeger"),("10:19 AM","Matthew McCarty|Harry Hall|Neal Shipley"),
+            ("10:30 AM","Steven Fisk|William Mouw|Joe Highsmith"),("10:30 AM","Zac Blair|Max McGreevy|Will Gordon"),
+            ("10:41 AM","Matt Wallace|Seamus Power|Rico Hoey"),("10:41 AM","Joel Dahmen|Andrew Putnam|Chandler Phillips"),
+            ("10:52 AM","Michael Thompson|Haotong Li|Jeffrey Kang"),("10:52 AM","Patrick Fishburn|Trace Crowe|Kensei Hirata"),
+            ("11:03 AM","Adrien Dumont de Chassart|Paul Peterson|Matt Snyder"),("11:03 AM","Jimmy Stanger|David Ford|Kihei Akina"),
+            ("11:14 AM","Pontus Nyholm|John VanDerLaan|Seonghyeon An"),("11:14 AM","Alejandro Tosti|Jesper Svensson|Bowen Mauss"),
+            ("2:30 PM","Austin Eckroat|Taylor Moore|Hank Lebioda"),("2:30 PM","Mackenzie Hughes|Brendon Todd|Jordan Smith"),
+            ("2:41 PM","Ben Martin|Kevin Roy|Danny Walker"),("2:41 PM","Matthieu Pavon|Tyler Duncan|Ben Silverman"),
+            ("2:52 PM","Erik van Rooyen|Christiaan Bezuidenhout|Zach Bauchou"),("2:52 PM","C.T. Pan|Rasmus Neergaard-Petersen|John Parry"),
+            ("3:03 PM","Nick Taylor|Maverick McNealy|Max Homa"),("3:03 PM","Cam Davis|Billy Horschel|Chris Kirk"),
+            ("3:14 PM","Aldrich Potgieter|Tony Finau|Eric Cole"),("3:14 PM","Adam Schenk|Lucas Glover|Kevin Streelman"),
+            ("3:25 PM","Emiliano Grillo|Pierceson Coody|Takumi Kanaya"),("3:25 PM","Nick Dunlap|Lee Hodges|Ben Kohles"),
+            ("3:36 PM","Chad Ramey|Beau Hossler|Justin Lower"),("3:36 PM","Brice Garnett|Adam Svensson|Austin Smotherman"),
+            ("3:47 PM","Kristoffer Ventura|A.J. Ewart|Rhett Rasmussen"),("3:47 PM","David Lingmerth|Marco Penge|Isaiah Salinda"),
+            ("3:58 PM","Luke Clanton|Davis Chatfield|Tyson Shelley"),("3:58 PM","Hayden Springer|Marcelo Rozo|Boston Bracken"),
+            ("4:09 PM","Chandler Blanchet|Christo Lamprecht|Carson Lundell"),("4:09 PM","Zecheng Dou|Gordon Sargent|Zach Johnson"),
+        ],
+        2:[
+            ("9:35 AM","Mackenzie Hughes|Brendon Todd|Jordan Smith"),("9:35 AM","Austin Eckroat|Taylor Moore|Hank Lebioda"),
+            ("9:46 AM","Matthieu Pavon|Tyler Duncan|Ben Silverman"),("9:46 AM","Ben Martin|Kevin Roy|Danny Walker"),
+            ("9:57 AM","C.T. Pan|Rasmus Neergaard-Petersen|John Parry"),("9:57 AM","Erik van Rooyen|Christiaan Bezuidenhout|Zach Bauchou"),
+            ("10:08 AM","Cam Davis|Billy Horschel|Chris Kirk"),("10:08 AM","Nick Taylor|Maverick McNealy|Max Homa"),
+            ("10:19 AM","Adam Schenk|Lucas Glover|Kevin Streelman"),("10:19 AM","Aldrich Potgieter|Tony Finau|Eric Cole"),
+            ("10:30 AM","Nick Dunlap|Lee Hodges|Ben Kohles"),("10:30 AM","Emiliano Grillo|Pierceson Coody|Takumi Kanaya"),
+            ("10:41 AM","Brice Garnett|Adam Svensson|Austin Smotherman"),("10:41 AM","Chad Ramey|Beau Hossler|Justin Lower"),
+            ("10:52 AM","David Lingmerth|Marco Penge|Isaiah Salinda"),("10:52 AM","Kristoffer Ventura|A.J. Ewart|Rhett Rasmussen"),
+            ("11:03 AM","Hayden Springer|Marcelo Rozo|Boston Bracken"),("11:03 AM","Luke Clanton|Davis Chatfield|Tyson Shelley"),
+            ("11:14 AM","Zecheng Dou|Gordon Sargent|Zach Johnson"),("11:14 AM","Chandler Blanchet|Christo Lamprecht|Carson Lundell"),
+            ("2:30 PM","Patton Kizzire|Dylan Wu|Johnny Keefer"),("2:30 PM","Peter Malnati|Doug Ghim|Vince Whaley"),
+            ("2:41 PM","Tom Hoge|Mac Meissner|Sudarshan Yellamaraju"),("2:41 PM","Rafael Campos|Denny McCarthy|Patrick Rodgers"),
+            ("2:52 PM","Max Greyserman|Rasmus Højgaard|Jackson Suber"),("2:52 PM","Mark Hubbard|David Lipsky|David Skinns"),
+            ("3:03 PM","Michael Brennan|Jackson Koivun|Benjamin James"),("3:03 PM","Garrick Higgo|Kevin Yu|Aaron Wise"),
+            ("3:14 PM","Matthew McCarty|Harry Hall|Neal Shipley"),("3:14 PM","Davis Thompson|Davis Riley|Stephan Jaeger"),
+            ("3:25 PM","Zac Blair|Max McGreevy|Will Gordon"),("3:25 PM","Steven Fisk|William Mouw|Joe Highsmith"),
+            ("3:36 PM","Joel Dahmen|Andrew Putnam|Chandler Phillips"),("3:36 PM","Matt Wallace|Seamus Power|Rico Hoey"),
+            ("3:47 PM","Patrick Fishburn|Trace Crowe|Kensei Hirata"),("3:47 PM","Michael Thompson|Haotong Li|Jeffrey Kang"),
+            ("3:58 PM","Jimmy Stanger|David Ford|Kihei Akina"),("3:58 PM","Adrien Dumont de Chassart|Paul Peterson|Matt Snyder"),
+            ("4:09 PM","Alejandro Tosti|Jesper Svensson|Bowen Mauss"),("4:09 PM","Pontus Nyholm|John VanDerLaan|Seonghyeon An"),
+        ]
+    }
+    out={}
+    for rnd,groups in rounds.items():
+        day="2026-10-01" if rnd==1 else "2026-10-02"
+        for tm,names in groups:
+            dt=pd.Timestamp(f"{day} {tm}",tz="America/New_York")
+            for name in names.split("|"):
+                out.setdefault(_norm_name(name),{})[rnd]=dt.isoformat()
+    return out
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_pga_context(event_name, player_names=(), refresh_token=0):
-    """Best-effort automatic event/venue/tee-time discovery from ESPN public golf data."""
+    """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
+    wanted=_norm_name(event_name)
+
+    # Current Bank of Utah Championship: authoritative event/course metadata plus the
+    # published Golf Channel R1/R2 tee sheet. This makes the current slate deterministic
+    # even if ESPN's pre-event JSON is late or Golf Channel blocks server-side scraping.
+    if "bankofutah" in wanted:
+        out["course"]="Black Desert Resort"
+        out["location"]="Ivins, UT"
+        out["lat"]=37.16258
+        out["lon"]=-113.64453
+        out["tee_times"]=_bank_utah_2026_pairings()
+        out["status"]=f"Tee times loaded · {len(out['tee_times'])} golfers"
+
+    # Generic ESPN discovery remains in place for future events and may fill richer metadata.
     try:
         sb=requests.get("https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard",timeout=8).json()
         choices=[]
-        for ev in sb.get("events",[]):
-            choices.append((ev.get("id"),ev.get("name",""),ev))
-        for cal in (sb.get("leagues") or [{}])[0].get("calendar",[]):
-            choices.append((cal.get("id"),cal.get("label",""),cal))
-        if not choices: return out
-        wanted=_norm_name(event_name)
-        def sim(x):
-            n=_norm_name(x[1])
-            return SequenceMatcher(None,wanted,n).ratio() + (0.5 if (wanted in n or n in wanted) else 0)
-        eid,ename,raw=max(choices,key=sim)
-        if sim((eid,ename,raw))<0.35: return out
-        out["event_id"]=str(eid); out["event_name"]=ename or event_name
-        # Event detail usually carries venue/address even before play begins.
-        try:
-            core=requests.get(f"https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/{eid}",timeout=8).json()
-            comp=(core.get("competitions") or [{}])[0]
-            venue=comp.get("venue") or core.get("venue") or {}
-            out["course"]=venue.get("fullName") or venue.get("name") or ""
-            addr=venue.get("address") or {}
-            city=addr.get("city",""); state=addr.get("state",""); country=addr.get("country","")
-            out["location"]=", ".join(x for x in [city,state,country] if x)
-            geo=venue.get("geo") or venue.get("location") or {}
-            out["lat"]=geo.get("latitude"); out["lon"]=geo.get("longitude")
-        except Exception: pass
-        # Site summary/leaderboard can expose teeTime alongside athlete records once pairings are published.
-        payloads=[]
-        for url in [
-            f"https://site.api.espn.com/apis/site/v2/sports/golf/pga/summary?event={eid}",
-            f"https://site.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard?tournamentId={eid}"
-        ]:
-            try: payloads.append(requests.get(url,timeout=8).json())
-            except Exception: pass
-        def walk(obj):
-            if isinstance(obj,dict):
-                athlete=obj.get("athlete") if isinstance(obj.get("athlete"),dict) else obj
-                name=athlete.get("displayName") or athlete.get("fullName") or obj.get("displayName")
-                tt=obj.get("teeTime") or obj.get("startTime") or obj.get("date")
-                period=obj.get("period") or obj.get("round") or 1
-                if name and tt and "T" in str(tt):
-                    key=_norm_name(name)
-                    rec=out["tee_times"].setdefault(key,{})
-                    try: rec[int(period)]=str(tt)
-                    except Exception: rec.setdefault(1,str(tt))
-                for v in obj.values(): walk(v)
-            elif isinstance(obj,list):
-                for v in obj: walk(v)
-        for p in payloads: walk(p)
-
-        # Current-event fallback: Golf Channel published complete Bank of Utah pairings
-        # before ESPN populated its tee-time payload.
-        if "bankofutah" in wanted and player_names:
-            urls={
-                1:"https://www.golfchannel.com/pga-tour/news/bank-of-utah-championship-2026-round-1-tee-times-groupings-and-how-to-watch",
-                2:"https://www.golfchannel.com/pga-tour/news/bank-of-utah-championship-2026-round-2-tee-times-groupings-and-how-to-watch",
-            }
-            aliases={"Benjamin James":"Ben James","Matthew McCarty":"Matt McCarty","Kristoffer Ventura":"Kris Ventura"}
-            loaded=set()
-            for rnd,url in urls.items():
+        for ev in sb.get("events",[]): choices.append((ev.get("id"),ev.get("name",""),ev))
+        for cal in (sb.get("leagues") or [{}])[0].get("calendar",[]): choices.append((cal.get("id"),cal.get("label",""),cal))
+        if choices:
+            def sim(x):
+                n=_norm_name(x[1])
+                return SequenceMatcher(None,wanted,n).ratio() + (0.5 if (wanted in n or n in wanted) else 0)
+            eid,ename,raw=max(choices,key=sim)
+            if sim((eid,ename,raw))>=0.35:
+                out["event_id"]=str(eid); out["event_name"]=ename or event_name
                 try:
-                    raw=requests.get(url,timeout=10,headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"}).text
-                    raw=re.sub(r"(?is)<script.*?</script>|<style.*?</style>"," ",raw)
-                    txt=html.unescape(re.sub(r"(?s)<[^>]+>"," ",raw))
-                    txt=re.sub(r"\\s+"," ",txt)
-                    low=txt.lower()
-                    for name in player_names:
-                        search=aliases.get(str(name),str(name))
-                        pos=low.find(search.lower())
-                        if pos<0: continue
-                        before=txt[max(0,pos-220):pos]
-                        times=re.findall(r"(\\d{1,2}:\\d{2})\\s*(AM|PM)",before,re.I)
-                        if not times: continue
-                        tm,ampm=times[-1]
-                        dt=pd.Timestamp(f"2026-10-0{rnd} {tm} {ampm}",tz="America/New_York").tz_convert("America/Denver")
-                        out["tee_times"].setdefault(_norm_name(name),{})[rnd]=dt.isoformat()
-                        loaded.add(_norm_name(name))
-                except Exception:
-                    pass
-            if loaded: out["status"]=f"Tee times loaded automatically ({len(loaded)} golfers)"
-        if out["tee_times"] and out["status"]=="Tee times not released":
-            out["status"]="Tee times loaded automatically"
+                    core=requests.get(f"https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/{eid}",timeout=8).json()
+                    comp=(core.get("competitions") or [{}])[0]
+                    venue=comp.get("venue") or core.get("venue") or {}
+                    if venue.get("fullName") or venue.get("name"): out["course"]=venue.get("fullName") or venue.get("name")
+                    addr=venue.get("address") or {}
+                    loc=", ".join(x for x in [addr.get("city",""),addr.get("state",""),addr.get("country","")] if x)
+                    if loc: out["location"]=loc
+                    geo=venue.get("geo") or venue.get("location") or {}
+                    if geo.get("latitude") is not None: out["lat"]=geo.get("latitude")
+                    if geo.get("longitude") is not None: out["lon"]=geo.get("longitude")
+                except Exception: pass
+
+                payloads=[]
+                for url in [
+                    f"https://site.api.espn.com/apis/site/v2/sports/golf/pga/summary?event={eid}",
+                    f"https://site.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard?tournamentId={eid}"
+                ]:
+                    try: payloads.append(requests.get(url,timeout=8).json())
+                    except Exception: pass
+                def walk(obj):
+                    if isinstance(obj,dict):
+                        athlete=obj.get("athlete") if isinstance(obj.get("athlete"),dict) else obj
+                        name=athlete.get("displayName") or athlete.get("fullName") or obj.get("displayName")
+                        tt=obj.get("teeTime") or obj.get("startTime") or obj.get("date")
+                        period=obj.get("period") or obj.get("round") or 1
+                        if name and tt and "T" in str(tt):
+                            rec=out["tee_times"].setdefault(_norm_name(name),{})
+                            try: rec[int(period)]=str(tt)
+                            except Exception: rec.setdefault(1,str(tt))
+                        for v in obj.values(): walk(v)
+                    elif isinstance(obj,list):
+                        for v in obj: walk(v)
+                for p in payloads: walk(p)
     except Exception:
         pass
+
+    if out["tee_times"] and out["status"]=="Tee times not released":
+        out["status"]=f"Tee times loaded automatically ({len(out['tee_times'])} golfers)"
     return out
 
 @st.cache_data(ttl=1800, show_spinner=False)

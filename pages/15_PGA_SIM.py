@@ -50,7 +50,7 @@ def _norm_name(x):
     return re.sub(r"[^a-z0-9]","",str(x).lower())
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_pga_context(event_name, player_names=()):
+def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Best-effort automatic event/venue/tee-time discovery from ESPN public golf data."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     try:
@@ -378,7 +378,9 @@ except Exception as e:
 event=str(golfers["Game Info"].iloc[0]) if "Game Info" in golfers.columns and len(golfers) else "PGA"
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
 
-ctx=fetch_pga_context(event,tuple(golfers["Name"].astype(str)))
+pga_refresh_nonce=int(st.session_state.get("pga_tee_refresh_nonce",0))
+pga_refresh_token=f"{int(datetime.now().timestamp()//900)}:{pga_refresh_nonce}"
+ctx=fetch_pga_context(event,tuple(golfers["Name"].astype(str)),pga_refresh_token)
 lat,lon=ctx.get("lat"),ctx.get("lon")
 if lat is None or lon is None:
     lat,lon=geocode_location(ctx.get("location",""))
@@ -390,6 +392,10 @@ tee_ready=bool(ctx.get("tee_times"))
 wcols=st.columns([2,2,2])
 wcols[0].info(f"📍 {course_label}" + (f" · {ctx.get('location')}" if ctx.get("location") else ""))
 wcols[1].info(("✅ " if tee_ready else "⏳ ") + ctx.get("status","Tee times not released"))
+if wcols[1].button("🔄 REFRESH TEE TIMES",use_container_width=True,key="pga_refresh_tee"):
+    st.session_state["pga_tee_refresh_nonce"]=pga_refresh_nonce+1
+    fetch_pga_context.clear()
+    st.rerun()
 if tee_ready and (golfers["Weather Edge"]!=0).any():
     am=golfers.loc[golfers["Wave"]=="AM","Weather Edge"].mean(); pm=golfers.loc[golfers["Wave"]=="PM","Weather Edge"].mean()
     leader="AM" if am>pm else "PM"; gap=abs(float(am-pm))

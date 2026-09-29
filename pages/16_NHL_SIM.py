@@ -233,42 +233,63 @@ def _lineup_position_ok(pos):
     return len(vals)==8 and c>=2 and w>=3 and de>=2 and c<=3 and w<=4 and de<=3
 
 def _combo_score(sub):
+    """Score a same-team mini-stack for GPP correlation, not just raw median projection."""
     mu=base_projection(sub)
     score=float(mu.sum())
     lines=sub["Line"].astype(str).tolist()
     pps=sub["PP"].astype(str).tolist()
     pos=sub["Pos"].astype(str).tolist()
     for a,b in itertools.combinations(range(len(sub)),2):
-        if lines[a] in ["F1","F2"] and lines[a]==lines[b]: score+=4.2
-        elif lines[a] not in ["?","-"] and lines[a]==lines[b]: score+=2.0
-        if pps[a]=="PP1" and pps[b]=="PP1": score+=2.5
-        elif pps[a]=="PP2" and pps[b]=="PP2": score+=.8
-    for ln in ["F1","F2"]:
-        if sum(1 for z in lines if z==ln)>=3: score+=8.0
-    if "D" in pos and any(p=="PP1" for p in pps): score+=2.0
+        if lines[a] in ["F1","F2"] and lines[a]==lines[b]: score+=5.0
+        elif lines[a] not in ["?","-"] and lines[a]==lines[b]: score+=2.4
+        if pps[a]=="PP1" and pps[b]=="PP1": score+=3.2
+        elif pps[a]=="PP2" and pps[b]=="PP2": score+=1.0
+    # A complete forward line is one of the strongest NHL DFS correlation structures.
+    for ln in ["F1","F2","F3","F4"]:
+        if sum(1 for z in lines if z==ln)>=3:
+            score += 11.0 if ln in ["F1","F2"] else 6.0
+    # Reward the classic 4-man line + power-play defenseman construction.
+    if "D" in pos and any(p=="PP1" for p in pps):
+        score+=4.0
     return score
 
 def build_group_cache(d):
+    """Pre-build correlated same-team groups used by the portfolio stack shapes."""
     cache={}
     sk=d[d["Pos"]!="G"]
     for team,g in sk.groupby("Team"):
-        # cap enumeration to the best role/projection players but retain enough value options for salary fit
+        # Keep enough salary relief for 49.6k builds while concentrating on fantasy-relevant roles.
         tmp=g.copy()
-        tmp["_rank"]=base_projection(tmp)+np.where(tmp["PP"].eq("PP1"),3,0)+np.where(tmp["Line"].isin(["F1","F2"]),2,0)
-        pool=tmp.sort_values("_rank",ascending=False).head(14)
+        tmp["_rank"]=base_projection(tmp)+np.where(tmp["PP"].eq("PP1"),3.2,0)+np.where(tmp["Line"].isin(["F1","F2"]),2.2,0)
+        pool=tmp.sort_values("_rank",ascending=False).head(15)
         idxs=pool.index.tolist()
+        known_roles=bool(((pool["Line"]!="?") | (pool["PP"].isin(["PP1","PP2"]))).any())
         for size in [1,2,3,4,5]:
-            combos=[]
+            strict=[]; fallback=[]
             for combo in itertools.combinations(idxs,size):
                 sub=d.loc[list(combo)]
-                if size>=3 and (sub["Pos"]=="G").any(): continue
-                role_known=(sub["Line"]!="?").any()
-                if size>=3 and role_known:
-                    same_top=max([int((sub["Line"]==ln).sum()) for ln in ["F1","F2","F3","F4"]]+[0])
-                    if same_top<2: continue
-                combos.append((combo,_combo_score(sub)))
-            combos=sorted(combos,key=lambda z:z[1],reverse=True)[:180]
-            cache[(team,size)]=combos
+                lines=sub["Line"].astype(str)
+                pps=sub["PP"].astype(str)
+                positions=sub["Pos"].astype(str)
+                line_counts={ln:int((lines==ln).sum()) for ln in ["F1","F2","F3","F4"]}
+                same_line=max(line_counts.values()) if line_counts else 0
+                same_pp1=int((pps=="PP1").sum())
+                same_pp2=int((pps=="PP2").sum())
+                score=_combo_score(sub)
+                fallback.append((combo,score))
+                if not known_roles or size==1:
+                    strict.append((combo,score)); continue
+                # Research-backed GPP constructions: correlated line mates / PP mates, not random teammates.
+                if size==2 and (same_line>=2 or same_pp1>=2 or same_pp2>=2):
+                    strict.append((combo,score))
+                elif size==3 and (same_line>=3 or (same_line>=2 and same_pp1>=2)):
+                    strict.append((combo,score))
+                elif size==4 and (same_line>=3 and ("D" in set(positions) or same_pp1>=3)):
+                    strict.append((combo,score))
+                elif size==5 and (same_line>=3 and (same_pp1>=2 or "D" in set(positions))):
+                    strict.append((combo,score))
+            combos=strict if strict else fallback
+            cache[(team,size)]=sorted(combos,key=lambda z:z[1],reverse=True)[:220]
     return cache
 
 def _weighted_pick(items,rng):
@@ -304,6 +325,8 @@ def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_s
     gst=goalies["G Status"].astype(str).str.lower()
     gw=np.maximum(gmu,1.0)*np.where(gst.eq("confirmed"),1.8,np.where(gst.isin(["likely","probable","projected"]),1.35,.75))
     gw=gw/gw.sum()
+    own=ownership_estimate(active)
+    posmap={idx:k for k,idx in enumerate(active.index)}
     seen=set(); out=[]; attempts=0; max_attempts=max(50000,n*100)
     while len(out)<n and attempts<max_attempts:
         attempts+=1
@@ -339,8 +362,6 @@ def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_s
         key=tuple(sorted(ids))
         if key in seen: continue
         seen.add(key)
-        own=ownership_estimate(active)
-        posmap={idx:k for k,idx in enumerate(active.index)}
         own_idx=[posmap[i] for i in sk_idx+[gidx]]
         out.append({"idx":sk_idx+[gidx],"salary":salary,"shape":shape,"primary":primary,
                     "own_product":float(np.prod(np.clip(own[own_idx]/100,.002,.95)))})
@@ -570,8 +591,8 @@ with st.sidebar:
     st.caption("Percent of portfolio by skater team-stack shape. The goalie is separate.")
     mix={}
     mix["4-3-1"]=st.number_input("4-3-1 %",0,100,50,5,key="nhl_431")
-    mix["3-3-2"]=st.number_input("3-3-2 %",0,100,25,5,key="nhl_332")
-    mix["5-2-1"]=st.number_input("5-2-1 %",0,100,15,5,key="nhl_521")
+    mix["3-3-2"]=st.number_input("3-3-2 %",0,100,35,5,key="nhl_332")
+    mix["5-2-1"]=st.number_input("5-2-1 %",0,100,5,5,key="nhl_521")
     mix["4-2-2"]=st.number_input("4-2-2 %",0,100,10,5,key="nhl_422")
     mix_total=sum(mix.values())
     if mix_total==100: st.success("Stack mix: 100%")

@@ -32,9 +32,9 @@ def render_nav():
     """,unsafe_allow_html=True)
 
     with st.sidebar:
-        st.page_link("app.py", label="Lineup Builder", icon="🏈")
-        st.page_link("pages/14_NUKE_SIM.py", label="NUKE Sim", icon="☢️")
-        st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown", icon="⚡")
+        st.page_link("app.py", label="NFL Hand Builder", icon="🏈")
+        st.page_link("pages/14_NUKE_SIM.py", label="NFL Sim", icon="☢️")
+        st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown Sim", icon="⚡")
         st.page_link("pages/15_PGA_SIM.py", label="PGA Sim", icon="⛳")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 

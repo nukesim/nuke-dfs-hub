@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 import re
+import html
 import requests
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
@@ -49,7 +50,7 @@ def _norm_name(x):
     return re.sub(r"[^a-z0-9]","",str(x).lower())
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_pga_context(event_name):
+def fetch_pga_context(event_name, player_names=()):
     """Best-effort automatic event/venue/tee-time discovery from ESPN public golf data."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     try:
@@ -102,7 +103,39 @@ def fetch_pga_context(event_name):
             elif isinstance(obj,list):
                 for v in obj: walk(v)
         for p in payloads: walk(p)
-        if out["tee_times"]: out["status"]="Tee times loaded automatically"
+
+        # Current-event fallback: Golf Channel published complete Bank of Utah pairings
+        # before ESPN populated its tee-time payload.
+        if "bankofutah" in wanted and player_names:
+            urls={
+                1:"https://www.golfchannel.com/pga-tour/news/bank-of-utah-championship-2026-round-1-tee-times-groupings-and-how-to-watch",
+                2:"https://www.golfchannel.com/pga-tour/news/bank-of-utah-championship-2026-round-2-tee-times-groupings-and-how-to-watch",
+            }
+            aliases={"Benjamin James":"Ben James","Matthew McCarty":"Matt McCarty","Kristoffer Ventura":"Kris Ventura"}
+            loaded=set()
+            for rnd,url in urls.items():
+                try:
+                    raw=requests.get(url,timeout=10,headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"}).text
+                    raw=re.sub(r"(?is)<script.*?</script>|<style.*?</style>"," ",raw)
+                    txt=html.unescape(re.sub(r"(?s)<[^>]+>"," ",raw))
+                    txt=re.sub(r"\\s+"," ",txt)
+                    low=txt.lower()
+                    for name in player_names:
+                        search=aliases.get(str(name),str(name))
+                        pos=low.find(search.lower())
+                        if pos<0: continue
+                        before=txt[max(0,pos-220):pos]
+                        times=re.findall(r"(\\d{1,2}:\\d{2})\\s*(AM|PM)",before,re.I)
+                        if not times: continue
+                        tm,ampm=times[-1]
+                        dt=pd.Timestamp(f"2026-10-0{rnd} {tm} {ampm}",tz="America/New_York").tz_convert("America/Denver")
+                        out["tee_times"].setdefault(_norm_name(name),{})[rnd]=dt.isoformat()
+                        loaded.add(_norm_name(name))
+                except Exception:
+                    pass
+            if loaded: out["status"]=f"Tee times loaded automatically ({len(loaded)} golfers)"
+        if out["tee_times"] and out["status"]=="Tee times not released":
+            out["status"]="Tee times loaded automatically"
     except Exception:
         pass
     return out
@@ -154,7 +187,8 @@ def attach_tee_weather(d,ctx,weather):
             if not raw: continue
             try:
                 dt=pd.to_datetime(raw)
-                if getattr(dt,"tzinfo",None) is not None: dt=dt.tz_convert(None)
+                if getattr(dt,"tzinfo",None) is not None:
+                    dt=dt.tz_convert("America/Denver").tz_localize(None)
                 x.at[i,f"R{rnd} Tee"]=dt.strftime("%-I:%M %p") if hasattr(dt,"strftime") else str(raw)
                 parsed.append((rnd,dt))
             except Exception: pass
@@ -344,7 +378,7 @@ except Exception as e:
 event=str(golfers["Game Info"].iloc[0]) if "Game Info" in golfers.columns and len(golfers) else "PGA"
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
 
-ctx=fetch_pga_context(event)
+ctx=fetch_pga_context(event,tuple(golfers["Name"].astype(str)))
 lat,lon=ctx.get("lat"),ctx.get("lon")
 if lat is None or lon is None:
     lat,lon=geocode_location(ctx.get("location",""))

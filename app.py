@@ -3131,3 +3131,5 @@ with exptab:
         dg=saved_duplicate_groups()
         if dg:
             st.error("Duplicate saved lineup groups: "+"; ".join(", ".join(f"L{x}" for x in g) for g in dg))
+
+# NUKE deploy marker: MMA simulator

@@ -264,11 +264,10 @@ def _combo_score(sub):
     return score
 
 def build_group_cache(d):
-    """Pre-build correlated same-team groups used by the portfolio stack shapes."""
+    """Pre-build correlated same-team groups plus fast lineup-generation metadata."""
     cache={}
     sk=d[d["Pos"]!="G"]
     for team,g in sk.groupby("Team"):
-        # Keep enough salary relief for 49.6k builds while concentrating on fantasy-relevant roles.
         tmp=g.copy()
         tmp["_rank"]=base_projection(tmp)+np.where(tmp["PP"].eq("PP1"),3.2,0)+np.where(tmp["Line"].isin(["F1","F2"]),2.2,0)
         pool=tmp.sort_values("_rank",ascending=False).head(13)
@@ -281,25 +280,38 @@ def build_group_cache(d):
                 lines=sub["Line"].astype(str)
                 pps=sub["PP"].astype(str)
                 positions=sub["Pos"].astype(str)
-                line_counts={ln:int((lines==ln).sum()) for ln in ["F1","F2","F3","F4"]}
-                same_line=max(line_counts.values()) if line_counts else 0
+                same_line=max([int((lines==ln).sum()) for ln in ["F1","F2","F3","F4"]]+[0])
                 same_pp1=int((pps=="PP1").sum())
                 same_pp2=int((pps=="PP2").sum())
                 score=_combo_score(sub)
-                fallback.append((combo,score))
+                meta={
+                    "idx":tuple(combo),
+                    "salary":int(sub["Salary"].sum()),
+                    "c":int((positions=="C").sum()),
+                    "w":int((positions=="W").sum()),
+                    "d":int((positions=="D").sum()),
+                    "ids":tuple(sub["ID"].astype(int).tolist()),
+                    "score":float(score),
+                }
+                fallback.append(meta)
                 if not known_roles or size==1:
-                    strict.append((combo,score)); continue
-                # Research-backed GPP constructions: correlated line mates / PP mates, not random teammates.
+                    strict.append(meta); continue
                 if size==2 and (same_line>=2 or same_pp1>=2 or same_pp2>=2):
-                    strict.append((combo,score))
+                    strict.append(meta)
                 elif size==3 and (same_line>=3 or (same_line>=2 and same_pp1>=2)):
-                    strict.append((combo,score))
+                    strict.append(meta)
                 elif size==4 and (same_line>=3 and ("D" in set(positions) or same_pp1>=3)):
-                    strict.append((combo,score))
+                    strict.append(meta)
                 elif size==5 and (same_line>=3 and (same_pp1>=2 or "D" in set(positions))):
-                    strict.append((combo,score))
-            combos=strict if strict else fallback
-            cache[(team,size)]=sorted(combos,key=lambda z:z[1],reverse=True)[:220]
+                    strict.append(meta)
+            items=sorted((strict if strict else fallback),key=lambda z:z["score"],reverse=True)[:220]
+            if items:
+                scores=np.array([z["score"] for z in items],dtype=float)
+                zz=(scores-scores.mean())/(scores.std()+1e-9)
+                probs=np.exp(np.clip(.45*zz,-3,3)); probs=probs/probs.sum()
+            else:
+                probs=np.array([],dtype=float)
+            cache[(team,size)]={"items":items,"p":probs}
     return cache
 
 def _weighted_pick(items,rng):
@@ -313,6 +325,7 @@ def _shape_counts(shape):
     return [int(x) for x in shape.split("-")]
 
 def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_stack_goalie=True,avoid_fourth_line=True,locked_ids=None,excluded_ids=None):
+    """Fast GPP candidate generator. Keeps correlation rules but avoids pandas work inside the hot loop."""
     rng=np.random.default_rng(seed)
     locked_ids=set(locked_ids or [])
     excluded_ids=set(excluded_ids or [])
@@ -321,63 +334,100 @@ def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_s
         fourth=(active["Pos"]!="G") & (active["Line"].astype(str)=="F4") & (~active["PP"].astype(str).isin(["PP1","PP2"])) & (~active["ID"].astype(int).isin(locked_ids))
         active=active[~fourth].copy()
     if len(active)<9: return []
+
     group_cache=build_group_cache(active)
     teams=sorted(active.loc[active["Pos"]!="G","Team"].unique())
     if len(teams)<3: return []
+
     tstrength={}
     for t in teams:
         g=active[(active["Team"]==t)&(active["Pos"]!="G")]
         tstrength[t]=float(np.sort(base_projection(g))[-min(6,len(g)):].sum()) if len(g) else 1
     tw=np.array([tstrength[t] for t in teams],float)
     tw=np.exp((tw-tw.mean())/(tw.std()+1e-9)*.35); tw=tw/tw.sum()
+
     shapes=[k for k,v in shape_mix.items() if v>0]
     sw=np.array([shape_mix[k] for k in shapes],float); sw=sw/sw.sum()
+
     goalies=active[active["Pos"]=="G"].copy()
     if goalies.empty: return []
     gmu=base_projection(goalies)
     gst=goalies["G Status"].astype(str).str.lower()
-    gw=np.maximum(gmu,1.0)*np.where(gst.eq("confirmed"),1.8,np.where(gst.isin(["likely","probable","projected"]),1.35,.75))
-    gw=gw/gw.sum()
+    base_gw=np.maximum(gmu,1.0)*np.where(gst.eq("confirmed"),1.8,np.where(gst.isin(["likely","probable","projected"]),1.35,.75))
+    base_gw=base_gw/base_gw.sum()
+
+    goalie_meta=[]
+    for j,(idx,gr) in enumerate(goalies.iterrows()):
+        goalie_meta.append({
+            "idx":idx,"id":int(gr["ID"]),"salary":int(gr["Salary"]),
+            "team":str(gr["Team"]),"opp":str(gr["Opp"]),"w":float(base_gw[j])
+        })
+
     own=ownership_estimate(active)
     posmap={idx:k for k,idx in enumerate(active.index)}
-    seen=set(); out=[]; attempts=0; max_attempts=max(50000,n*100)
+    seen=set(); out=[]; attempts=0
+    # The old pandas-heavy generator could spend several minutes chasing 5,000 candidates.
+    # This fast loop can try far more combinations cheaply, but stops if the legal universe is exhausted.
+    max_attempts=max(40000,n*35)
+    stale=0
+
     while len(out)<n and attempts<max_attempts:
-        attempts+=1
-        shape=str(rng.choice(shapes,p=sw)); counts=_shape_counts(shape)
-        if len(counts)>len(teams): continue
+        attempts+=1; stale+=1
+        shape=str(rng.choice(shapes,p=sw))
+        counts=_shape_counts(shape)
         chosen=list(rng.choice(teams,size=len(counts),replace=False,p=tw))
-        sk_idx=[]
+
+        sk_idx=[]; ids=[]; sk_salary=0; cc=ww=dd=0
         valid=True
         for team,size in zip(chosen,counts):
-            combo=_weighted_pick(group_cache.get((team,size),[]),rng)
-            if combo is None: valid=False; break
-            sk_idx.extend(list(combo))
-        if not valid or len(set(sk_idx))!=8: continue
-        sk=active.loc[sk_idx]
-        if not _lineup_position_ok(sk["Pos"].tolist()): continue
-        sk_ids=set(sk["ID"].astype(int))
-        if locked_ids and not locked_ids.intersection(set(goalies["ID"].astype(int))).issubset(set(goalies["ID"].astype(int))):
+            pack=group_cache.get((team,size),{})
+            items=pack.get("items",[])
+            probs=pack.get("p",np.array([]))
+            if not items:
+                valid=False; break
+            meta=items[int(rng.choice(len(items),p=probs))]
+            sk_idx.extend(meta["idx"]); ids.extend(meta["ids"])
+            sk_salary+=meta["salary"]; cc+=meta["c"]; ww+=meta["w"]; dd+=meta["d"]
+        if not valid or len(sk_idx)!=SKATERS:
             continue
-        gweights=gw.copy()
-        primary=chosen[0]
-        for j,(_,gr) in enumerate(goalies.iterrows()):
-            if no_vs_goalie and str(gr["Opp"]) in set(sk["Team"]): gweights[j]=0
-            if no_vs_goalie and str(gr["Team"]) in set(sk["Opp"]): gweights[j]=0
-            if prefer_stack_goalie and str(gr["Team"])==primary: gweights[j]*=2.0
-        if gweights.sum()<=0: continue
-        gweights=gweights/gweights.sum()
-        gi=int(rng.choice(len(goalies),p=gweights))
-        gidx=goalies.index[gi]
-        ids=sk_ids|{int(active.loc[gidx,"ID"])}
-        if locked_ids and not locked_ids.issubset(ids): continue
-        salary=int(sk["Salary"].sum()+active.loc[gidx,"Salary"])
-        if salary<min_salary or salary>CAP: continue
-        key=tuple(sorted(ids))
-        if key in seen: continue
-        seen.add(key)
-        own_idx=[posmap[i] for i in sk_idx+[gidx]]
-        out.append({"idx":sk_idx+[gidx],"salary":salary,"shape":shape,"primary":primary,
-                    "own_product":float(np.prod(np.clip(own[own_idx]/100,.002,.95)))})
+        if not (cc>=2 and ww>=3 and dd>=2 and cc<=3 and ww<=4 and dd<=3):
+            continue
+
+        # Choose only goalies that keep the lineup legal before doing any expensive work.
+        elig=[]; gweights=[]
+        for gm in goalie_meta:
+            if no_vs_goalie and gm["opp"] in chosen:
+                continue
+            total_salary=sk_salary+gm["salary"]
+            if total_salary<min_salary or total_salary>CAP:
+                continue
+            weight=gm["w"]*(2.0 if prefer_stack_goalie and gm["team"]==chosen[0] else 1.0)
+            elig.append(gm); gweights.append(weight)
+        if not elig:
+            continue
+        gweights=np.asarray(gweights,dtype=float); gweights=gweights/gweights.sum()
+        gm=elig[int(rng.choice(len(elig),p=gweights))]
+
+        lineup_ids=set(ids+[gm["id"]])
+        if locked_ids and not locked_ids.issubset(lineup_ids):
+            continue
+        key=tuple(sorted(lineup_ids))
+        if key in seen:
+            continue
+
+        seen.add(key); stale=0
+        own_idx=[posmap[i] for i in sk_idx+[gm["idx"]]]
+        out.append({
+            "idx":sk_idx+[gm["idx"]],
+            "salary":sk_salary+gm["salary"],
+            "shape":shape,
+            "primary":chosen[0],
+            "own_product":float(np.prod(np.clip(own[own_idx]/100,.002,.95))),
+        })
+
+        if stale>25000 and len(out)>=max(500,min(n,1500)):
+            break
+
     return out
 
 def simulate_players(d,n_sims,seed):
@@ -641,14 +691,19 @@ if st.button("☢️ RUN NHL GPP SIM",type="primary",use_container_width=True):
         st.error("You can lock at most 9 players."); st.stop()
     run_players=players.copy()
     seed=int(np.random.default_rng().integers(1,2_000_000_000))
-    with st.spinner("Building correlated NHL stacks and simulating the slate..."):
+    with st.status("🏒 Building NHL GPP candidate universe...",expanded=True) as run_status:
+        st.write("Generating correlated line / power-play stacks...")
         cands=generate_candidates(run_players,int(candidates_n),int(min_salary),seed,mix,bool(no_vs_goalie),bool(prefer_stack_goalie),bool(avoid_fourth_line),locked,excluded)
         if not cands:
+            run_status.update(label="No legal candidates generated",state="error")
             st.error("No legal NHL lineups were generated. Loosen the pool/exposure rules or lower the minimum salary."); st.stop()
+        st.write(f"✅ Generated {len(cands):,} legal candidates. Simulating {int(universes):,} slate outcomes...")
         sims=simulate_players(run_players,int(universes),seed)
         own=ownership_estimate(run_players)
+        st.write("Scoring ceiling, leverage and tournament outcomes...")
         results=evaluate(cands,sims,run_players,own)
         results=contest_metrics(results,cands,sims,run_players,seed)
+        run_status.update(label=f"✅ NHL SIM complete — {len(cands):,} candidates evaluated",state="complete",expanded=False)
         boosts=dict(zip(edited["ID"].astype(int),edited["Boost %"].astype(float)))
         for ri in results.index:
             c=cands[int(results.at[ri,"_candidate"])]

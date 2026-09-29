@@ -90,10 +90,12 @@ def load_csv(src):
     d=d.copy()
     d["ID"]=pd.to_numeric(d["ID"],errors="coerce").astype("Int64")
     d["Salary"]=pd.to_numeric(d["Salary"],errors="coerce").fillna(0).astype(int)
-    d["FPPG"]=pd.to_numeric(d.get("AvgPointsPerGame",0),errors="coerce").fillna(0.0)
+    fppg_src=d["AvgPointsPerGame"] if "AvgPointsPerGame" in d.columns else pd.Series(0.0,index=d.index)
+    status_src=d["Status"] if "Status" in d.columns else pd.Series("",index=d.index)
+    d["FPPG"]=pd.to_numeric(fppg_src,errors="coerce").fillna(0.0)
     d["Team"]=d[team_col].map(_norm_team)
     d["Pos"]=d[pos_col].map(_norm_pos)
-    d["Status"]=d.get("Status","").fillna("").astype(str).str.upper()
+    d["Status"]=status_src.fillna("").astype(str).str.upper()
     d=d[~d["Status"].isin(["OUT","O","IR"])].dropna(subset=["ID"])
     d=d[d["Pos"].isin(["C","W","D","G"])].drop_duplicates("ID").reset_index(drop=True)
     if "Game Info" in d.columns:
@@ -261,7 +263,7 @@ def build_group_cache(d):
         # Keep enough salary relief for 49.6k builds while concentrating on fantasy-relevant roles.
         tmp=g.copy()
         tmp["_rank"]=base_projection(tmp)+np.where(tmp["PP"].eq("PP1"),3.2,0)+np.where(tmp["Line"].isin(["F1","F2"]),2.2,0)
-        pool=tmp.sort_values("_rank",ascending=False).head(15)
+        pool=tmp.sort_values("_rank",ascending=False).head(13)
         idxs=pool.index.tolist()
         known_roles=bool(((pool["Line"]!="?") | (pool["PP"].isin(["PP1","PP2"]))).any())
         for size in [1,2,3,4,5]:
@@ -545,6 +547,21 @@ goalie_cov=float(players.loc[players["Pos"]=="G","G Status"].str.lower().isin(["
 m1,m2,m3,m4=st.columns(4)
 m1.metric("Players",len(players)); m2.metric("Teams",players["Team"].nunique()); m3.metric("Line Match",f"{line_cov:.0f}%"); m4.metric("Salary Cap","$50,000")
 st.caption(f"Slate date detected: {_slate_date(players)} · Role data: Daily Faceoff best-effort live match")
+
+with st.expander("🧠 How NUKE is constructing NHL GPP lineups", expanded=False):
+    st.markdown("""
+**The core idea is correlation, not nine isolated projections.** A goal can score for the goal-scorer and one or two teammates on the same play, which is why NUKE prioritizes linemates and overlapping power-play units.
+
+- **4-3-1 (default 50%)** — primary four-man team stack, usually a correlated forward core plus a defenseman/PP piece; three correlated skaters from another team; one skater from a third team.
+- **3-3-2 (default 35%)** — two correlated three-man stacks plus a two-man mini-stack. This is one of the standard tournament constructions.
+- **4-2-2 / 5-2-1** — smaller portfolio shares for alternate ceiling paths and differentiation.
+- **Goalie correlation** — NUKE prefers pairing the goalie with the primary offensive stack because team scoring and the goalie win can succeed together.
+- **No skaters against your goalie** is on by default because those outcomes are strongly negatively correlated.
+- **Power-play overlap matters.** PP1 teammates get additional correlation weight, especially when a defenseman shares the unit with a forward stack.
+- **GPP score favors tails.** P95, top-1% outcomes and simulated win rate matter more than median projection alone.
+- **Portfolio diversity matters.** Minimum-unique and max-exposure settings prevent 20 entries from becoming tiny variations of one lineup.
+""")
+    st.caption("DraftKings NHL scoring rewards goals, assists, shots, blocked shots and ceiling bonuses; goalie scoring includes saves, wins and shutouts. NUKE uses DK FPPG as the player baseline and adds correlated team/line/power-play simulation around it.")
 
 st.subheader("🏒 Player Pool")
 st.caption("Lines and PP roles matter in NHL GPPs because linemates and power-play teammates can score together on the same goal.")

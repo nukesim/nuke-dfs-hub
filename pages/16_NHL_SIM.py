@@ -304,11 +304,14 @@ def _weighted_pick(items,rng):
 def _shape_counts(shape):
     return [int(x) for x in shape.split("-")]
 
-def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_stack_goalie=True,locked_ids=None,excluded_ids=None):
+def generate_candidates(d,n,min_salary,seed,shape_mix,no_vs_goalie=True,prefer_stack_goalie=True,avoid_fourth_line=True,locked_ids=None,excluded_ids=None):
     rng=np.random.default_rng(seed)
     locked_ids=set(locked_ids or [])
     excluded_ids=set(excluded_ids or [])
     active=d[~d["ID"].astype(int).isin(excluded_ids)].copy()
+    if avoid_fourth_line:
+        fourth=(active["Pos"]!="G") & (active["Line"].astype(str)=="F4") & (~active["PP"].astype(str).isin(["PP1","PP2"])) & (~active["ID"].astype(int).isin(locked_ids))
+        active=active[~fourth].copy()
     if len(active)<9: return []
     group_cache=build_group_cache(active)
     teams=sorted(active.loc[active["Pos"]!="G","Team"].unique())
@@ -604,6 +607,8 @@ with st.sidebar:
                          help="Each portfolio lineup must differ from every selected lineup by at least this many players.")
     no_vs_goalie=st.checkbox("No skaters vs own goalie",True,key="nhl_no_vs_g")
     prefer_stack_goalie=st.checkbox("Prefer goalie with primary stack",True,key="nhl_g_stack")
+    avoid_fourth_line=st.checkbox("Avoid non-PP 4th-line skaters",True,key="nhl_avoid_f4",
+                                   help="Research-based GPP default: fourth-line players usually lack enough ice time unless they retain a power-play role.")
     st.markdown("### Stack Construction")
     st.caption("Percent of portfolio by skater team-stack shape. The goalie is separate.")
     mix={}
@@ -626,7 +631,7 @@ if st.button("☢️ RUN NHL GPP SIM",type="primary",use_container_width=True):
     run_players=players.copy()
     seed=int(np.random.default_rng().integers(1,2_000_000_000))
     with st.spinner("Building correlated NHL stacks and simulating the slate..."):
-        cands=generate_candidates(run_players,int(candidates_n),int(min_salary),seed,mix,bool(no_vs_goalie),bool(prefer_stack_goalie),locked,excluded)
+        cands=generate_candidates(run_players,int(candidates_n),int(min_salary),seed,mix,bool(no_vs_goalie),bool(prefer_stack_goalie),bool(avoid_fourth_line),locked,excluded)
         if not cands:
             st.error("No legal NHL lineups were generated. Loosen the pool/exposure rules or lower the minimum salary."); st.stop()
         sims=simulate_players(run_players,int(universes),seed)

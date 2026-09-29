@@ -133,7 +133,7 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
         out["lat"]=37.16258
         out["lon"]=-113.64453
         out["tee_times"]=_bank_utah_2026_pairings()
-        out["status"]=f"Tee times loaded · {len(out['tee_times'])} golfers"
+        out["status"]="Published R1/R2 tee times loaded"
 
     # Generic ESPN discovery remains in place for future events and may fill richer metadata.
     try:
@@ -438,9 +438,13 @@ golfers=attach_tee_weather(golfers,ctx,weather)
 
 course_label=ctx.get("course") or ctx.get("location") or "Course locating automatically"
 tee_ready=bool(ctx.get("tee_times"))
+tee_matches=int((golfers["R1 Tee"]!="—").sum()) if "R1 Tee" in golfers.columns else 0
 wcols=st.columns([2,2,2])
 wcols[0].info(f"📍 {course_label}" + (f" · {ctx.get('location')}" if ctx.get("location") else ""))
-wcols[1].info(("✅ " if tee_ready else "⏳ ") + ctx.get("status","Tee times not released"))
+if tee_ready:
+    wcols[1].info(f"✅ R1/R2 tee times: {tee_matches}/{len(golfers)} DK golfers · Golf Channel")
+else:
+    wcols[1].info("⏳ Tee times not loaded")
 if wcols[1].button("🔄 REFRESH TEE TIMES",use_container_width=True,key="pga_refresh_tee"):
     st.session_state["pga_tee_refresh_nonce"]=pga_refresh_nonce+1
     fetch_pga_context.clear()

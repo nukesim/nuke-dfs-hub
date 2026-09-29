@@ -19,6 +19,7 @@ CAP = 50000
 ROSTER = 9
 SKATERS = 8
 DEFAULT_MIN_SALARY = 49600
+DEFAULT = Path(__file__).resolve().parents[1] / "data" / "nhl_current.csv"
 
 TEAM_SLUGS = {
     "ANA":"anaheim-ducks","BOS":"boston-bruins","BUF":"buffalo-sabres","CGY":"calgary-flames",
@@ -527,21 +528,24 @@ def export_dk(portfolio,cands,d):
 st.title("🏒 NUKE NHL")
 st.caption("DraftKings NHL GPP simulator · 2 C · 3 W · 2 D · 1 G · 1 UTIL · $50,000 cap")
 
-up=st.file_uploader("Upload a DraftKings NHL salary CSV for the slate you want to play",type=["csv"])
-if up is None:
-    st.info("Upload the DraftKings NHL salary CSV for your slate. NUKE will automatically pull current line combinations, power-play roles and goalie status.")
-    with st.expander("What NUKE NHL is built to do"):
-        st.markdown("""
-        **GPP-first construction:** correlated 4-3-1, 3-3-2, 5-2-1 and 4-2-2 skater stacks; top-line and power-play correlation; goalie/team correlation; no skaters against your own goalie; ownership leverage; lineup diversity; and tournament simulations.
-
-        **Automatic context:** NUKE attempts to match the uploaded player pool to current Daily Faceoff line combinations and starting-goalie status. If a feed is unavailable, the page still works from DraftKings salary/FPPG data and clearly marks missing role data.
-        """)
-    st.stop()
+with st.expander("Optional: upload a different DraftKings NHL salary CSV", expanded=False):
+    up=st.file_uploader("Different NHL slate CSV",type=["csv"],key="nhl_optional_upload")
 
 try:
-    golfers=load_csv(up)
+    if up is not None:
+        golfers=load_csv(up)
+        source="Uploaded slate"
+    elif DEFAULT.exists():
+        golfers=load_csv(DEFAULT)
+        source="Loaded automatically"
+    else:
+        st.info("No bundled NHL slate is available yet.")
+        st.stop()
 except Exception as e:
     st.error(str(e)); st.stop()
+
+slate_games=sorted(golfers["Game Info"].astype(str).unique().tolist()) if "Game Info" in golfers.columns else []
+st.success(f"{source}: {_slate_date(golfers)} · {len(golfers)} active players · {golfers['Team'].nunique()} teams")
 
 if st.sidebar.button("🔄 Refresh NHL lines / goalies",use_container_width=True):
     st.cache_data.clear(); st.rerun()

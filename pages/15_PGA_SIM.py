@@ -9,9 +9,15 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from nuke_nav import render_nav
+from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
+    generate_pga_candidates, select_pga_portfolio, wave_lineup_targets)
 
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
+
+PGA_PORTFOLIO_VERSION=2
+if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
+    st.session_state.pop("pga_results",None)
 
 CAP=50000
 ROSTER=6
@@ -26,7 +32,7 @@ def load_csv(src):
     d["ID"]=pd.to_numeric(d["ID"],errors="coerce").astype("Int64")
     d["Salary"]=pd.to_numeric(d["Salary"],errors="coerce").fillna(0).astype(int)
     d["AvgPointsPerGame"]=pd.to_numeric(d["AvgPointsPerGame"],errors="coerce").fillna(0.0)
-    d["Status"]=d.get("Status","").fillna("").astype(str).str.upper()
+    d["Status"]=d.get("Status",pd.Series("",index=d.index)).fillna("").astype(str).str.upper()
     d=d[~d["Status"].isin(["OUT","O","IR"])].dropna(subset=["ID"])
     d=d.drop_duplicates("ID").reset_index(drop=True)
     return d
@@ -260,36 +266,11 @@ def attach_tee_weather(d,ctx,weather):
         x.loc[x["Weather Edge"]!=0,"Weather Edge"]=(x.loc[x["Weather Edge"]!=0,"Weather Edge"]-baseline)*0.22
     return x
 
-def generate_candidates(d,n,min_salary,seed,locked_ids,excluded_ids):
-    rng=np.random.default_rng(seed)
-    ids=d["ID"].astype(int).to_numpy()
-    salaries=d["Salary"].to_numpy(int)
-    proj=base_projection(d)
-    own=ownership_estimate(d)
-    active=np.array([i not in excluded_ids for i in ids])
-    locked_idx=np.where(np.isin(ids,list(locked_ids)) & active)[0]
-    if len(locked_idx)>ROSTER:
-        return []
-    avail=np.where(active & ~np.isin(ids,list(locked_ids)))[0]
-    # quality-weighted but stochastic candidate creation
-    value=proj/np.maximum(salaries,1)*1000
-    z=(value-value.mean())/(value.std()+1e-9)
-    w=np.exp(np.clip(.45*z,-2,2)); w=w[avail]; w=w/w.sum()
-    seen=set(); out=[]
-    attempts=0; max_attempts=max(20000,n*80)
-    while len(out)<n and attempts<max_attempts:
-        attempts+=1
-        need=ROSTER-len(locked_idx)
-        if need<0 or len(avail)<need: break
-        pick=rng.choice(avail,size=need,replace=False,p=w)
-        idx=np.concatenate([locked_idx,pick])
-        salary=int(salaries[idx].sum())
-        if salary<min_salary or salary>CAP: continue
-        key=tuple(sorted(ids[idx].tolist()))
-        if key in seen: continue
-        seen.add(key)
-        out.append({"idx":idx,"salary":salary,"own_product":float(np.prod(np.clip(own[idx]/100,.002,.99)))})
-    return out
+def generate_candidates(d,n,min_salary,seed,locked_ids,excluded_ids,wave_targets=None):
+    return generate_pga_candidates(
+        d["ID"].astype(int).to_numpy(), d["Salary"].to_numpy(int),
+        base_projection(d), ownership_estimate(d), n, min_salary, seed,
+        locked_ids, excluded_ids, d["Wave"].to_numpy(), wave_targets)
 
 def simulate_golfers(d,n_sims,seed):
     rng=np.random.default_rng(seed+991)
@@ -461,8 +442,10 @@ m1,m2,m3,m4=st.columns(4)
 m1.metric("Golfers",len(golfers)); m2.metric("Roster","6 G"); m3.metric("Salary Cap","$50,000"); m4.metric("Event",event)
 
 st.subheader("🏌️ Golfer Pool")
-st.caption("Include/exclude golfers, lock golfers into every candidate lineup, and optionally boost or limit portfolio exposure.")
+st.caption("Include/exclude golfers, lock golfers, and set boosts or exposure limits. Automatic caps use salary tier, relative projection/cut strength, and estimated ownership. An explicit Max % overrides the automatic cap within the global limit; locks use 100%. In portfolios of 10+ lineups, every golfer used appears at least twice.")
 editor=golfers[["ID","Name","Salary","AvgPointsPerGame","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
+_, preview_cut=simulate_golfers(golfers,1,0)
+editor["Auto Max %"]=automatic_exposure_caps(golfers["Salary"],base_projection(golfers),preview_cut,ownership_estimate(golfers))
 # Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
 editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
 # Keep projected ownership directly to the right of Salary.
@@ -488,7 +471,7 @@ if "pga_pool_bulk_in" in st.session_state:
 
 edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430,
     column_order=[c for c in editor.columns if c != "ID"],
-    disabled=["ID","Name","Salary","AvgPointsPerGame","pOwn%","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
+    disabled=["Auto Max %","ID","Name","Salary","AvgPointsPerGame","pOwn%","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
     column_config={
       "In":st.column_config.CheckboxColumn("In"),
       "Lock":st.column_config.CheckboxColumn("🔒 Lock"),
@@ -498,7 +481,8 @@ edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430
       "Weather Edge":st.column_config.NumberColumn("Wx Edge",format="%+.2f"),
       "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),
       "Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=5),
-      "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=5),
+      "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=5,help="100 uses the automatic cap. Any lower value is an explicit override, bounded by the global cap. Zero excludes this golfer from the portfolio."),
+      "Auto Max %":st.column_config.NumberColumn("Auto Max %",format="%d%%"),
     },key="pga_pool_editor")
 
 with st.sidebar:
@@ -539,64 +523,52 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
     if len(locked)>6:
         st.error("You can lock at most 6 golfers."); st.stop()
     seed=int(np.random.default_rng().integers(1,2_000_000_000))
-    with st.spinner("Generating PGA lineups and simulating tournament outcomes..."):
-        cands=generate_candidates(golfers,int(candidates_n),int(min_salary),seed,locked,excluded)
+    st.session_state.pop("pga_results",None)
+    # Zero max is an exclusion during generation as well as selection.
+    excluded.update(edited.loc[edited["Max %"]==0,"ID"].astype(int))
+    personal_min=dict(zip(edited["ID"].astype(int),edited["Min %"].astype(float)))
+    personal_max=dict(zip(edited["ID"].astype(int),edited["Max %"].astype(float)))
+    if any(personal_min[pid]>0 for pid in excluded):
+        st.error("An excluded golfer has a positive minimum. Include that golfer or clear the minimum."); st.stop()
+    waves=golfers["Wave"].astype(str).to_numpy()
+    wave_active=tee_ready and set(waves).intersection({"AM","PM"})=={"AM","PM"}
+    try:
+        wave_targets=wave_lineup_targets(int(portfolio_n),wave_mix) if wave_active else None
+        with st.spinner("Generating PGA lineups and simulating tournament outcomes..."):
+            cands=generate_candidates(golfers,int(candidates_n),int(min_salary),seed,locked,excluded,wave_targets)
+    except PortfolioError as e:
+        st.error(str(e)); st.stop()
+    with st.spinner("Simulating golfers and selecting a complete constrained portfolio..."):
+
         if not cands:
             st.error("No legal 6-golfer lineups were generated. Lower the salary floor or loosen the pool."); st.stop()
         sims,cut_prob=simulate_golfers(golfers,int(universes),seed)
         own=ownership_estimate(golfers)
-        results=evaluate(cands,sims,own)
-        results=simulate_contest_metrics(results,cands,sims,cut_prob,int(field_size),float(entry_fee),float(first_prize),seed)
-        # apply user boosts to selection score
         boosts=dict(zip(edited["ID"].astype(int),edited["Boost %"].astype(float)))
-        for ri in results.index:
-            c=cands[int(results.at[ri,"_candidate"])]
-            results.at[ri,"NUKE Score"] += sum(boosts.get(int(golfers.iloc[i]["ID"]),0) for i in c["idx"])/100
-        results=results.sort_values("NUKE Score",ascending=False).reset_index(drop=True)
-        # greedy diversified portfolio honoring max exposure + per-golfer max/min as best effort
-        counts={int(x):0 for x in golfers["ID"]}
-        pair_counts={}
-        triple_counts={}
-        selected=[]
-        target=int(portfolio_n)
-        personal_max=dict(zip(edited["ID"].astype(int),edited["Max %"].astype(float)))
-        pair_cap=max(1,int(np.floor(target*float(max_pair)/100+1e-9)))
-        triple_cap=max(1,int(np.floor(target*float(max_triple)/100+1e-9)))
-        waves=golfers["Wave"].astype(str).to_numpy()
-        wave_active=tee_ready and set(waves).intersection({"AM","PM"})=={"AM","PM"} and wave_total==100
-        wave_targets={}
-        if wave_active:
-            raw_targets={k:target*float(v)/100 for k,v in wave_mix.items()}
-            wave_targets={k:int(np.floor(v)) for k,v in raw_targets.items()}
-            remain=target-sum(wave_targets.values())
-            for k in sorted(raw_targets,key=lambda z:raw_targets[z]-wave_targets[z],reverse=True)[:remain]:
-                wave_targets[k]+=1
-        wave_used={k:0 for k in range(7)}
-        for _,r in results.iterrows():
-            c=cands[int(r["_candidate"])]
-            ids=sorted(int(golfers.iloc[i]["ID"]) for i in c["idx"])
-            pairs=[(ids[a],ids[b]) for a in range(6) for b in range(a+1,6)]
-            triples=[(ids[a],ids[b],ids[c3]) for a in range(6) for b in range(a+1,6) for c3 in range(b+1,6)]
-            ok=True
-            for pid in ids:
-                cap=min(float(max_player),personal_max.get(pid,100.0))
-                if counts.get(pid,0)+1 > max(1,int(np.floor(target*cap/100+1e-9))):
-                    ok=False; break
-            if ok and any(pair_counts.get(combo,0)+1 > pair_cap for combo in pairs):
-                ok=False
-            if ok and any(triple_counts.get(combo,0)+1 > triple_cap for combo in triples):
-                ok=False
-            am_count=sum(1 for idx in c["idx"] if waves[idx]=="AM")
-            if ok and wave_active and wave_used.get(am_count,0)>=wave_targets.get(am_count,0):
-                ok=False
-            if ok:
-                selected.append(r)
-                if wave_active: wave_used[am_count]=wave_used.get(am_count,0)+1
-                for pid in ids: counts[pid]=counts.get(pid,0)+1
-                for combo in pairs: pair_counts[combo]=pair_counts.get(combo,0)+1
-                for combo in triples: triple_counts[combo]=triple_counts.get(combo,0)+1
-            if len(selected)>=target: break
-        portfolio=pd.DataFrame(selected)
+        auto_caps=automatic_exposure_caps(golfers["Salary"],base_projection(golfers),cut_prob,own)
+        candidate_budget=int(candidates_n)
+        while True:
+            results=evaluate(cands,sims,own)
+            results=simulate_contest_metrics(results,cands,sims,cut_prob,int(field_size),float(entry_fee),float(first_prize),seed)
+            for ri in results.index:
+                cand=cands[int(results.at[ri,"_candidate"])]
+                results.at[ri,"NUKE Score"] += sum(boosts.get(int(golfers.iloc[i]["ID"]),0) for i in cand["idx"])/100
+            results=results.sort_values("NUKE Score",ascending=False).reset_index(drop=True)
+            try:
+                portfolio=select_pga_portfolio(results,cands,golfers,int(portfolio_n),
+                    float(max_player),float(max_pair),float(max_triple),personal_min,
+                    personal_max,auto_caps,locked,wave_targets)
+                break
+            except PortfolioError as e:
+                if not e.retryable or candidate_budget>=20000:
+                    st.error(str(e)); st.stop()
+                candidate_budget=min(20000,max(10000,candidate_budget*2))
+                st.info(f"Expanding the candidate pool to {candidate_budget:,} to complete the requested portfolio under your constraints.")
+                expanded=generate_candidates(golfers,candidate_budget,int(min_salary),seed,locked,excluded,wave_targets)
+                if len(expanded)<=len(cands):
+                    st.error(str(e)); st.stop()
+                cands=expanded
+        st.session_state["pga_results_version"]=PGA_PORTFOLIO_VERSION
         st.session_state["pga_results"]=(results,cands,portfolio,golfers,own,cut_prob,seed)
 
 if "pga_results" in st.session_state:
@@ -604,6 +576,7 @@ if "pga_results" in st.session_state:
     st.divider(); st.header("🏆 PGA Contest Sim Results")
     a,b,c,d=st.columns(4)
     a.metric("Candidates",len(results)); b.metric("Portfolio",len(portfolio)); c.metric("Universes",f"{universes:,}"); d.metric("Seed",seed)
+    st.success(f"Complete portfolio: {len(portfolio)} unique lineups. Golfer, pair/triple, minimum-use, and wave constraints validated.")
     st.subheader("NUKE PGA Portfolio")
     show=[]
     for rank,r in portfolio.reset_index(drop=True).iterrows():
@@ -635,7 +608,7 @@ if "pga_results" in st.session_state:
             if i in cands[int(r["_candidate"])]["idx"]: ct+=1
         if ct:
             exp.append({"Golfer":row["Name"],"Salary":int(row["Salary"]),"Lineups":ct,
-                        "Exposure %":round(100*ct/denom,1),"Est. Own %":round(float(own[i]),1),
+                        "Exposure %":round(100*ct/denom,1),"Cap Lineups":portfolio.attrs.get("exposure_caps",{}).get(pid),"Est. Own %":round(float(own[i]),1),
                         "Make Cut %":round(float(cut_prob[i])*100,1)})
     st.dataframe(pd.DataFrame(exp).sort_values(["Exposure %","Salary"],ascending=[False,False]),hide_index=True,use_container_width=True)
 
@@ -646,3 +619,4 @@ if "pga_results" in st.session_state:
             top.append({"Rank":rank+1,"Golfers":" · ".join(lineup_names(cand,golfers)),"Salary":int(r["Salary"]),
                         "Mean":r["Mean"],"P95":r["P95"],"Top 1%":r["Top 1%"],"6/6 %":r["6/6 %"],"Win %":r["Win %"],"Top 1% %":r["Top 1% %"],"Cash %":r["Cash %"],"Est. ROI %":r["Est. ROI %"],"Est. Duplicates":r["Est. Duplicates"],"NUKE Score":round(float(r["NUKE Score"]),3)})
         st.dataframe(pd.DataFrame(top),hide_index=True,use_container_width=True)
+

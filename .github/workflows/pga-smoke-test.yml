@@ -1,0 +1,33 @@
+name: PGA portfolio regression test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pages/15_PGA_SIM.py"
+      - "nuke_pga_portfolio.py"
+      - "data/pga_current.csv"
+      - "requirements.txt"
+      - "tests/test_pga_portfolio.py"
+      - ".github/workflows/pga-smoke-test.yml"
+  pull_request:
+    paths:
+      - "pages/15_PGA_SIM.py"
+      - "nuke_pga_portfolio.py"
+      - "requirements.txt"
+      - "tests/test_pga_portfolio.py"
+
+jobs:
+  portfolio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install numerical dependencies
+        run: pip install numpy pandas 'scipy>=1.11'
+      - name: Compile PGA page and portfolio engine
+        run: python -m py_compile pages/15_PGA_SIM.py nuke_pga_portfolio.py
+      - name: Verify complete PGA portfolios and exposure constraints
+        run: python -m unittest discover -s tests -p test_pga_portfolio.py -v

@@ -3,3 +3,5 @@ pandas
 numpy
 openpyxl
 requests
+
+scipy>=1.11

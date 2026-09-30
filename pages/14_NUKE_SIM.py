@@ -1,4 +1,4 @@
-# Deployment refresh: DraftKings Week 4 · 2026-09-30
+# Deployment refresh: DraftKings and FanDuel Week 4 · 2026-09-30
 import streamlit as st
 from nuke_nav import render_nav
 import pandas as pd

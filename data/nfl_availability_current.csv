@@ -1,1 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
+23180,Puka Nacua,LAR,,,,0.6921,,,,2026-09-30T17:40:43+00:00
+19236,Justin Jefferson,MIN,,,,0.36928,,,,2026-09-30T17:40:43+00:00
+20130,Nico Collins,HOU,,,,0.30162,,,,2026-09-30T17:40:43+00:00
+22982,Breece Hall,NYJ,,,,0.26981,,,,2026-09-30T17:40:43+00:00
+19275,Jalen Hurts,PHI,,,,0.99,,,,2026-09-30T17:40:43+00:00
+12119,Mike Evans,SF,,,,0.481,,,,2026-09-30T17:40:43+00:00
+18218,A.J. Brown,NE,IR,IR,,,,,2026-09-30 17:30:01,2026-09-30T17:40:43+00:00
+23084,Caleb Williams,CHI,,,,0.26554,,,,2026-09-30T17:40:43+00:00
+19231,Travis Etienne Jr.,NO,OUT,O,,0.3173,injured,,2026-09-29 12:00:00,2026-09-30T17:40:43+00:00
+24357,Adonai Mitchell,NYJ,,,,0.64609,,,,2026-09-30T17:40:43+00:00

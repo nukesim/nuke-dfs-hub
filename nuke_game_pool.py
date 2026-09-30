@@ -72,7 +72,7 @@ def game_environment(players, odds=None):
                 books_val = pd.to_numeric(orow.get("Book Count", 0), errors="coerce")
                 books = int(books_val) if pd.notna(books_val) else 0
                 updated = str(orow.get("Snapshot UTC", ""))
-                source = "Sportsbook Consensus"
+                source = str(orow.get("Source", "Sportsbook Consensus"))
             else:
                 team_total, game_total, spread, books, updated, source = float(fallback_total.get(team,23.5)), fallback_gt, np.nan, 0, "", "DK Salary Estimate"
             rows.append({"Game":str(game),"Team":team,"Opponent":opp,"Spread":spread,"Team Total":round(team_total,1),"Game Total":round(game_total,1),"Books":books,"Source":source,"Last Update":updated})

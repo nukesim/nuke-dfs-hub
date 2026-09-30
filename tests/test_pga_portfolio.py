@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 
 from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
-    generate_pga_candidates, select_pga_portfolio, wave_lineup_targets)
+    generate_pga_candidates, select_pga_portfolio, wave_lineup_targets,
+    wave_lineup_bounds, salary_build_type, build_type_summary)
 
 
 def page_functions():
@@ -18,12 +19,92 @@ def page_functions():
     names = {"load_csv", "base_projection", "ownership_estimate", "simulate_golfers",
              "evaluate", "simulate_contest_metrics", "_norm_name", "_bank_utah_2026_pairings", "export_csv"}
     nodes = [n for n in source.body if isinstance(n, ast.FunctionDef) and n.name in names]
-    env = {"np": np, "pd": pd, "re": __import__("re")}
+    env = {"np": np, "pd": pd, "re": __import__("re"), "salary_build_type": salary_build_type}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "pga_helpers", "exec"), env)
     return env
 
 
 class PGAPortfolioTests(unittest.TestCase):
+    def test_salary_build_bands_and_rounding(self):
+        self.assertEqual(salary_build_type([6999,7000,7999,8999,9999,10999]), "10/9/8/7/7/6")
+        self.assertEqual(salary_build_type([11000,9000,8000,7000,6000,5000]), "11/9/8/7/6/5")
+        bounds = wave_lineup_bounds(150, {4:(20,45),3:(10,60),0:(0,0)})
+        self.assertEqual(bounds[4], (30,67))
+        self.assertEqual(bounds[3], (15,90))
+        self.assertEqual(bounds[0], (0,0))
+        self.assertEqual(bounds[6], (0,150))
+        with self.assertRaisesRegex(PortfolioError, "no whole lineup"):
+            wave_lineup_bounds(3, {3:(20,25)})
+        with self.assertRaisesRegex(PortfolioError, "minimums"):
+            wave_lineup_bounds(20, {3:(60,100),4:(60,100)})
+        with self.assertRaisesRegex(PortfolioError, "maximums"):
+            wave_lineup_bounds(20, {am:(0,0) for am in range(7)})
+        with self.assertRaisesRegex(PortfolioError, "Min %"):
+            wave_lineup_bounds(20, {3:(90,20)})
+
+    def test_rebuild_joint_wave_and_build_ranges(self):
+        golfers=pd.DataFrame({"ID":range(14),"Name":[f"G{i}" for i in range(14)],
+            "Salary":[10000]*3+[9000]*3+[8000]*3+[7000]*3+[6000]*2,
+            "Wave":["AM","PM"]*7})
+        cands=[{"idx":np.array(c),"salary":int(golfers.iloc[list(c)]["Salary"].sum())}
+               for c in combinations(range(14),6) if 46000 <= golfers.iloc[list(c)]["Salary"].sum() <= 50000]
+        kinds=[salary_build_type(golfers.iloc[c["idx"]]["Salary"]) for c in cands]
+        a,b=[kind for kind,_ in Counter(kinds).most_common(2)]
+        results=pd.DataFrame({"_candidate":range(len(cands)),"NUKE Score":[100. if kind==a else 0. for kind in kinds]})
+        unchanged=results.copy(deep=True)
+        args=(results,cands,golfers,20,100,100,100,{}, {},np.full(14,100))
+        original=select_pga_portfolio(*args)
+        before=build_type_summary(results,cands,golfers,original).set_index("Build Type")
+        bounds=wave_lineup_bounds(20,{0:(0,0),1:(0,0),2:(10,40),3:(20,70),4:(10,50),5:(0,0),6:(0,0)})
+        rebuilt=select_pga_portfolio(*args,wave_bounds=bounds,build_ranges={a:(0,30),b:(40,70)})
+        summary=build_type_summary(results,cands,golfers,rebuilt).set_index("Build Type")
+        self.assertLessEqual(summary.loc[a,"Lineups"],6)
+        self.assertGreaterEqual(summary.loc[b,"Lineups"],8)
+        self.assertGreater(summary.loc[b,"Lineups"],before.loc[b,"Lineups"])
+        wave_counts=Counter(int(np.sum(golfers.iloc[cands[int(j)]["idx"]]["Wave"]=="AM")) for j in rebuilt["_candidate"])
+        for am,(lo,hi) in bounds.items():
+            self.assertTrue(lo <= wave_counts[am] <= hi)
+        uses=Counter(pid for j in rebuilt["_candidate"] for pid in cands[int(j)]["idx"])
+        self.assertTrue(all(ct>=2 for ct in uses.values()))
+        self.assertEqual(rebuilt["_candidate"].nunique(),20)
+        self.assertIn("Build Type",rebuilt)
+        pd.testing.assert_frame_equal(results,unchanged)
+        with self.assertRaisesRegex(PortfolioError,"only 0 simulated candidates"):
+            select_pga_portfolio(*args,build_ranges={"15/14/13/12/11/10":(10,100)})
+        self.assertEqual(len(original),20)
+
+    def test_real_slate_flexible_150_and_post_sim_rebuild(self):
+        env=page_functions()
+        golfers=env["load_csv"](Path(__file__).resolve().parents[1]/"tests/fixtures/pga_bank_utah_2026.csv")
+        tee=env["_bank_utah_2026_pairings"]()
+        golfers["Wave"]=["AM" if pd.Timestamp(tee[env["_norm_name"](name)][1]).tz_convert("America/Denver").hour<12 else "PM" for name in golfers["Name"]]
+        own=env["ownership_estimate"](golfers);projection=env["base_projection"](golfers)
+        ranges={6:(0,0),5:(5,35),4:(20,55),3:(10,45),2:(5,35),1:(0,0),0:(0,0)}
+        bounds=wave_lineup_bounds(150,ranges)
+        cands=generate_pga_candidates(golfers["ID"],golfers["Salary"],projection,own,5000,49600,930,
+                                      waves=golfers["Wave"],wave_bounds=bounds)
+        self.assertEqual(len(cands),5000)
+        sims,cut=env["simulate_golfers"](golfers,250,930)
+        results=env["evaluate"](cands,sims,own)
+        results=env["simulate_contest_metrics"](results,cands,sims,cut,2378,3,600,930)
+        caps=automatic_exposure_caps(golfers["Salary"],projection,cut,own)
+        args=(results,cands,golfers,150,40,30,25,{}, {},caps)
+        portfolio=select_pga_portfolio(*args,wave_bounds=bounds)
+        mix=build_type_summary(results,cands,golfers,portfolio)
+        kind=mix.sort_values("Candidates",ascending=False).iloc[0]["Build Type"]
+        rebuilt=select_pga_portfolio(*args,wave_bounds=bounds,build_ranges={kind:(20,60)})
+        self.assertEqual(len(rebuilt),150)
+        uses=Counter(int(golfers.iloc[ix]["ID"]) for j in rebuilt["_candidate"] for ix in cands[int(j)]["idx"])
+        self.assertTrue(all(ct>=2 and ct<=rebuilt.attrs["exposure_caps"][pid] for pid,ct in uses.items()))
+        wave_counts=Counter(int(np.sum(golfers.iloc[cands[int(j)]["idx"]]["Wave"]=="AM")) for j in rebuilt["_candidate"])
+        for am,(lo,hi) in bounds.items():
+            self.assertTrue(lo<=wave_counts[am]<=hi)
+        self.assertTrue(30 <= rebuilt["Build Type"].eq(kind).sum() <= 90)
+        exported=pd.read_csv(__import__("io").BytesIO(env["export_csv"](rebuilt,cands,golfers)))
+        self.assertEqual(len(exported),150)
+        self.assertEqual(list(exported["Build Type"]),list(rebuilt["Build Type"]))
+        self.assertIn("Wave Build",exported)
+
     def test_solver_repairs_greedy_dead_end(self):
         golfers = pd.DataFrame({"ID": range(14), "Name": [f"G{i}" for i in range(14)]})
         cands = [{"idx": np.array(idx)} for idx in

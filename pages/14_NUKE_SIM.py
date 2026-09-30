@@ -1,4 +1,4 @@
-# Deployment refresh: FanDuel Week 3 · 2026-09-22
+# Deployment refresh: DraftKings Week 4 · 2026-09-30
 import streamlit as st
 from nuke_nav import render_nav
 import pandas as pd
@@ -232,7 +232,7 @@ odds_history=load_odds_history()
 rendered_odds_status=odds_status(current_odds)
 if rendered_odds_status.get("available"):
     st.caption(
-        f"Sportsbook consensus loaded for {rendered_odds_status.get('games',0)} NFL games"
+        f"Sportsbook lines loaded for {rendered_odds_status.get('games',0)} NFL games"
         + (f" · Updated {rendered_odds_status.get('snapshot','')}" if rendered_odds_status.get("snapshot") else "")
     )
 

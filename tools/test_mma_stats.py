@@ -12,6 +12,12 @@ class FighterStatsTests(unittest.TestCase):
         self.assertEqual(result["deivesonfigueiredo"]["Moneyline"], 525)
         self.assertAlmostEqual(sum(r["Market Win %"] for r in result.values()), 100)
 
+    def test_moneylines_match_accented_fighter_names(self):
+        text = "Sportsbook Imanol Rodríguez Alden Coria Trend DraftKings -142 +120"
+        result = scope["_parse_fight_market"](text, "Imanol Rodriguez", "Alden Coria")
+        self.assertEqual(result["imanolrodriguez"]["Moneyline"], -142)
+        self.assertEqual(result["aldencoria"]["Moneyline"], 120)
+
     def test_consensus_ignores_opening_and_best_lines(self):
         text = "Betting Odds Deiveson Figueiredo +517 16% Open: +408 Best: +596 Payton Talbott -764 88% Open: -597 Best: -567 Line Movement"
         result = scope["_parse_fight_market"](text, "Payton Talbott", "Deiveson Figueiredo")
@@ -91,6 +97,27 @@ class FighterStatsTests(unittest.TestCase):
             result = scope["enrich_live_context"](original)
         self.assertEqual(result.loc[0, "SLpM"], 2.34)
         self.assertEqual(result.loc[0, "Sub Avg"], 0.0)
+
+    def test_moneyline_snapshot_survives_outage_for_current_card(self):
+        pd = scope["pd"]
+        original = scope["load_csv"](scope["Path"](scope["__file__"]).resolve().parents[1] / "data/mma_current.csv")
+        with patch.object(scope["requests"], "get", return_value=SimpleNamespace(ok=False)):
+            result = scope["enrich_live_context"](original)
+        self.assertGreaterEqual(result["Moneyline"].notna().sum(), 24)
+        payton = result.loc[result["Name"] == "Payton Talbott"].iloc[0]
+        self.assertLess(payton["Moneyline"], 0)
+        self.assertTrue(payton["Odds Updated"])
+        self.assertEqual(payton["Odds Source"], "DraftKings")
+        for _, fight in result.groupby("Fight"):
+            if fight["Market Win %"].notna().all():
+                self.assertAlmostEqual(fight["Market Win %"].sum(), 100)
+
+    def test_moneyline_snapshot_never_applies_to_other_card_date(self):
+        original = scope["load_csv"](scope["Path"](scope["__file__"]).resolve().parents[1] / "data/mma_current.csv")
+        original["Game Info"] = original["Game Info"].str.replace("10/03/2026", "11/03/2026", regex=False)
+        with patch.object(scope["requests"], "get", return_value=SimpleNamespace(ok=False)):
+            result = scope["enrich_live_context"](original)
+        self.assertFalse(result["Moneyline"].notna().any())
 
 
 if __name__ == "__main__":

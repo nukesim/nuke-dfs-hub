@@ -60,6 +60,10 @@ def _american_prob(odds):
     return np.nan
 
 def _parse_fight_market(txt,name_a,name_b):
+    # DraftKings salary names may omit accents used on the source page.
+    txt=unicodedata.normalize("NFKD",txt).encode("ascii","ignore").decode()
+    name_a=unicodedata.normalize("NFKD",str(name_a)).encode("ascii","ignore").decode()
+    name_b=unicodedata.normalize("NFKD",str(name_b)).encode("ascii","ignore").decode()
     # Match the page's fighter headings because URLs can reverse its order.
     for first,second in [(name_a,name_b),(name_b,name_a)]:
         heading=r"Sportsbook\s+"+re.escape(first)+r"\s+"+re.escape(second)+r"\s+Trend\b"
@@ -96,7 +100,10 @@ def fetch_fight_market(name_a,name_b,refresh_token=0):
             r=requests.get(url,timeout=10)
             if not r.ok: continue
             result=_parse_fight_market(_strip_html(r.text),name_a,name_b)
-            if result: return result
+            if result:
+                updated=datetime.now(ZoneInfo("UTC")).isoformat()
+                for values in result.values(): values["Odds Updated"]=updated
+                return result
         except requests.RequestException:
             continue
     return {}
@@ -231,6 +238,15 @@ def fetch_ufcstats(name,refresh_token=0):
 
 def enrich_live_context(d,refresh_token=0):
     x=d.copy()
+    odds_snapshot=Path(__file__).resolve().parents[1]/"data"/"mma_market.csv"
+    if odds_snapshot.exists():
+        saved=pd.read_csv(odds_snapshot).to_dict("records")
+        by_match={(_norm_name(r["Name"]),_norm_name(r["Opp"]),str(r["Game Info"])):r for r in saved}
+        for i,row in x.iterrows():
+            r=by_match.get((_norm_name(row["Name"]),_norm_name(row.get("Opp","")),str(row.get("Game Info",""))),{})
+            for col in ["Moneyline","Market Win %","Odds Source","Odds Updated"]:
+                if col in r and pd.notna(r[col]) and (col not in x or pd.isna(x.at[i,col])):
+                    x.at[i,col]=r[col]
     # A verified, dated snapshot survives app reboots and upstream outages.
     snapshot=Path(__file__).resolve().parents[1]/"data"/"mma_fighter_stats.csv"
     if snapshot.exists():
@@ -463,8 +479,18 @@ m=re.search(r"(\d{1,2}/\d{1,2}/\d{4})",str(fighters["Game Info"].iloc[0])) if le
 if m: event_date=m.group(1)
 refresh_nonce=int(st.session_state.get("mma_live_refresh_nonce",0))
 refresh_token=f"{int(time.time()//900)}:{refresh_nonce}"
+slate_key=tuple(sorted(zip(fighters["ID"].astype(int),fighters["Game Info"].astype(str))))
+last_market=st.session_state.get("mma_last_market",{})
+if last_market.get("slate")==slate_key:
+    for i,row in fighters.iterrows():
+        for col,val in last_market["values"].get(int(row["ID"]),{}).items():
+            fighters.at[i,col]=val
 with st.spinner("Pulling current MMA moneylines and UFCStats style data..."):
     fighters=enrich_live_context(fighters,refresh_token)
+st.session_state["mma_last_market"]={"slate":slate_key,"values":{
+    int(row["ID"]):{col:row[col] for col in ["Moneyline","Market Win %","Odds Source","Odds Updated"]
+                    if col in row and pd.notna(row[col])}
+    for _,row in fighters.iterrows()}}
 
 if st.session_state.get("mma_live_context_token")!=refresh_token:
     now=datetime.now(ZoneInfo("America/Chicago"))
@@ -480,14 +506,14 @@ odds_cov=int(fighters["Market Win %"].notna().sum())
 stats_cov=int(fighters["SLpM"].notna().sum())
 last_live=st.session_state.get("mma_live_updated_at","Just now")
 c1,c2,c3=st.columns([1,1,2])
-c1.metric("Live odds",f"{odds_cov}/{len(fighters)}")
+c1.metric("Odds available",f"{odds_cov}/{len(fighters)}")
 c2.metric("Fighter stats",f"{stats_cov}/{len(fighters)}")
-c3.caption(f"🕒 Live data last refreshed: **{last_live}** · auto-checks every 15 minutes while active.")
+c3.caption(f"🕒 Last live refresh attempt: **{last_live}** · auto-checks every 15 minutes while active.")
 if odds_cov<len(fighters):
     st.caption("Missing odds safely fall back to DraftKings salary-implied win probability. Missing fighter stats stay neutral in the style model.")
-with st.expander("Fighter stat sources and coverage",expanded=False):
-    st.caption("Verified saved stats remain available if a live source fails. Dates below show when each fighter's stats were retrieved; unsupported fighters remain blank.")
-    cols=[c for c in ["Name","SLpM","SApM","TD Avg","TD Acc %","TD Def %","Sub Avg","Stats Source","Stats Updated"] if c in fighters]
+with st.expander("Odds and fighter stat sources",expanded=False):
+    st.caption("Verified saved odds and stats remain available if a live source fails. Dates show when each value was retrieved. Saved odds only apply to the same matchup and card date.")
+    cols=[c for c in ["Name","Moneyline","Odds Source","Odds Updated","SLpM","SApM","TD Avg","TD Acc %","TD Def %","Sub Avg","Stats Source","Stats Updated"] if c in fighters]
     st.dataframe(fighters[cols],hide_index=True,use_container_width=True)
 if st.button("🔄 REFRESH LIVE MMA DATA",use_container_width=True,key="mma_refresh_live"):
     st.session_state["mma_live_refresh_nonce"]=refresh_nonce+1
@@ -511,7 +537,7 @@ with st.expander("🧠 Large-field GPP construction baked into NUKE",expanded=Fa
     st.caption("Moneylines are live market inputs when available. Finish %, pOwn%, projections and tournament outputs remain model estimates, not sportsbook props.")
 
 st.subheader("🥋 Fighter Pool")
-ed=fighters[["ID","Name","Opp","Salary","Moneyline","Market Win %","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"]].copy()
+ed=fighters[["ID","Name","Opp","Salary","Moneyline","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"]].copy()
 ed.insert(0,"In",True); ed.insert(1,"Lock",False); ed["Boost %"]=0; ed["Min %"]=0; ed["Max %"]=100
 prefs=st.session_state.get("mma_prefs",{})
 for i,row in ed.iterrows():
@@ -523,10 +549,10 @@ if b1.button("✅ ADD ALL",use_container_width=True): st.session_state["mma_bulk
 if b2.button("🚫 REMOVE ALL",use_container_width=True): st.session_state["mma_bulk"]=False; st.session_state.pop("mma_editor",None); st.rerun()
 if "mma_bulk" in st.session_state: ed["In"]=bool(st.session_state.pop("mma_bulk"))
 edited=st.data_editor(ed,hide_index=True,use_container_width=True,height=520,column_order=[c for c in ed.columns if c!="ID"],
-    disabled=["ID","Name","Opp","Salary","Moneyline","Market Win %","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"],
+    disabled=["ID","Name","Opp","Salary","Moneyline","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"],
     column_config={"In":st.column_config.CheckboxColumn("In"),"Lock":st.column_config.CheckboxColumn("🔒 Lock"),
-    "Salary":st.column_config.NumberColumn("Salary",format="$%d"),"Moneyline":st.column_config.NumberColumn("Odds",format="%d"),
-    "Market Win %":st.column_config.NumberColumn("Market Win",format="%.1f%%"),"pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
+    "Salary":st.column_config.NumberColumn("Salary",format="$%d"),"Moneyline":st.column_config.NumberColumn("Odds",format="%+d"),
+    "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
     "FPPG":st.column_config.NumberColumn("DK FPPG",format="%.1f"),"Win %":st.column_config.NumberColumn("Win %",format="%.1f%%"),
     "Finish %":st.column_config.NumberColumn("Finish %",format="%.1f%%"),"Projection":st.column_config.NumberColumn("Proj",format="%.1f"),
     "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),

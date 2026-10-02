@@ -8,7 +8,9 @@ on:
       - "nuke_nav.py"
       - "data/mma_current.csv"
       - "data/mma_fighter_stats.csv"
+      - "data/mma_market.csv"
       - "tools/check_mma_live.py"
+      - "tools/check_mma_market.py"
       - "tools/test_mma_stats.py"
       - ".github/workflows/mma-smoke-test.yml"
   workflow_dispatch:

@@ -183,7 +183,7 @@ def fetch_ufcstats(name,refresh_token=0):
         for url in urls:
             r=requests.get(url,timeout=8,headers=headers)
             if not r.ok: continue
-            links=re.findall(r'href=["\\'](https?://ufcstats\\.com/fighter-details/[a-zA-Z0-9]+)["\\'][^>]*>(.*?)</a>',r.text,re.I|re.S)
+            links=re.findall(r"href=[\\\"'](https?://ufcstats\\.com/fighter-details/[a-zA-Z0-9]+)[\\\"'][^>]*>(.*?)</a>",r.text,re.I|re.S)
             for href,_ in links:
                 ix=r.text.find(href)
                 row=_strip_html(r.text[max(0,ix-650):ix+1250])

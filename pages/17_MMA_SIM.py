@@ -100,52 +100,113 @@ def fetch_fight_market(name_a,name_b,refresh_token=0):
             continue
     return {}
 
+def _grab_after(txt,patterns):
+    for pattern in patterns:
+        m=re.search(pattern+r"\\s*[:\\-]?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*%?",txt,re.I)
+        if m:
+            try: return float(m.group(1))
+            except Exception: pass
+    return np.nan
+
+def _grab_before(txt,patterns):
+    for pattern in patterns:
+        m=re.search(r"([0-9]+(?:\\.[0-9]+)?)\\s*%?\\s*"+pattern,txt,re.I)
+        if m:
+            try: return float(m.group(1))
+            except Exception: pass
+    return np.nan
+
+def _stats_payload(vals,source):
+    out={}
+    for col,val in vals.items():
+        try:
+            v=float(val)
+            if np.isfinite(v): out[col]=v
+        except Exception:
+            pass
+    if out: out["Stats Source"]=source
+    return out
+
 @st.cache_data(ttl=21600,show_spinner=False)
 def fetch_ufcstats(name,refresh_token=0):
-    """Pull career striking/grappling rates from UFCStats. Missing/debut fighters safely fall back."""
-    headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"}
+    """Pull fighter style rates with multiple fallbacks so cloud blocking does not blank the MMA model."""
+    headers={
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36",
+        "Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language":"en-US,en;q=0.9",
+    }
+    slug=_slug_name(name)
+
+    # Primary: UFCalendar exposes current career-rate pages and is already used by NUKE for fight markets.
+    try:
+        r=requests.get(f"https://www.ufcalendar.com/fighters/{slug}/stats",timeout=8,headers=headers)
+        if r.ok:
+            txt=_strip_html(r.text)
+            if _norm_name(name) in _norm_name(txt):
+                vals={
+                    "SLpM":_grab_after(txt,[r"Strikes landed\\s*/\\s*min",r"Significant strikes"]),
+                    "SApM":_grab_after(txt,[r"Strikes absorbed\\s*/\\s*min",r"SApM"]),
+                    "TD Avg":_grab_after(txt,[r"Takedowns\\s*/\\s*15\\s*min",r"TD Avg\\.?"]),
+                    "TD Def %":_grab_after(txt,[r"TD Def\\.?",r"Takedown defense"]),
+                    "Sub Avg":_grab_after(txt,[r"Submission attempts",r"Sub\\.?\\s*Avg\\.?"]),
+                }
+                out=_stats_payload(vals,"UFCalendar")
+                if "SLpM" in out and "SApM" in out: return out
+    except Exception:
+        pass
+
+    # Secondary: official UFC athlete pages use number-before-label metric cards.
+    try:
+        r=requests.get(f"https://www.ufc.com/athlete/{slug}",timeout=8,headers=headers)
+        if r.ok:
+            txt=_strip_html(r.text)
+            if _norm_name(name) in _norm_name(txt):
+                vals={
+                    "SLpM":_grab_before(txt,[r"Sig\\.?\\s*Str\\.?\\s*Landed\\s*Per\\s*Min"]),
+                    "SApM":_grab_before(txt,[r"Sig\\.?\\s*Str\\.?\\s*Absorbed\\s*Per\\s*Min"]),
+                    "TD Avg":_grab_before(txt,[r"Takedown\\s*avg\\s*Per\\s*15\\s*Min"]),
+                    "TD Def %":_grab_before(txt,[r"Takedown\\s*Defense"]),
+                    "Sub Avg":_grab_before(txt,[r"Submission\\s*avg\\s*Per\\s*15\\s*Min"]),
+                }
+                out=_stats_payload(vals,"UFC.com")
+                if "SLpM" in out and "SApM" in out: return out
+    except Exception:
+        pass
+
+    # Final live fallback: UFCStats. HTTPS is important in hosted Streamlit environments.
     detail_url=None
     try:
-        q=quote_plus(str(name))
         urls=[
-            f"http://ufcstats.com/statistics/fighters/search?query={q}",
-            f"http://ufcstats.com/statistics/fighters?char={_slug_name(name)[:1]}&page=all",
+            f"https://ufcstats.com/statistics/fighters/search?query={quote_plus(str(name))}",
+            f"https://ufcstats.com/statistics/fighters?char={slug[:1]}&page=all",
         ]
         for url in urls:
-            r=requests.get(url,timeout=7,headers=headers)
+            r=requests.get(url,timeout=8,headers=headers)
             if not r.ok: continue
-            links=re.findall(r'href=["\'](https?://ufcstats\.com/fighter-details/[a-zA-Z0-9]+)["\'][^>]*>(.*?)</a>',r.text,re.I|re.S)
-            exact=[]
-            for href,label in links:
-                label_txt=_strip_html(label)
-                if label_txt and _norm_name(label_txt) in _norm_name(name):
-                    exact.append(href)
-            if exact:
-                detail_url=exact[0]; break
-            # Search-page rows sometimes split first/last names into separate anchors to the same URL.
+            links=re.findall(r'href=["\\'](https?://ufcstats\\.com/fighter-details/[a-zA-Z0-9]+)["\\'][^>]*>(.*?)</a>',r.text,re.I|re.S)
             for href,_ in links:
                 ix=r.text.find(href)
-                row=_strip_html(r.text[max(0,ix-500):ix+900])
+                row=_strip_html(r.text[max(0,ix-650):ix+1250])
                 if _norm_name(name) in _norm_name(row):
-                    detail_url=href; break
+                    detail_url=href.replace("http://","https://")
+                    break
             if detail_url: break
         if not detail_url: return {}
 
-        d=requests.get(detail_url,timeout=7,headers=headers)
+        d=requests.get(detail_url,timeout=8,headers=headers)
         if not d.ok: return {}
         txt=_strip_html(d.text)
         def grab(label):
-            m=re.search(re.escape(label)+r"\s*([0-9.]+)%?",txt,re.I)
+            m=re.search(re.escape(label)+r"\\s*([0-9.]+)%?",txt,re.I)
             return float(m.group(1)) if m else np.nan
-        return {
+        return _stats_payload({
             "SLpM":grab("SLpM:"),
             "SApM":grab("SApM:"),
             "TD Avg":grab("TD Avg.:"),
             "TD Acc %":grab("TD Acc.:"),
             "TD Def %":grab("TD Def.:"),
             "Sub Avg":grab("Sub. Avg.:"),
-            "Stats Source":"UFCStats",
-        }
+        },"UFCStats")
     except Exception:
         return {}
 
@@ -172,11 +233,20 @@ def enrich_live_context(d,refresh_token=0):
             try: stats[_norm_name(n)]=f.result() or {}
             except Exception: stats[_norm_name(n)]={}
 
+    # Preserve bundled snapshot values when a live source is temporarily blocked.
+    # Fresh live values overwrite the snapshot below whenever a request succeeds.
     for col,default in [
         ("Moneyline",np.nan),("Market Win %",np.nan),("Odds Source","Fallback"),
         ("SLpM",np.nan),("SApM",np.nan),("TD Avg",np.nan),("TD Acc %",np.nan),
         ("TD Def %",np.nan),("Sub Avg",np.nan),("Stats Source","Fallback")
-    ]: x[col]=default
+    ]:
+        if col not in x.columns:
+            x[col]=default
+        elif col in ("Odds Source","Stats Source"):
+            x[col]=x[col].fillna(default).astype(str)
+            x.loc[x[col].str.strip().isin(["","nan","None"] ),col]=default
+        else:
+            x[col]=pd.to_numeric(x[col],errors="coerce")
 
     for i,row in x.iterrows():
         k=_norm_name(row["Name"])
@@ -381,10 +451,10 @@ stats_cov=int(fighters["SLpM"].notna().sum())
 last_live=st.session_state.get("mma_live_updated_at","Just now")
 c1,c2,c3=st.columns([1,1,2])
 c1.metric("Live odds",f"{odds_cov}/{len(fighters)}")
-c2.metric("UFCStats",f"{stats_cov}/{len(fighters)}")
+c2.metric("Fighter stats",f"{stats_cov}/{len(fighters)}")
 c3.caption(f"🕒 Live data last refreshed: **{last_live}** · auto-checks every 15 minutes while active.")
 if odds_cov<len(fighters):
-    st.caption("Missing odds safely fall back to DraftKings salary-implied win probability. Missing UFCStats stay neutral in the style model.")
+    st.caption("Missing odds safely fall back to DraftKings salary-implied win probability. Missing fighter stats stay neutral in the style model.")
 if st.button("🔄 REFRESH LIVE MMA DATA",use_container_width=True,key="mma_refresh_live"):
     st.session_state["mma_live_refresh_nonce"]=refresh_nonce+1
     fetch_fight_market.clear(); fetch_ufcstats.clear()
@@ -401,7 +471,7 @@ with st.expander("🧠 Large-field GPP construction baked into NUKE",expanded=Fa
 - Salary is not forced to $50K. Historical perfect lineups often leave salary unused; NUKE defaults to a $49,800 maximum.
 - One or two leverage fighters are useful; forcing an entire lineup of low-owned darts is not.
 - **Current moneylines** are pulled automatically when available and de-vigged into fair market win probabilities.
-- **UFCStats style data** (SLpM, SApM, takedowns, takedown defense, submission attempts) changes fighter ceiling and score distributions.
+- **Fighter style data** (SLpM, SApM, takedowns, takedown defense, submission attempts) changes fighter ceiling and score distributions.
 - Max exposure, Min/Max fighter exposure and minimum uniques build a portfolio across different card outcomes.
 """)
     st.caption("Moneylines are live market inputs when available. Finish %, pOwn%, projections and tournament outputs remain model estimates, not sportsbook props.")

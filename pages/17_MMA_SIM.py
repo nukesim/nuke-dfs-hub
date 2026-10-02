@@ -59,50 +59,51 @@ def _american_prob(odds):
     if o>0: return 100.0/(o+100.0)
     return np.nan
 
+def _parse_fight_market(txt,name_a,name_b):
+    # Match the page's fighter headings because URLs can reverse its order.
+    for first,second in [(name_a,name_b),(name_b,name_a)]:
+        heading=r"Sportsbook\s+"+re.escape(first)+r"\s+"+re.escape(second)+r"\s+Trend\b"
+        table=re.search(heading+r"(.*?)(?:Odds are for information|$)",txt,re.I|re.S)
+        if not table: continue
+        dk=re.search(r"\bDraftKings\s+([+-]\d{2,4})\s+([+-]\d{2,4})\b",table.group(1),re.I)
+        if not dk: continue
+        o1,o2=map(int,dk.groups())
+        p1,p2=_american_prob(o1),_american_prob(o2)
+        if not (.80<=p1+p2<=1.35): continue
+        return {
+            _norm_name(first):{"Moneyline":o1,"Market Win %":p1/(p1+p2)*100,"Odds Source":"DraftKings"},
+            _norm_name(second):{"Moneyline":o2,"Market Win %":p2/(p1+p2)*100,"Odds Source":"DraftKings"},
+        }
+    section=re.search(r"Betting Odds(.*?)Line Movement",txt,re.I|re.S)
+    if section:
+        odds=[]
+        for name in [name_a,name_b]:
+            match=re.search(re.escape(name)+r"\s+([+-]\d{2,4})\s",section.group(1),re.I)
+            if not match: return {}
+            odds.append(int(match.group(1)))
+        probs=[_american_prob(o) for o in odds]
+        if .80<=sum(probs)<=1.35:
+            return {_norm_name(name):{"Moneyline":o,"Market Win %":prob/sum(probs)*100,"Odds Source":"Consensus"}
+                    for name,o,prob in zip([name_a,name_b],odds,probs)}
+    return {}
+
 @st.cache_data(ttl=900,show_spinner=False)
 def fetch_fight_market(name_a,name_b,refresh_token=0):
-    """Best-effort DK moneyline from UFCalendar, falling back to its multi-book consensus."""
-    headers={"User-Agent":"Mozilla/5.0 NUKE-DFS"}
-    orders=[(name_a,name_b),(name_b,name_a)]
-    for a,b in orders:
+    """Fetch name-bound DK moneylines, falling back to labelled consensus."""
+    for a,b in [(name_a,name_b),(name_b,name_a)]:
         url=f"https://www.ufcalendar.com/fights/{_slug_name(a)}-vs-{_slug_name(b)}"
         try:
-            r=requests.get(url,timeout=7,headers=headers)
+            r=requests.get(url,timeout=10)
             if not r.ok: continue
-            txt=_strip_html(r.text)
-            low=txt.lower()
-            if _norm_name(a) not in _norm_name(txt) or _norm_name(b) not in _norm_name(txt): continue
-
-            # Prefer the DraftKings row from the line-movement table.
-            pos=low.find("draftkings")
-            source="DraftKings"
-            odds=[]
-            if pos>=0:
-                window=txt[pos:pos+260]
-                odds=re.findall(r"(?<!\d)([+-]\d{3,4})(?!\d)",window)
-            # If DK is not present/parsable, use the page's displayed consensus lines.
-            if len(odds)<2:
-                source="Consensus"
-                p=low.find("betting odds")
-                window=txt[p:p+1200] if p>=0 else txt[:1600]
-                odds=re.findall(r"(?<!\d)([+-]\d{3,4})(?!\d)",window)
-            if len(odds)<2: continue
-
-            o1,o2=int(odds[0]),int(odds[1])
-            p1,p2=_american_prob(o1),_american_prob(o2)
-            if not np.isfinite(p1) or not np.isfinite(p2) or not (.80<=p1+p2<=1.35): continue
-            fair1=p1/(p1+p2); fair2=p2/(p1+p2)
-            return {
-                _norm_name(a):{"Moneyline":o1,"Market Win %":fair1*100,"Odds Source":source},
-                _norm_name(b):{"Moneyline":o2,"Market Win %":fair2*100,"Odds Source":source},
-            }
-        except Exception:
+            result=_parse_fight_market(_strip_html(r.text),name_a,name_b)
+            if result: return result
+        except requests.RequestException:
             continue
     return {}
 
 def _grab_after(txt,patterns):
     for pattern in patterns:
-        m=re.search(pattern+r"\\s*[:\\-]?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*%?",txt,re.I)
+        m=re.search(pattern+r"\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*%?",txt,re.I)
         if m:
             try: return float(m.group(1))
             except Exception: pass
@@ -110,7 +111,7 @@ def _grab_after(txt,patterns):
 
 def _grab_before(txt,patterns):
     for pattern in patterns:
-        m=re.search(r"([0-9]+(?:\\.[0-9]+)?)\\s*%?\\s*"+pattern,txt,re.I)
+        m=re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%?\s*"+pattern,txt,re.I)
         if m:
             try: return float(m.group(1))
             except Exception: pass
@@ -127,6 +128,31 @@ def _stats_payload(vals,source):
     if out: out["Stats Source"]=source
     return out
 
+def _parse_ufcalendar_stats(txt):
+    # Keep published UFC career averages separate from tracked-bout totals.
+    career=re.search(r"UFC career\s+(.*?)\s+(?:Tracked fights|Percentiles compare|Events Tonight)",txt,re.I|re.S)
+    if career:
+        section=career.group(1)
+        source="UFCStats via UFCalendar"
+    else:
+        tracked=re.search(r"Tracked fights\s+Source:\s*UFCalendar\s+(.*?)(?:Events Tonight|Percentiles compare|$)",txt,re.I|re.S)
+        if not tracked: return {}
+        section=tracked.group(1)
+        source="UFCalendar tracked bouts"
+    return _stats_payload({
+        "SLpM":_grab_after(section,[r"Significant strikes"]),
+        "SApM":_grab_after(section,[r"SApM"]),
+        "TD Avg":_grab_after(section,[r"Takedowns"]),
+        "TD Acc %":_grab_after(section,[r"Takedown accuracy"]),
+        "TD Def %":_grab_after(section,[r"TD Def\.?"]),
+        "Sub Avg":_grab_after(section,[r"Submission attempts"]),
+    },source)
+
+def _fighter_aliases(name):
+    aliases={"kinggreen":["Bobby Green"],"wangcong":["Cong Wang"],
+             "ismailnaurdiev":["Ismael Naurdiev"]}
+    return [str(name)]+aliases.get(_norm_name(name),[])
+
 @st.cache_data(ttl=21600,show_spinner=False)
 def fetch_ufcstats(name,refresh_token=0):
     """Pull fighter style rates with multiple fallbacks so cloud blocking does not blank the MMA model."""
@@ -139,18 +165,12 @@ def fetch_ufcstats(name,refresh_token=0):
 
     # Primary: UFCalendar exposes current career-rate pages and is already used by NUKE for fight markets.
     try:
-        r=requests.get(f"https://www.ufcalendar.com/fighters/{slug}/stats",timeout=8,headers=headers)
-        if r.ok:
+        for alias in _fighter_aliases(name):
+            r=requests.get(f"https://www.ufcalendar.com/fighters/{_slug_name(alias)}/stats",timeout=15)
+            if not r.ok: continue
             txt=_strip_html(r.text)
-            if _norm_name(name) in _norm_name(txt):
-                vals={
-                    "SLpM":_grab_after(txt,[r"Strikes landed\\s*/\\s*min",r"Significant strikes"]),
-                    "SApM":_grab_after(txt,[r"Strikes absorbed\\s*/\\s*min",r"SApM"]),
-                    "TD Avg":_grab_after(txt,[r"Takedowns\\s*/\\s*15\\s*min",r"TD Avg\\.?"]),
-                    "TD Def %":_grab_after(txt,[r"TD Def\\.?",r"Takedown defense"]),
-                    "Sub Avg":_grab_after(txt,[r"Submission attempts",r"Sub\\.?\\s*Avg\\.?"]),
-                }
-                out=_stats_payload(vals,"UFCalendar")
+            if re.search(re.escape(alias)+r"\s+stats",txt,re.I):
+                out=_parse_ufcalendar_stats(txt)
                 if "SLpM" in out and "SApM" in out: return out
     except Exception:
         pass
@@ -162,11 +182,11 @@ def fetch_ufcstats(name,refresh_token=0):
             txt=_strip_html(r.text)
             if _norm_name(name) in _norm_name(txt):
                 vals={
-                    "SLpM":_grab_before(txt,[r"Sig\\.?\\s*Str\\.?\\s*Landed\\s*Per\\s*Min"]),
-                    "SApM":_grab_before(txt,[r"Sig\\.?\\s*Str\\.?\\s*Absorbed\\s*Per\\s*Min"]),
-                    "TD Avg":_grab_before(txt,[r"Takedown\\s*avg\\s*Per\\s*15\\s*Min"]),
-                    "TD Def %":_grab_before(txt,[r"Takedown\\s*Defense"]),
-                    "Sub Avg":_grab_before(txt,[r"Submission\\s*avg\\s*Per\\s*15\\s*Min"]),
+                    "SLpM":_grab_before(txt,[r"Sig\.?\s*Str\.?\s*Landed\s*Per\s*Min"]),
+                    "SApM":_grab_before(txt,[r"Sig\.?\s*Str\.?\s*Absorbed\s*Per\s*Min"]),
+                    "TD Avg":_grab_before(txt,[r"Takedown\s*avg\s*Per\s*15\s*Min"]),
+                    "TD Def %":_grab_before(txt,[r"Takedown\s*Defense"]),
+                    "Sub Avg":_grab_before(txt,[r"Submission\s*avg\s*Per\s*15\s*Min"]),
                 }
                 out=_stats_payload(vals,"UFC.com")
                 if "SLpM" in out and "SApM" in out: return out
@@ -183,12 +203,11 @@ def fetch_ufcstats(name,refresh_token=0):
         for url in urls:
             r=requests.get(url,timeout=8,headers=headers)
             if not r.ok: continue
-            links=re.findall(r"href=[\\\"'](https?://ufcstats\\.com/fighter-details/[a-zA-Z0-9]+)[\\\"'][^>]*>(.*?)</a>",r.text,re.I|re.S)
-            for href,_ in links:
-                ix=r.text.find(href)
-                row=_strip_html(r.text[max(0,ix-650):ix+1250])
-                if _norm_name(name) in _norm_name(row):
-                    detail_url=href.replace("http://","https://")
+            for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>",r.text,re.I|re.S):
+                links=re.findall(r"""href=["'](https?://ufcstats\.com/fighter-details/[a-zA-Z0-9]+)["'][^>]*>(.*?)</a>""",row,re.I|re.S)
+                row_name=" ".join(_strip_html(label) for _,label in links)
+                if links and any(_norm_name(alias)==_norm_name(row_name) for alias in _fighter_aliases(name)):
+                    detail_url=links[0][0].replace("http://","https://")
                     break
             if detail_url: break
         if not detail_url: return {}
@@ -197,7 +216,7 @@ def fetch_ufcstats(name,refresh_token=0):
         if not d.ok: return {}
         txt=_strip_html(d.text)
         def grab(label):
-            m=re.search(re.escape(label)+r"\\s*([0-9.]+)%?",txt,re.I)
+            m=re.search(re.escape(label)+r"\s*([0-9.]+)%?",txt,re.I)
             return float(m.group(1)) if m else np.nan
         return _stats_payload({
             "SLpM":grab("SLpM:"),
@@ -212,6 +231,16 @@ def fetch_ufcstats(name,refresh_token=0):
 
 def enrich_live_context(d,refresh_token=0):
     x=d.copy()
+    # A verified, dated snapshot survives app reboots and upstream outages.
+    snapshot=Path(__file__).resolve().parents[1]/"data"/"mma_fighter_stats.csv"
+    if snapshot.exists():
+        saved=pd.read_csv(snapshot).to_dict("records")
+        by_name={_norm_name(r["Name"]):r for r in saved}
+        for i,row in x.iterrows():
+            r=by_name.get(_norm_name(row["Name"]),{})
+            for col in ["SLpM","SApM","TD Avg","TD Acc %","TD Def %","Sub Avg","Stats Source","Stats Updated"]:
+                if col in r and pd.notna(r[col]) and (col not in x or pd.isna(x.at[i,col])):
+                    x.at[i,col]=r[col]
     # Moneylines: one request per fight, in parallel.
     market={}
     fights=[]
@@ -252,6 +281,7 @@ def enrich_live_context(d,refresh_token=0):
         k=_norm_name(row["Name"])
         for col,val in market.get(k,{}).items(): x.at[i,col]=val
         for col,val in stats.get(k,{}).items(): x.at[i,col]=val
+        if stats.get(k): x.at[i,"Stats Updated"]=datetime.now(ZoneInfo("UTC")).isoformat()
     return x
 
 def model(d):
@@ -455,6 +485,10 @@ c2.metric("Fighter stats",f"{stats_cov}/{len(fighters)}")
 c3.caption(f"🕒 Live data last refreshed: **{last_live}** · auto-checks every 15 minutes while active.")
 if odds_cov<len(fighters):
     st.caption("Missing odds safely fall back to DraftKings salary-implied win probability. Missing fighter stats stay neutral in the style model.")
+with st.expander("Fighter stat sources and coverage",expanded=False):
+    st.caption("Verified saved stats remain available if a live source fails. Dates below show when each fighter's stats were retrieved; unsupported fighters remain blank.")
+    cols=[c for c in ["Name","SLpM","SApM","TD Avg","TD Acc %","TD Def %","Sub Avg","Stats Source","Stats Updated"] if c in fighters]
+    st.dataframe(fighters[cols],hide_index=True,use_container_width=True)
 if st.button("🔄 REFRESH LIVE MMA DATA",use_container_width=True,key="mma_refresh_live"):
     st.session_state["mma_live_refresh_nonce"]=refresh_nonce+1
     fetch_fight_market.clear(); fetch_ufcstats.clear()

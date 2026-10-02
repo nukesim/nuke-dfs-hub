@@ -7,6 +7,9 @@ on:
       - "pages/17_MMA_SIM.py"
       - "nuke_nav.py"
       - "data/mma_current.csv"
+      - "data/mma_fighter_stats.csv"
+      - "tools/check_mma_live.py"
+      - "tools/test_mma_stats.py"
       - ".github/workflows/mma-smoke-test.yml"
   workflow_dispatch:
 
@@ -20,6 +23,10 @@ jobs:
           python-version: "3.11"
       - name: Compile MMA page
         run: python -m py_compile pages/17_MMA_SIM.py nuke_nav.py
+      - name: Install MMA test dependencies
+        run: python -m pip install streamlit pandas numpy requests
+      - name: Test fighter parsers and outage fallback
+        run: python tools/test_mma_stats.py
       - name: Validate bundled MMA slate
         run: |
           python - <<'PY'

@@ -1,0 +1,47 @@
+name: Cap PGA salary build tier at 10K
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/pga_cap_10k_tier.py'
+      - '.github/workflows/pga-cap-10k-tier.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply PGA 10K tier cap
+        run: python tools/pga_cap_10k_tier.py
+      - name: Install numerical dependencies
+        run: pip install numpy pandas 'scipy>=1.11'
+      - name: Compile
+        run: python -m py_compile pages/15_PGA_SIM.py nuke_pga_portfolio.py tests/test_pga_portfolio.py
+      - name: Verify 10K is the highest salary tier
+        run: |
+          python - <<'PY'
+          from nuke_pga_portfolio import salary_build_type
+          assert salary_build_type([11000,10700,9900,8800,7500,6100]) == '10/10/9/8/7/6'
+          assert salary_build_type([12500,10000,9999,9000,8000,7000]) == '10/10/9/9/8/7'
+          print('10K salary tier cap verified')
+          PY
+      - name: Run PGA portfolio tests
+        run: python -m unittest discover -s tests -p test_pga_portfolio.py -v
+      - name: Commit
+        run: |
+          if git diff --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nuke_pga_portfolio.py pages/15_PGA_SIM.py tests/test_pga_portfolio.py
+          git commit -m 'Cap PGA salary build tier at 10K'
+          git push

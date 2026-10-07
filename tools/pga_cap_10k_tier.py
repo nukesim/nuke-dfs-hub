@@ -25,6 +25,12 @@ test = Path("tests/test_pga_portfolio.py")
 t = test.read_text()
 t = t.replace('"base_projection"', '"salary_baseline"')
 
+# Update the older salary-band expectation to the new 10K ceiling.
+t = t.replace(
+    'self.assertEqual(salary_build_type([11000,9000,8000,7000,6000,5000]), "11/9/8/7/6/5")',
+    'self.assertEqual(salary_build_type([11000,9000,8000,7000,6000,5000]), "10/9/8/7/6/5")',
+)
+
 # Add a permanent regression test for the 10K ceiling if it is not already present.
 marker = "def test_salary_build_type_caps_10k_and_above"
 if marker not in t:

@@ -55,11 +55,12 @@ def wave_lineup_bounds(target, wave_ranges):
 
 
 def salary_build_type(salaries):
-    """$9,000 through $9,999 is tier 9, regardless of exact salary."""
+    """Salary-build tiers top out at 10; every golfer priced $10,000+ is a 10K golfer."""
     values = np.asarray(salaries, dtype=float)
     if len(values) != 6 or not np.isfinite(values).all() or np.any(values < 1000):
         raise PortfolioError("A salary build needs six valid golfer salaries.")
-    return "/".join(map(str, sorted((values//1000).astype(int), reverse=True)))
+    tiers = np.minimum((values//1000).astype(int), 10)
+    return "/".join(map(str, sorted(tiers, reverse=True)))
 
 
 def build_type_summary(results, cands, golfers, portfolio):

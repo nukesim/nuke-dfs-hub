@@ -16,7 +16,7 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 def page_functions():
     """Load pure page helpers without executing Streamlit or remote context calls."""
     source = ast.parse((Path(__file__).resolve().parents[1]/"pages/15_PGA_SIM.py").read_text())
-    names = {"load_csv", "base_projection", "ownership_estimate", "simulate_golfers",
+    names = {"load_csv", "salary_baseline", "ownership_estimate", "simulate_golfers",
              "evaluate", "simulate_contest_metrics", "_norm_name", "_bank_utah_2026_pairings", "export_csv",
              "_baycurrent_2026_context", "attach_tee_weather", "weather_severity", "weather_dot"}
     nodes = [n for n in source.body if isinstance(n, ast.FunctionDef) and n.name in names]
@@ -26,6 +26,10 @@ def page_functions():
 
 
 class PGAPortfolioTests(unittest.TestCase):
+    def test_salary_build_type_caps_10k_and_above(self):
+        self.assertEqual(salary_build_type([11000, 10700, 9900, 8800, 7500, 6100]), "10/10/9/8/7/6")
+        self.assertEqual(salary_build_type([12500, 10000, 9999, 9000, 8000, 7000]), "10/10/9/9/8/7")
+
     def test_baycurrent_field_japan_times_and_no_cut(self):
         env=page_functions()
         golfers=env["load_csv"](Path(__file__).resolve().parents[1]/"tests/fixtures/pga_baycurrent_2026.csv")
@@ -67,7 +71,7 @@ class PGAPortfolioTests(unittest.TestCase):
         golfers=env["attach_tee_weather"](
             env["load_csv"](Path(__file__).resolve().parents[1]/"tests/fixtures/pga_baycurrent_2026.csv"),
             env["_baycurrent_2026_context"](),pd.DataFrame())
-        own=env["ownership_estimate"](golfers);projection=env["base_projection"](golfers)
+        own=env["ownership_estimate"](golfers);projection=env["salary_baseline"](golfers)
         bounds=wave_lineup_bounds(150,{am:(0,100) for am in range(7)})
         cands=generate_pga_candidates(golfers["ID"],golfers["Salary"],projection,own,5000,49600,107,
                                       waves=golfers["Wave"],wave_bounds=bounds)
@@ -85,7 +89,7 @@ class PGAPortfolioTests(unittest.TestCase):
 
     def test_salary_build_bands_and_rounding(self):
         self.assertEqual(salary_build_type([6999,7000,7999,8999,9999,10999]), "10/9/8/7/7/6")
-        self.assertEqual(salary_build_type([11000,9000,8000,7000,6000,5000]), "11/9/8/7/6/5")
+        self.assertEqual(salary_build_type([11000,9000,8000,7000,6000,5000]), "10/9/8/7/6/5")
         bounds = wave_lineup_bounds(150, {4:(20,45),3:(10,60),0:(0,0)})
         self.assertEqual(bounds[4], (30,67))
         self.assertEqual(bounds[3], (15,90))
@@ -136,7 +140,7 @@ class PGAPortfolioTests(unittest.TestCase):
         golfers=env["load_csv"](Path(__file__).resolve().parents[1]/"tests/fixtures/pga_bank_utah_2026.csv")
         tee=env["_bank_utah_2026_pairings"]()
         golfers["Wave"]=["AM" if pd.Timestamp(tee[env["_norm_name"](name)][1]).tz_convert("America/Denver").hour<12 else "PM" for name in golfers["Name"]]
-        own=env["ownership_estimate"](golfers);projection=env["base_projection"](golfers)
+        own=env["ownership_estimate"](golfers);projection=env["salary_baseline"](golfers)
         ranges={6:(0,0),5:(5,35),4:(20,55),3:(10,45),2:(5,35),1:(0,0),0:(0,0)}
         bounds=wave_lineup_bounds(150,ranges)
         cands=generate_pga_candidates(golfers["ID"],golfers["Salary"],projection,own,5000,49600,930,
@@ -184,7 +188,7 @@ class PGAPortfolioTests(unittest.TestCase):
         tee = env["_bank_utah_2026_pairings"]()
         golfers["Wave"] = ["AM" if pd.Timestamp(tee[env["_norm_name"](name)][1]).tz_convert("America/Denver").hour < 12 else "PM" for name in golfers["Name"]]
         own = env["ownership_estimate"](golfers)
-        projection = env["base_projection"](golfers)
+        projection = env["salary_baseline"](golfers)
         quotas = wave_lineup_targets(150, {6: 0, 5: 20, 4: 40, 3: 20, 2: 20, 1: 0, 0: 0})
         for seed in [1932402642, 42, 9876]:
             with self.subTest(seed=seed):

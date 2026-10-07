@@ -16,7 +16,7 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
 
-PGA_PORTFOLIO_VERSION=5
+PGA_PORTFOLIO_VERSION=6
 if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)

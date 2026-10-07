@@ -16,7 +16,7 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
 
-PGA_PORTFOLIO_VERSION=4
+PGA_PORTFOLIO_VERSION=5
 if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)
@@ -27,28 +27,29 @@ DEFAULT=Path(__file__).resolve().parents[1]/"data"/"pga_current.csv"
 
 def load_csv(src):
     d=pd.read_csv(src)
-    req={"Name","ID","Salary","AvgPointsPerGame"}
+    req={"Name","ID","Salary"}
     if not req.issubset(d.columns):
         raise ValueError("This does not look like a DraftKings PGA salary CSV.")
     d=d.copy()
     d["ID"]=pd.to_numeric(d["ID"],errors="coerce").astype("Int64")
     d["Salary"]=pd.to_numeric(d["Salary"],errors="coerce").fillna(0).astype(int)
-    d["AvgPointsPerGame"]=pd.to_numeric(d["AvgPointsPerGame"],errors="coerce").fillna(0.0)
     d["Status"]=d.get("Status",pd.Series("",index=d.index)).fillna("").astype(str).str.upper()
     d=d[~d["Status"].isin(["OUT","O","IR"])].dropna(subset=["ID"])
     d=d.drop_duplicates("ID").reset_index(drop=True)
     return d
 
-def base_projection(d):
-    f=d["AvgPointsPerGame"].to_numpy(float)
+def salary_baseline(d):
     sal=d["Salary"].to_numpy(float)
-    fallback=np.interp(sal,[sal.min(),sal.max()],[42,78])
-    return np.where(f>0,f,fallback)
+    if not len(sal):
+        return np.array([],dtype=float)
+    lo=float(sal.min()); hi=float(sal.max())
+    if np.isclose(lo,hi):
+        return np.full(len(sal),60.0,dtype=float)
+    return np.interp(sal,[lo,hi],[42,78])
 
 def ownership_estimate(d):
     sal=d["Salary"].to_numpy(float)
-    form=base_projection(d)
-    z=.58*(sal-sal.mean())/(sal.std()+1e-9)+.42*(form-form.mean())/(form.std()+1e-9)
+    z=(sal-sal.mean())/(sal.std()+1e-9)
     raw=np.exp(np.clip(z,-2.5,2.5))
     # six roster spots across the field -> ownership sums to ~600%
     return raw/raw.sum()*600
@@ -330,18 +331,18 @@ def attach_tee_weather(d,ctx,weather):
 def generate_candidates(d,n,min_salary,seed,locked_ids,excluded_ids,wave_targets=None,wave_bounds=None):
     return generate_pga_candidates(
         d["ID"].astype(int).to_numpy(), d["Salary"].to_numpy(int),
-        base_projection(d), ownership_estimate(d), n, min_salary, seed,
+        salary_baseline(d), ownership_estimate(d), n, min_salary, seed,
         locked_ids, excluded_ids, d["Wave"].to_numpy(), wave_targets, wave_bounds)
 
 def simulate_golfers(d,n_sims,seed):
     rng=np.random.default_rng(seed+991)
-    mu=base_projection(d)
+    mu=salary_baseline(d)
     # Tee-time weather edge is deliberately modest and uncertain rather than treated as certain points.
     edge=pd.to_numeric(d.get("Weather Edge",pd.Series(np.zeros(len(d)))),errors="coerce").fillna(0).to_numpy(float)
     mu=mu+edge
     salary=d["Salary"].to_numpy(float)
-    # salary/form-informed cut probability; missed cuts score much lower
-    strength=.55*(mu-mu.mean())/(mu.std()+1e-9)+.45*(salary-salary.mean())/(salary.std()+1e-9)
+    # Salary-tier-informed cut probability; missed cuts score much lower.
+    strength=(salary-salary.mean())/(salary.std()+1e-9)
     make_cut=1/(1+np.exp(-(.25+strength))) if d.attrs.get("has_cut",True) else np.ones(len(d))
     cut=rng.random((n_sims,len(d)))<make_cut
     made=rng.normal(mu,14+np.maximum(0,7600-salary)/800,size=(n_sims,len(d)))
@@ -469,7 +470,7 @@ except Exception as e:
     st.error(str(e)); st.stop()
 
 event=str(golfers["Game Info"].iloc[0]) if "Game Info" in golfers.columns and len(golfers) else "PGA"
-slate_key=(event,tuple(zip(golfers["ID"].astype(int),golfers["Salary"],golfers["AvgPointsPerGame"])))
+slate_key=(event,tuple(zip(golfers["ID"].astype(int),golfers["Salary"])))
 if st.session_state.get("pga_slate_key") != slate_key:
     for key in ["pga_results","pga_run_settings","pga_pool_editor","pga_pool_bulk_in",
                 "pga_wave_range_editor"]:
@@ -540,10 +541,10 @@ m1,m2,m3,m4=st.columns(4)
 m1.metric("Golfers",len(golfers)); m2.metric("Roster","6 G"); m3.metric("Salary Cap","$50,000"); m4.metric("Event",event)
 
 st.subheader("🏌️ Golfer Pool")
-st.caption("Include/exclude golfers, lock golfers, and set boosts or exposure limits. Automatic caps use salary tier, relative projection/cut strength, and estimated ownership. An explicit Max % overrides the automatic cap within the global limit; locks use 100%. In portfolios of 10+ lineups, every golfer used appears at least twice.")
-editor=golfers[["ID","Name","Salary","AvgPointsPerGame","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
+st.caption("Include/exclude golfers, lock golfers, and set boosts or exposure limits. Automatic caps use salary tier, simulated cut strength, and estimated ownership. An explicit Max % overrides the automatic cap within the global limit; locks use 100%. In portfolios of 10+ lineups, every golfer used appears at least twice.")
+editor=golfers[["ID","Name","Salary","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
 _, preview_cut=simulate_golfers(golfers,1,0)
-editor["Auto Max %"]=automatic_exposure_caps(golfers["Salary"],base_projection(golfers),preview_cut,ownership_estimate(golfers))
+editor["Auto Max %"]=automatic_exposure_caps(golfers["Salary"],salary_baseline(golfers),preview_cut,ownership_estimate(golfers))
 # Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
 editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
 # Keep projected ownership directly to the right of Salary.
@@ -569,12 +570,11 @@ if "pga_pool_bulk_in" in st.session_state:
 
 edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430,
     column_order=[c for c in editor.columns if c != "ID"],
-    disabled=["Auto Max %","ID","Name","Salary","AvgPointsPerGame","pOwn%","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
+    disabled=["Auto Max %","ID","Name","Salary","pOwn%","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
     column_config={
       "In":st.column_config.CheckboxColumn("In"),
       "Lock":st.column_config.CheckboxColumn("🔒 Lock"),
       "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
-      "AvgPointsPerGame":st.column_config.NumberColumn("DK FPPG",format="%.1f"),
       "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
       "Weather Edge":st.column_config.NumberColumn("Wx Edge",format="%+.2f"),
       "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),
@@ -639,7 +639,7 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
         sims,cut_prob=simulate_golfers(golfers,int(universes),seed)
         own=ownership_estimate(golfers)
         boosts=dict(zip(edited["ID"].astype(int),edited["Boost %"].astype(float)))
-        auto_caps=automatic_exposure_caps(golfers["Salary"],base_projection(golfers),cut_prob,own)
+        auto_caps=automatic_exposure_caps(golfers["Salary"],salary_baseline(golfers),cut_prob,own)
         candidate_budget=int(candidates_n)
         while True:
             results=evaluate(cands,sims,own)

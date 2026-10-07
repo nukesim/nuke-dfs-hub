@@ -16,10 +16,13 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
 
-PGA_PORTFOLIO_VERSION=6
+PGA_PORTFOLIO_VERSION=7
 if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)
+    for key in list(st.session_state):
+        if key.startswith("pga_build_range_editor_"):
+            st.session_state.pop(key,None)
 
 CAP=50000
 ROSTER=6
@@ -682,7 +685,7 @@ if "pga_results" in st.session_state:
         mix["Min %"]=[saved_build_ranges.get(kind,(0,100))[0] for kind in mix["Build Type"]]
         mix["Max %"]=[saved_build_ranges.get(kind,(0,100))[1] for kind in mix["Build Type"]]
         build_edit=st.data_editor(mix,hide_index=True,use_container_width=True,
-            height=min(360,38+35*len(mix)),key=f"pga_build_range_editor_{seed}",
+            height=min(360,38+35*len(mix)),key=f"pga_build_range_editor_v{PGA_PORTFOLIO_VERSION}_{seed}",
             disabled=["Build Type","Lineups","Portfolio %","Candidates"],
             column_config={"Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=1,required=True),
                            "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=1,required=True)})

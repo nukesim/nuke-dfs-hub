@@ -1,0 +1,38 @@
+name: Clear stale PGA build editor state
+
+on:
+  push:
+    paths:
+      - 'tools/pga_clear_build_editor_cache.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply PGA build editor cache reset
+        run: python tools/pga_clear_build_editor_cache.py
+      - name: Compile
+        run: python -m py_compile pages/15_PGA_SIM.py
+      - name: Verify build editor reset/versioning
+        run: |
+          grep -q 'PGA_PORTFOLIO_VERSION=7' pages/15_PGA_SIM.py
+          grep -q 'key=f"pga_build_range_editor_v{PGA_PORTFOLIO_VERSION}_{seed}"' pages/15_PGA_SIM.py
+          grep -q 'if key.startswith("pga_build_range_editor_")' pages/15_PGA_SIM.py
+      - name: Commit
+        run: |
+          if git diff --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/15_PGA_SIM.py
+          git commit -m 'Clear stale PGA build editor state'
+          git push

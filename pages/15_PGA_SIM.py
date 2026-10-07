@@ -16,7 +16,7 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
 
-PGA_PORTFOLIO_VERSION=3
+PGA_PORTFOLIO_VERSION=4
 if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)
@@ -126,11 +126,63 @@ def _bank_utah_2026_pairings():
         if src: out[_norm_name(dk_name)]=dict(src)
     return out
 
+def _baycurrent_2026_context():
+    """PGA TOUR's October 8/9 tee sheet; all timestamps are course-local JST.
+
+    Source: https://pgatourmedia.pgatourhq.com/tours/2026/pgatour/baycurrentclassic
+    R1-R2 Tee Times.pdf, published October 6. Names below use DraftKings aliases.
+    """
+    groups=[
+        "Beau Hossler|Pierceson Coody|Ren Yonezawa",
+        "Denny McCarthy|Max Greyserman|Keita Nakajima",
+        "Michael Thorbjornsen|Matthew McCarty|Stephan Jaeger",
+        "Nicolas Echavarria|Maverick McNealy|Alex Smalley",
+        "Aldrich Potgieter|Nick Taylor|Taylor Pendrith",
+        "Jackson Suber|Takumi Kanaya|Kosuke Sunagawa",
+        "Kevin Roy|Johnny Keefer|Yoshinori Fujimoto",
+        "Taylor Moore|Ryo Hisatsune|Yusaku Hosono",
+        "Steven Fisk|Kurt Kitayama|Max Homa",
+        "Wyndham Clark|Justin Thomas|Adam Scott",
+        "Keegan Bradley|Hideki Matsuyama|Rickie Fowler",
+        "Doug Ghim|Zachary Bauchou|Koshin Nagasaki",
+        "Keith Mitchell|Michael Kim|Ben Kohles",
+        "Mac Meissner|Kris Ventura|Sang-hee Lee",
+        "Michael Brennan|Ricky Castillo|Billy Horschel",
+        "Min Woo Lee|Jordan Spieth|Sungjae Im",
+        "Jacob Bridgeman|Collin Morikawa|Xander Schauffele",
+        "Matt Wallace|John Parry|Jinichiro Kozuma",
+        "Christiaan Bezuidenhout|Rasmus Neergaard-Petersen|Hiroshi Iwata",
+        "Patrick Rodgers|Chandler Phillips|Aguri Iwasaki",
+        "Sahith Theegala|Jordan L. Smith|Tomohiro Ishizaka",
+        "Ryan Gerard|Kevin Yu|Tony Finau",
+        "Brian Harman|Davis Thompson|Tom Hoge",
+        "Lee Hodges|Andrew Putnam|David Lipsky",
+    ]
+    tee={}
+    for i,group in enumerate(groups):
+        slot=i%12
+        r1=pd.Timestamp("2026-10-08 08:45",tz="Asia/Tokyo")+pd.Timedelta(minutes=11*slot)
+        r2=pd.Timestamp("2026-10-09 08:45",tz="Asia/Tokyo")+pd.Timedelta(minutes=11*((slot+6)%12))
+        for name in group.split("|"):
+            tee[_norm_name(name)]={1:r1.isoformat(),2:r2.isoformat()}
+    return {"event_id":None,"event_name":"Baycurrent Classic","course":"Yokohama Country Club",
+        "location":"Yokohama, Japan","lat":35.444785,"lon":139.547239,
+        "timezone":"Asia/Tokyo","timezone_label":"JST","has_cut":False,
+        "round_dates":["2026-10-08","2026-10-09","2026-10-10","2026-10-11"],
+        "tee_times":tee,"tee_source":"PGA TOUR","status":"Published R1/R2 tee times loaded",
+        "tee_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/baycurrentclassic/roundInfo/R1-R2%20Tee%20Times.pdf",
+        "forecast_summary":"Dry conditions expected for all four rounds. Thursday/Friday: 61–74°F, NE to E wind 6–12 mph. Saturday/Sunday: 63–75°F, NE wind 8–14 mph.",
+        "forecast_as_of":"October 7, 2026, 5:30 AM JST",
+        "forecast_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/baycurrentclassic/weather/Wednesday.pdf"}
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
+    if "baycurrent" in wanted:
+        # Pin this week's verified course and tee sheet; unrelated ESPN events cannot overwrite it.
+        return _baycurrent_2026_context()
 
     # Current Bank of Utah Championship: authoritative event/course metadata plus the
     # published Golf Channel R1/R2 tee sheet. This makes the current slate deterministic
@@ -140,8 +192,12 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
         out["location"]="Ivins, UT"
         out["lat"]=37.16258
         out["lon"]=-113.64453
+        out["timezone"]="America/Denver"
+        out["timezone_label"]="MDT"
+        out["tee_source"]="Golf Channel"
         out["tee_times"]=_bank_utah_2026_pairings()
         out["status"]="Published R1/R2 tee times loaded"
+        return out
 
     # Generic ESPN discovery remains in place for future events and may fill richer metadata.
     try:
@@ -207,17 +263,18 @@ def geocode_location(location):
     except Exception: return None,None
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_hourly_weather(lat,lon):
+def fetch_hourly_weather(lat,lon,timezone="auto",refresh_token=0):
     if lat is None or lon is None: return pd.DataFrame()
     try:
         j=requests.get("https://api.open-meteo.com/v1/forecast",params={
-            "latitude":lat,"longitude":lon,"timezone":"auto","forecast_days":10,
+            "latitude":lat,"longitude":lon,"timezone":timezone,"forecast_days":10,
             "temperature_unit":"fahrenheit","wind_speed_unit":"mph","precipitation_unit":"inch",
             "hourly":"temperature_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m"
         },timeout=10).json()
         h=j.get("hourly",{})
         df=pd.DataFrame(h)
         if len(df): df["time"]=pd.to_datetime(df["time"])
+        df.attrs["timezone"]=j.get("timezone",timezone)
         return df
     except Exception: return pd.DataFrame()
 
@@ -235,6 +292,8 @@ def weather_dot(sev):
 
 def attach_tee_weather(d,ctx,weather):
     x=d.copy()
+    x.attrs["has_cut"]=ctx.get("has_cut",True)
+    timezone=ctx.get("timezone") or weather.attrs.get("timezone") or "UTC"
     x["R1 Tee"]="—"; x["R2 Tee"]="—"; x["Wave"]="TBD"; x["Weather"]="⚪ TBD"; x["Weather Edge"]=0.0
     for i,row in x.iterrows():
         rec=ctx.get("tee_times",{}).get(_norm_name(row["Name"]),{})
@@ -245,7 +304,7 @@ def attach_tee_weather(d,ctx,weather):
             try:
                 dt=pd.to_datetime(raw)
                 if getattr(dt,"tzinfo",None) is not None:
-                    dt=dt.tz_convert("America/Denver").tz_localize(None)
+                    dt=dt.tz_convert(timezone).tz_localize(None)
                 x.at[i,f"R{rnd} Tee"]=dt.strftime("%-I:%M %p") if hasattr(dt,"strftime") else str(raw)
                 parsed.append((rnd,dt))
             except Exception: pass
@@ -283,7 +342,7 @@ def simulate_golfers(d,n_sims,seed):
     salary=d["Salary"].to_numpy(float)
     # salary/form-informed cut probability; missed cuts score much lower
     strength=.55*(mu-mu.mean())/(mu.std()+1e-9)+.45*(salary-salary.mean())/(salary.std()+1e-9)
-    make_cut=1/(1+np.exp(-(.25+strength)))
+    make_cut=1/(1+np.exp(-(.25+strength))) if d.attrs.get("has_cut",True) else np.ones(len(d))
     cut=rng.random((n_sims,len(d)))<make_cut
     made=rng.normal(mu,14+np.maximum(0,7600-salary)/800,size=(n_sims,len(d)))
     missed=rng.normal(np.maximum(8,mu*.43),9,size=(n_sims,len(d)))
@@ -410,6 +469,15 @@ except Exception as e:
     st.error(str(e)); st.stop()
 
 event=str(golfers["Game Info"].iloc[0]) if "Game Info" in golfers.columns and len(golfers) else "PGA"
+slate_key=(event,tuple(zip(golfers["ID"].astype(int),golfers["Salary"],golfers["AvgPointsPerGame"])))
+if st.session_state.get("pga_slate_key") != slate_key:
+    for key in ["pga_results","pga_run_settings","pga_pool_editor","pga_pool_bulk_in",
+                "pga_wave_range_editor"]:
+        st.session_state.pop(key,None)
+    for key in list(st.session_state):
+        if key.startswith("pga_build_range_editor_"):
+            st.session_state.pop(key,None)
+    st.session_state["pga_slate_key"]=slate_key
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
 
 pga_refresh_nonce=int(st.session_state.get("pga_tee_refresh_nonce",0))
@@ -418,29 +486,55 @@ ctx=fetch_pga_context(event,tuple(golfers["Name"].astype(str)),pga_refresh_token
 lat,lon=ctx.get("lat"),ctx.get("lon")
 if lat is None or lon is None:
     lat,lon=geocode_location(ctx.get("location",""))
-weather=fetch_hourly_weather(lat,lon)
+weather=fetch_hourly_weather(lat,lon,ctx.get("timezone","auto"),pga_refresh_token)
 golfers=attach_tee_weather(golfers,ctx,weather)
 
 course_label=ctx.get("course") or ctx.get("location") or "Course locating automatically"
 tee_ready=bool(ctx.get("tee_times"))
-tee_matches=int((golfers["R1 Tee"]!="—").sum()) if "R1 Tee" in golfers.columns else 0
+tee_matches=int(((golfers["R1 Tee"]!="—") & (golfers["R2 Tee"]!="—")).sum())
 wcols=st.columns([2,2,2])
 wcols[0].info(f"📍 {course_label}" + (f" · {ctx.get('location')}" if ctx.get("location") else ""))
 if tee_ready:
-    wcols[1].info(f"✅ R1/R2 tee times: {tee_matches}/{len(golfers)} DK golfers · Golf Channel")
+    wcols[1].info(f"✅ R1/R2 tee times: {tee_matches}/{len(golfers)} DK golfers · {ctx.get('tee_source','ESPN')}")
 else:
     wcols[1].info("⏳ Tee times not loaded")
-if wcols[1].button("🔄 REFRESH TEE TIMES",use_container_width=True,key="pga_refresh_tee"):
+if wcols[1].button("🔄 REFRESH TEE TIMES & WEATHER",use_container_width=True,key="pga_refresh_tee"):
     st.session_state["pga_tee_refresh_nonce"]=pga_refresh_nonce+1
     fetch_pga_context.clear()
+    fetch_hourly_weather.clear()
     st.rerun()
-if tee_ready and (golfers["Weather Edge"]!=0).any():
+weather_ready=bool(golfers["Weather"].ne("⚪ TBD").any())
+if weather_ready and {"AM","PM"}.issubset(set(golfers["Wave"])):
     am=golfers.loc[golfers["Wave"]=="AM","Weather Edge"].mean(); pm=golfers.loc[golfers["Wave"]=="PM","Weather Edge"].mean()
     leader="AM" if am>pm else "PM"; gap=abs(float(am-pm))
     dot="🟢" if gap<.5 else ("🟡" if gap<1.25 else ("🟠" if gap<2.25 else "🔴"))
     wcols[2].info(f"{dot} Wave edge: {leader} +{gap:.2f} sim pts")
+elif weather_ready:
+    wcols[2].info("🌤️ Hourly weather loaded · single morning wave")
+elif tee_ready:
+    wcols[2].info("⚪ Hourly weather unavailable · sim weather edge is neutral")
 else:
     wcols[2].info("⚪ Weather/wave edge activates when tee times are published")
+if ctx.get("round_dates"):
+    st.caption(f"October 8–11, 2026 · No-cut event · Tee times and weather shown in {ctx.get('timezone_label','course local time')} (Japan). R1/R2: all golfers start in the morning.")
+    st.markdown(f"[Published R1/R2 tee sheet]({ctx['tee_url']})")
+if ctx.get("forecast_summary"):
+    st.info("🌦️ " + ctx["forecast_summary"])
+    st.caption(f"PGA TOUR forecast issued {ctx['forecast_as_of']} · [Official forecast]({ctx['forecast_url']}). Golfer weather edges use the latest Open-Meteo hourly forecast when available.")
+if not weather.empty and ctx.get("round_dates"):
+    daily=[]
+    for rnd,date in enumerate(ctx["round_dates"],1):
+        day=weather.loc[weather["time"].dt.strftime("%Y-%m-%d")==date]
+        play=day.loc[day["time"].dt.hour.between(8,16)]
+        if not play.empty:
+            daily.append({"Round":f"R{rnd} · {date}",
+                "Temperature °F":f"{day['temperature_2m'].min():.0f}–{day['temperature_2m'].max():.0f}",
+                "Wind mph (8 AM–4 PM)":f"{play['wind_speed_10m'].min():.0f}–{play['wind_speed_10m'].max():.0f}",
+                "Max gust mph":round(float(play['wind_gusts_10m'].max())),
+                "Max rain chance %":round(float(play['precipitation_probability'].max()))})
+    if daily:
+        with st.expander("Yokohama hourly forecast by round"):
+            st.dataframe(pd.DataFrame(daily),hide_index=True,use_container_width=True)
 
 m1,m2,m3,m4=st.columns(4)
 m1.metric("Golfers",len(golfers)); m2.metric("Roster","6 G"); m3.metric("Salary Cap","$50,000"); m4.metric("Event",event)
@@ -502,6 +596,8 @@ with st.sidebar:
                          help="Maximum share of portfolio lineups that may contain the same 3-golfer combination.")
     with st.expander("🌦️ Wave ranges",expanded=False):
         st.caption("Min/max % of portfolio lineups. 0–100 leaves a type open; 0 max excludes it. No exact mix required. Activates when tee times load.")
+        if set(golfers["Wave"])=={"AM"}:
+            st.caption("All golfers start in the morning this week. Every lineup is 6A / 0P.")
         wave_table=pd.DataFrame({"Wave":[f"{am}A / {6-am}P" for am in range(6,-1,-1)],
                                  "Min %":[0]*7,"Max %":[100]*7})
         wave_edit=st.data_editor(wave_table,hide_index=True,use_container_width=True,

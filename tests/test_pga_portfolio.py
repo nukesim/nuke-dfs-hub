@@ -17,7 +17,8 @@ def page_functions():
     """Load pure page helpers without executing Streamlit or remote context calls."""
     source = ast.parse((Path(__file__).resolve().parents[1]/"pages/15_PGA_SIM.py").read_text())
     names = {"load_csv", "base_projection", "ownership_estimate", "simulate_golfers",
-             "evaluate", "simulate_contest_metrics", "_norm_name", "_bank_utah_2026_pairings", "export_csv"}
+             "evaluate", "simulate_contest_metrics", "_norm_name", "_bank_utah_2026_pairings", "export_csv",
+             "_baycurrent_2026_context", "attach_tee_weather", "weather_severity", "weather_dot"}
     nodes = [n for n in source.body if isinstance(n, ast.FunctionDef) and n.name in names]
     env = {"np": np, "pd": pd, "re": __import__("re"), "salary_build_type": salary_build_type}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "pga_helpers", "exec"), env)
@@ -25,6 +26,63 @@ def page_functions():
 
 
 class PGAPortfolioTests(unittest.TestCase):
+    def test_baycurrent_field_japan_times_and_no_cut(self):
+        env=page_functions()
+        golfers=env["load_csv"](Path(__file__).resolve().parents[1]/"tests/fixtures/pga_baycurrent_2026.csv")
+        ctx=env["_baycurrent_2026_context"]()
+        self.assertEqual(len(golfers),72)
+        self.assertTrue(golfers["Game Info"].eq("Baycurrent Classic").all())
+        self.assertEqual(set(map(env["_norm_name"],golfers["Name"])),set(ctx["tee_times"]))
+        hours=pd.date_range("2026-10-08",periods=48,freq="h")
+        weather=pd.DataFrame({"time":hours,"wind_speed_10m":np.where(hours.hour<10,6,12),
+                              "wind_gusts_10m":15,"precipitation_probability":0,"precipitation":0,"temperature_2m":70})
+        enriched=env["attach_tee_weather"](golfers,ctx,weather)
+        self.assertTrue(enriched["Wave"].eq("AM").all())
+        self.assertTrue(enriched["R1 Tee"].ne("—").all())
+        self.assertTrue(enriched["R2 Tee"].ne("—").all())
+        self.assertTrue(enriched["Weather"].ne("⚪ TBD").all())
+        self.assertTrue(np.isfinite(enriched["Weather Edge"]).all())
+        self.assertAlmostEqual(enriched["Weather Edge"].mean(),0)
+        byname=enriched.set_index("Name")
+        self.assertEqual(byname.loc["Xander Schauffele","R1 Tee"],"9:29 AM")
+        self.assertEqual(byname.loc["Xander Schauffele","R2 Tee"],"10:35 AM")
+        self.assertEqual(byname.loc["Beau Hossler","R1 Tee"],"8:45 AM")
+        self.assertEqual(byname.loc["Doug Ghim","R2 Tee"],"9:40 AM")
+        for rec in ctx["tee_times"].values():
+            for rnd,date in [(1,"2026-10-08"),(2,"2026-10-09")]:
+                stamp=pd.Timestamp(rec[rnd])
+                self.assertEqual(str(stamp.date()),date)
+                self.assertEqual(stamp.utcoffset().total_seconds(),9*3600)
+        _,cut=env["simulate_golfers"](enriched,250,107)
+        np.testing.assert_array_equal(cut,np.ones(72))
+        legacy=enriched.copy();legacy.attrs["has_cut"]=True
+        _,legacy_cut=env["simulate_golfers"](legacy,250,107)
+        self.assertTrue((legacy_cut<1).all())
+        neutral=env["attach_tee_weather"](golfers,ctx,pd.DataFrame())
+        self.assertTrue(neutral["Weather Edge"].eq(0).all())
+        self.assertTrue(neutral["Wave"].eq("AM").all())
+
+    def test_baycurrent_complete_150_single_wave_portfolio(self):
+        env=page_functions()
+        golfers=env["attach_tee_weather"](
+            env["load_csv"](Path(__file__).resolve().parents[1]/"tests/fixtures/pga_baycurrent_2026.csv"),
+            env["_baycurrent_2026_context"](),pd.DataFrame())
+        own=env["ownership_estimate"](golfers);projection=env["base_projection"](golfers)
+        bounds=wave_lineup_bounds(150,{am:(0,100) for am in range(7)})
+        cands=generate_pga_candidates(golfers["ID"],golfers["Salary"],projection,own,5000,49600,107,
+                                      waves=golfers["Wave"],wave_bounds=bounds)
+        sims,cut=env["simulate_golfers"](golfers,250,107)
+        results=env["simulate_contest_metrics"](env["evaluate"](cands,sims,own),cands,sims,cut,2378,3,600,107)
+        self.assertTrue(results["6/6 %"].eq(100).all())
+        caps=automatic_exposure_caps(golfers["Salary"],projection,cut,own)
+        selected=select_pga_portfolio(results,cands,golfers,150,60,30,20,{}, {},caps,wave_bounds=bounds)
+        self.assertEqual(len(selected),150)
+        self.assertEqual(selected["_candidate"].nunique(),150)
+        for j in selected["_candidate"]:
+            cand=cands[int(j)]
+            self.assertTrue(49600<=cand["salary"]<=50000)
+            self.assertTrue(golfers.iloc[cand["idx"]]["Wave"].eq("AM").all())
+
     def test_salary_build_bands_and_rounding(self):
         self.assertEqual(salary_build_type([6999,7000,7999,8999,9999,10999]), "10/9/8/7/7/6")
         self.assertEqual(salary_build_type([11000,9000,8000,7000,6000,5000]), "11/9/8/7/6/5")

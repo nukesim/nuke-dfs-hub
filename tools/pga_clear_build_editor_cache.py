@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Triggered after the cache-reset workflow was added so the live PGA page is patched.
 p = Path("pages/15_PGA_SIM.py")
 s = p.read_text()
 

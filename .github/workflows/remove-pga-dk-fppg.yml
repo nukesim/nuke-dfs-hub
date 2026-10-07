@@ -1,0 +1,41 @@
+name: Remove PGA DK FPPG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/remove_pga_dk_fppg.py'
+      - '.github/workflows/remove-pga-dk-fppg.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply PGA FPPG removal
+        run: python tools/remove_pga_dk_fppg.py
+      - name: Compile PGA page
+        run: python -m py_compile pages/15_PGA_SIM.py
+      - name: Verify DK FPPG is gone from PGA sim
+        run: |
+          ! grep -q 'AvgPointsPerGame' pages/15_PGA_SIM.py
+          ! grep -q 'DK FPPG' pages/15_PGA_SIM.py
+          ! grep -q 'base_projection' pages/15_PGA_SIM.py
+          grep -q 'def salary_baseline' pages/15_PGA_SIM.py
+      - name: Commit patched PGA page
+        run: |
+          if git diff --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/15_PGA_SIM.py
+          git commit -m 'Remove DK FPPG from PGA sim'
+          git push

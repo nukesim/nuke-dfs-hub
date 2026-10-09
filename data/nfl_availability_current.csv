@@ -1,11 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
-19217,Jonathan Taylor,IND,,,Limit / Full / Full,1,,,,2026-10-08T23:23:12+00:00
-16393,Christian McCaffrey,SF,,,DNP / Full / Full,1,,,,2026-10-08T23:23:12+00:00
-23180,Puka Nacua,LAR,,,Limit / Limit / Full,1,,,,2026-10-08T23:23:12+00:00
-25989,Ashton Jeanty,LV,,,Full / Full / Full,1,,,,2026-10-08T23:23:12+00:00
-22916,Zay Flowers,BAL,Questionable,Q,Limit / Full / Limit,0.95,,Hamstring,2026-10-04 11:20:03,2026-10-08T23:23:12+00:00
-20130,Nico Collins,HOU,,,Limit / Limit / Full,1,,,,2026-10-08T23:23:12+00:00
-19210,D'Andre Swift,CHI,,,-- / DNP / Full,1,,,,2026-10-08T23:23:12+00:00
-19236,Justin Jefferson,MIN,OUT,O,DNP / DNP / DNP,0,,Ankle,2026-10-03 11:33:45,2026-10-08T23:23:12+00:00
-19792,Chuba Hubbard,CAR,,,DNP / Full / Full,1,,,,2026-10-08T23:23:12+00:00
-17233,Lamar Jackson,BAL,,,Limit / Full / Full,1,,,,2026-10-08T23:23:12+00:00
+19217,Jonathan Taylor,IND,,,Limit / Full / Full,1,,,,2026-10-09T06:13:08+00:00
+16393,Christian McCaffrey,SF,,,DNP / Full / Full,1,,,,2026-10-09T06:13:08+00:00
+23180,Puka Nacua,LAR,,,Limit / Limit / Full,1,,,,2026-10-09T06:13:08+00:00
+25989,Ashton Jeanty,LV,,,Full / Full / Full,1,,,,2026-10-09T06:13:08+00:00
+22916,Zay Flowers,BAL,Questionable,Q,Limit / Full / Limit,0.95,,Hamstring,2026-10-04 11:20:03,2026-10-09T06:13:08+00:00
+20130,Nico Collins,HOU,,,Limit / Limit / Full,1,,,,2026-10-09T06:13:08+00:00
+19210,D'Andre Swift,CHI,,,-- / DNP / Full,1,,,,2026-10-09T06:13:08+00:00
+19236,Justin Jefferson,MIN,OUT,O,DNP / DNP / DNP,0,,Ankle,2026-10-03 11:33:45,2026-10-09T06:13:08+00:00
+19792,Chuba Hubbard,CAR,,,DNP / Full / Full,1,,,,2026-10-09T06:13:08+00:00
+17233,Lamar Jackson,BAL,,,Limit / Full / Full,1,,,,2026-10-09T06:13:08+00:00

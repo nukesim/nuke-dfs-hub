@@ -7,7 +7,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 FD_SLATE_PATH = ROOT / "data" / "fanduel_nfl_current.csv"
 FD_B64_PREFIX = ROOT / "data" / "fanduel_nfl_current.csv.gz.b64.part"
-FD_SLATE_LABEL = "2026 FanDuel Week 4 Sunday Main · 2026-10-04 · Updated 2026-09-30"
+FD_SLATE_LABEL = "2026 FanDuel Week 5 Sunday Main · 2026-10-11 · Updated 2026-10-09"
 
 
 def _payload_parts():

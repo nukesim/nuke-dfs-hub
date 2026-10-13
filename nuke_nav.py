@@ -38,6 +38,7 @@ def render_nav():
         st.page_link("pages/15_PGA_SIM.py", label="PGA Sim", icon="⛳")
         st.page_link("pages/16_NHL_SIM.py", label="NHL Sim", icon="🏒")
         st.page_link("pages/17_MMA_SIM.py", label="MMA Sim", icon="🥊")
+        st.page_link("pages/18_CONTEST_FILL.py", label="Contest Fill Tracker", icon="📈")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
 

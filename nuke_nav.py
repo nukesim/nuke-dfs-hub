@@ -37,8 +37,8 @@ def render_nav():
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown Sim", icon="⚡")
         st.page_link("pages/15_PGA_SIM.py", label="PGA Sim", icon="⛳")
         st.page_link("pages/16_NHL_SIM.py", label="NHL Sim", icon="🏒")
-        st.page_link("pages/17_MMA_SIM.py", label="MMA Sim", icon="🥊")
-        st.page_link("pages/19_UFC_SINGLE_ENTRY.py", label="UFC Single Entry", icon="🎯")
+        st.page_link("pages/17_MMA_SIM.py", label="MMA 150-Max Sim", icon="🥊")
+        st.page_link("pages/19_UFC_SINGLE_ENTRY.py", label="UFC Single Entry (Today)", icon="🎯")
         st.page_link("pages/18_CONTEST_FILL.py", label="Contest Fill Tracker", icon="📈")
         st.page_link("pages/11_GUIDE.py", label="Guide / About", icon="❓")
 
@@ -58,3 +58,5 @@ def render_nav():
         st.caption("Buy Me a Coffee supports one-time or monthly contributions.")
         st.divider()
         st.caption("NUKE DFS is an independent fantasy sports research and lineup-building tool. It is not affiliated with or endorsed by DraftKings, FanDuel, or the NFL. Simulations and model outputs are estimates and do not guarantee outcomes or winnings. Play responsibly and follow applicable laws and platform rules.")
+
+# Streamlit Cloud nav refresh marker: 2026-10-17 UFC single-entry deploy

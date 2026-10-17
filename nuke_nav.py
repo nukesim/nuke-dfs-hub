@@ -1,4 +1,5 @@
 import streamlit as st
+import nuke_numpy_hotfix  # narrow UFC NumPy cast guard; no-op for normal np.where calls
 
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/nukedfs"
 VENMO_URL = "https://account.venmo.com/u/Bryson-Anderson-1"

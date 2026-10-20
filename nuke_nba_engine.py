@@ -356,5 +356,5 @@ def export_dk_csv(results, players):
     writer = csv.writer(buffer)
     writer.writerow(DK_SLOTS)
     for lineup in results:
-        writer.writerow([players[i]["id"] for i in lineup["lineup"]])
+        writer.writerow([f'{players[i]["name"]} ({players[i]["id"]})' for i in lineup["lineup"]])
     return buffer.getvalue()

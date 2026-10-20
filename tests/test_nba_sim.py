@@ -106,6 +106,9 @@ class NbaSimTests(unittest.TestCase):
         self.assertEqual(exported[0], ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"])
         self.assertEqual(len(exported), 4)
         self.assertTrue(all(len(set(row)) == 8 for row in exported[1:]))
+        for result_row, csv_row in zip(result, exported[1:]):
+            expected = [f'{players[i]["name"]} ({players[i]["id"]})' for i in result_row["lineup"]]
+            self.assertEqual(csv_row, expected)
 
 
 if __name__ == "__main__":

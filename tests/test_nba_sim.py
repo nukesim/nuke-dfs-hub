@@ -86,6 +86,36 @@ class NbaSimTests(unittest.TestCase):
             data = fetch_rotowire_lineups(date(2026,10,20))
         self.assertEqual(data["SAS"]["state"], "expected")
         self.assertEqual(len(data["SAS"]["starters"]), 5)
+        self.assertEqual(data["SAS"]["positions"], {})
+
+    def test_rotowire_positions_are_preserved_for_starting_fives(self):
+        from datetime import date
+        positions = ("PG", "SG", "SF", "PF", "C")
+        visitor = ["Derrick White", "Paul George", "Jayson Tatum", "Jordan Walsh", "Mitchell Robinson"]
+        home = ["Cade Cunningham", "Duncan Robinson", "Ausar Thompson", "John Collins", "Jalen Duren"]
+
+        def block(side, names, state):
+            players = "".join(
+                f'<li class="lineup__player is-pct-play-100" title="Very Likely To Play">'
+                f'<div class="lineup__pos" >{slot}</div><a title="{name}">{name}</a></li>'
+                for slot, name in zip(positions, names)
+            )
+            return f'<ul class="lineup__list is-{side}"><li class="lineup__status is-{state}"></li>{players}</ul>'
+
+        markup = ('<div class="lineup is-nba" data-lnum="1">'
+                  '<a class="lineup__team is-visit"><div class="lineup__abbr">BOS</div></a>'
+                  '<a class="lineup__team is-home"><div class="lineup__abbr">DET</div></a>'
+                  + block("visit", visitor, "confirmed")
+                  + block("home", home, "expected")
+                  + '</div>')
+        with patch("nuke_nba_data._text", return_value=markup):
+            result = fetch_rotowire_lineups(date(2026, 10, 20))
+        self.assertEqual(result["BOS"]["state"], "confirmed")
+        self.assertEqual(result["DET"]["state"], "expected")
+        self.assertEqual(result["BOS"]["positions"]["PG"], norm_name("Derrick White"))
+        self.assertEqual(result["DET"]["positions"]["C"], norm_name("Jalen Duren"))
+        self.assertEqual(result["BOS"]["display_positions"]["SF"], "Jayson Tatum")
+        self.assertEqual(len(result["BOS"]["positions"]), 5)
 
     def test_optimizer_and_export(self):
         import numpy as np

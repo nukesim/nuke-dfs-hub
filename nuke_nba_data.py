@@ -213,7 +213,29 @@ def fetch_rotowire_lineups(slate_date):
             status_match = re.search(r'lineup__status\s+is-([a-z]+)', starter_block)
             state = (status_match.group(1) if status_match else "unknown").lower()
             if len(starter_names) == 5 and state in {"expected", "confirmed"}:
-                result[team] = {"state": state, "starters": {norm_name(html.unescape(n)) for n in starter_names}}
+                # Preserve RotoWire's real PG/SG/SF/PF/C assignments for the
+                # visual lineup board; a set of names alone loses positions.
+                positions, display_positions = {}, {}
+                for player_tag in re.finditer(
+                    r'<li\b[^>]*class="[^"]*\blineup__player\b[^"]*"[^>]*>(.*?)</li>',
+                    starter_block, re.S,
+                ):
+                    fragment = player_tag.group(1)
+                    slot = re.search(
+                        r'<div\b[^>]*class="[^"]*\blineup__pos\b[^"]*"[^>]*>\s*(PG|SG|SF|PF|C)\s*</div>',
+                        fragment, re.S,
+                    )
+                    name = re.search(r'<a\b[^>]*\btitle="([^"]+)"', fragment, re.S)
+                    if slot and name:
+                        label = html.unescape(name.group(1))
+                        positions[slot.group(1)] = norm_name(label)
+                        display_positions[slot.group(1)] = label
+                result[team] = {
+                    "state": state,
+                    "starters": {norm_name(html.unescape(n)) for n in starter_names},
+                    "positions": positions,
+                    "display_positions": display_positions,
+                }
     return result
 
 

@@ -35,6 +35,7 @@ def render_nav():
     with st.sidebar:
         st.page_link("app.py", label="NFL Hand Builder", icon="🏈")
         st.page_link("pages/14_NUKE_SIM.py", label="NFL Sim", icon="☢️")
+        st.page_link("pages/20_NBA_SIM.py", label="NBA Sim", icon="🏀")
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown Sim", icon="⚡")
         st.page_link("pages/15_PGA_SIM.py", label="PGA Sim", icon="⛳")
         st.page_link("pages/16_NHL_SIM.py", label="NHL Sim", icon="🏒")

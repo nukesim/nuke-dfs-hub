@@ -40,3 +40,28 @@ A new expandable table can sort teams by:
 - Players Used
 
 Saved Lineup preview cards also include the Correlation Map badges.
+
+## NBA Classic simulator
+
+Open **NBA Sim** from the NUKE sidebar. The default slate is the October 20, 2026
+DraftKings NBA Classic salary CSV; upload a fresh DK file for subsequent slates.
+
+- Refresh ESPN NBA injuries, game lines, and the publicly listed expected/confirmed
+  starting fives from RotoWire; the NBA page checks feeds every five minutes while open.
+- Model 240 minutes per NBA team, with role-aware rotation weights, injury exclusions,
+  optional Q/doubtful scenarios, a manual minutes override, and historical ESPN
+  player scoring rates. The first 2026-27 slate uses the 2025-26 statistical prior.
+- Display projection, ceiling, 20+ fantasy-point frequency, 6x salary frequency,
+  minutes, value and **model-estimated** ownership on the player lab.
+- Build up to 150 unique GPP lineups via a legal DraftKings position/salary integer
+  optimizer, with contest size, max-team, minimum salary and exposure controls.
+- Evaluate lineups with correlated slate simulations, synthetic field benchmarks,
+  a high-ceiling/low-duplication GPP score, and player exposure bars. Export the
+  eight DK ID columns: `PG,SG,SF,PF,C,G,F,UTIL`.
+
+**Important limitations:** Starting lineups stay marked *expected* until explicitly
+confirmed by the source. Feed failures are shown; existing DK statuses remain a
+conservative fallback. Missing ESPN history is labeled as a DK-average fallback.
+Ownership and simulated field-beat percentages are heuristic research estimates,
+not real DraftKings contest ownership or calibrated winning probabilities. The
+CSV export does not implement locked-player late swaps on already-entered lineups.

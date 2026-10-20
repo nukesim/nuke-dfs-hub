@@ -14,8 +14,8 @@ import streamlit as st
 
 from nuke_nav import render_nav
 from nuke_nba_data import (
-    DK_SLOTS, apply_live_data, fetch_espn_games, fetch_espn_injuries,
-    fetch_espn_stats, fetch_rotowire_lineups, parse_slate,
+    DK_SLOTS, TEAM_NAMES, apply_live_data, fetch_espn_games, fetch_espn_injuries,
+    fetch_espn_stats, fetch_rotowire_lineups, norm_name, parse_slate,
 )
 from nuke_nba_engine import (
     build_portfolio, estimate_ownership, export_dk_csv, project_players,
@@ -45,6 +45,30 @@ st.markdown("""
 .nbachip.red {background:rgba(255,85,85,.12);color:#ffb1b1}
 .nbaplayers {color:#e8f2ea;font-weight:800;line-height:1.75}
 .nbalabel {color:#8fa0ae;font-size:.69rem;font-weight:900;letter-spacing:.09em;text-transform:uppercase}
+
+.nba-start-game {border:1px solid rgba(255,255,255,.13);border-radius:17px;overflow:hidden;background:#101721;margin:13px 0 20px;box-shadow:0 10px 28px rgba(0,0,0,.16)}
+.nba-start-gamehead {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px;padding:12px 17px;background:#1b2633;border-bottom:1px solid rgba(255,255,255,.1);color:#d9e6f2;font-size:.78rem;font-weight:850;letter-spacing:.06em}
+.nba-start-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+.nba-start-team {padding:14px 18px 15px;min-width:0}
+.nba-start-team + .nba-start-team {border-left:1px solid rgba(255,255,255,.11)}
+.nba-start-teamhead {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:11px}
+.nba-start-abbr {font-size:1.6rem;font-weight:950;color:#f5f8fc;letter-spacing:-.04em}
+.nba-start-full {font-size:.7rem;font-weight:700;color:#899bab}
+.nba-start-pill {font-size:.67rem;font-weight:900;border-radius:20px;padding:5px 8px;white-space:nowrap;background:rgba(244,193,57,.11);color:#fbd776}
+.nba-start-pill.confirmed {background:rgba(25,195,125,.13);color:#78eab3}
+.nba-start-pill.pending {background:rgba(143,160,174,.12);color:#aab7c3}
+.nba-start-row {display:grid;grid-template-columns:34px minmax(0,1fr) 46px;align-items:center;gap:7px;min-height:39px;border-top:1px solid rgba(255,255,255,.055);font-size:.89rem}
+.nba-start-pos {color:#72e0b0;font-size:.73rem;font-weight:950}
+.nba-start-player {font-weight:760;color:#edf4fb;overflow-wrap:anywhere}
+.nba-start-player.pending {color:#798997;font-weight:550}
+.nba-start-min {color:#9cabb8;font-weight:750;font-size:.72rem;text-align:right;white-space:nowrap}
+.nba-start-alert {font-size:.62rem;font-weight:950;background:rgba(245,75,82,.14);color:#ff929a;padding:2px 5px;border-radius:4px;margin-left:5px}
+.nba-start-watch {border-top:1px solid rgba(255,255,255,.09);padding-top:10px;margin-top:5px;min-height:55px}
+.nba-start-watchlabel {font-size:.66rem;font-weight:950;letter-spacing:.1em;color:#8296a5;margin-bottom:6px}
+.nba-start-watchline {font-size:.73rem;color:#d2dde5;line-height:1.8}
+.nba-start-watchline b {color:#ff929a}
+.nba-start-foot {font-size:.68rem;color:#91a4b2;margin-top:6px}
+@media(max-width:760px) {.nba-start-grid{grid-template-columns:1fr}.nba-start-team + .nba-start-team{border-left:none;border-top:1px solid rgba(255,255,255,.14)}}
 div[data-testid="stMetric"]{border:1px solid rgba(255,255,255,.11);border-radius:14px;padding:9px 12px;background:rgba(255,255,255,.022)}
 div[data-testid="stMetricValue"]{font-weight:950}
 </style>
@@ -87,6 +111,75 @@ def player_badges(p):
     if p["starter"] == "EXPECTED":
         return '<span class="nbachip warn">EXPECTED STARTER</span>'
     return '<span class="nbachip warn">START UNKNOWN</span>'
+
+
+STARTING_POSITIONS = ("PG", "SG", "SF", "PF", "C")
+
+
+def starting_team_html(team, roster, lineups):
+    """Render sourced position assignments, never guessing a confirmed five."""
+    lineup = (lineups or {}).get(team, {})
+    state = lineup.get("state", "unknown")
+    positions = lineup.get("positions") or {}
+    display_positions = lineup.get("display_positions") or {}
+    roster_lookup = {norm_name(p["name"]): p for p in roster}
+    complete = all(positions.get(slot) for slot in STARTING_POSITIONS)
+    if complete and state == "confirmed":
+        status_label, status_class = "● CONFIRMED", "confirmed"
+    elif complete and state == "expected":
+        status_label, status_class = "● EXPECTED", ""
+    elif lineup.get("starters"):
+        status_label, status_class = "● POSITIONS PENDING", "pending"
+    else:
+        status_label, status_class = "● LINEUP PENDING", "pending"
+
+    rows = []
+    for slot in STARTING_POSITIONS:
+        match = roster_lookup.get(positions.get(slot, ""))
+        source_name = display_positions.get(slot, "")
+        if match is not None:
+            name = html.escape(match["name"])
+            minutes = f'{match["minutes"]:.0f}m'
+            status = match["status"]
+            alert = (f'<span class="nba-start-alert">{html.escape(status)}</span>'
+                     if status in {"OUT", "Q", "DOUBTFUL"} else "")
+            name_class = ""
+        else:
+            name = html.escape(source_name or "Awaiting starter")
+            minutes, alert = "—", ""
+            name_class = " pending" if not source_name else ""
+        rows.append(
+            f'<div class="nba-start-row"><span class="nba-start-pos">{slot}</span>'
+            f'<span class="nba-start-player{name_class}">{name}{alert}</span>'
+            f'<span class="nba-start-min">{minutes}</span></div>'
+        )
+
+    severity = {"OUT": 0, "DOUBTFUL": 1, "Q": 2}
+    watched = sorted((p for p in roster if p["status"] in severity),
+                     key=lambda p: (severity[p["status"]], -p["salary"]))
+    if watched:
+        warning_list = " · ".join(
+            f'{html.escape(p["name"])} <b>{html.escape(p["status"])}</b>'
+            for p in watched[:5]
+        )
+        if len(watched) > 5:
+            warning_list += f" · +{len(watched)-5} more"
+    else:
+        warning_list = "No OUT / doubtful / questionable flags in the current feed"
+    source_note = ("Starting positions supplied by RotoWire"
+                   if complete else "Source has not supplied a complete five by position")
+    return (
+        '<div class="nba-start-team">'
+        '<div class="nba-start-teamhead">'
+        f'<div><div class="nba-start-abbr">{html.escape(team)}</div>'
+        f'<div class="nba-start-full">{html.escape(TEAM_NAMES.get(team, team))}</div></div>'
+        f'<span class="nba-start-pill {status_class}">{status_label}</span></div>'
+        + "".join(rows)
+        + '<div class="nba-start-watch"><div class="nba-start-watchlabel">INJURY WATCH</div>'
+        f'<div class="nba-start-watchline">{warning_list}</div></div>'
+        f'<div class="nba-start-foot">{source_note} · Minutes = NUKE projection</div>'
+        '</div>'
+    )
 
 
 def lineup_card(item, players, index):
@@ -214,9 +307,49 @@ def nba_dashboard():
     if stale_results:
         st.warning("Injury, minutes or contest settings changed since the last run. Rebuild the GPP portfolio before downloading.")
 
-    slate_tab, player_tab, tournament_tab, portfolio_tab = st.tabs([
-        "🏟 SLATE INTEL", "🧪 PLAYER LAB", "☢ GPP SIM", "📈 PORTFOLIO + EXPORT"
+    starters_tab, slate_tab, player_tab, tournament_tab, portfolio_tab = st.tabs([
+        "🏀 STARTING 5", "🏟 SLATE INTEL", "🧪 PLAYER LAB", "☢ GPP SIM", "📈 PORTFOLIO + EXPORT"
     ])
+    with starters_tab:
+        lineup_feed = feeds.get("Starting fives · RotoWire") or {}
+        teams = sorted({p["team"] for p in modeled})
+        confirmed_teams = sum(lineup_feed.get(t, {}).get("state") == "confirmed"
+                              and len(lineup_feed.get(t, {}).get("positions", {})) == 5 for t in teams)
+        expected_teams = sum(lineup_feed.get(t, {}).get("state") == "expected"
+                             and len(lineup_feed.get(t, {}).get("positions", {})) == 5 for t in teams)
+        ready = confirmed_teams + expected_teams
+        a, b, c = st.columns(3)
+        a.metric("Confirmed fives", confirmed_teams)
+        b.metric("Expected fives", expected_teams)
+        c.metric("Awaiting full lineup", len(teams) - ready)
+        st.caption("Starter identities and positions: RotoWire expected/confirmed feed. Minutes: NUKE model, not source minutes. "
+                   f"Last feed check {last_refresh.replace('T', ' ')} UTC · Refresh in the sidebar or wait about five minutes.")
+        games_order = sorted({p["game"] for p in modeled},
+                             key=lambda game: min(p["start"] for p in modeled if p["game"] == game))
+        selected_matchup = st.selectbox("Matchup", ["All games"] + games_order, key="nba_starting_matchup")
+        for game in games_order:
+            if selected_matchup != "All games" and selected_matchup != game:
+                continue
+            group = [p for p in modeled if p["game"] == game]
+            away, home = game.split("@")
+            away_roster = [p for p in group if p["team"] == away]
+            home_roster = [p for p in group if p["team"] == home]
+            tip = group[0]["start"].strftime("%I:%M %p ET").lstrip("0")
+            total = group[0].get("game_total")
+            header = f"{html.escape(game)} · {tip} · O/U {total:g}" if total else f"{html.escape(game)} · {tip} · O/U unavailable"
+            st.markdown(
+                '<div class="nba-start-game">'
+                f'<div class="nba-start-gamehead"><span>🏀 {header}</span><span>PG · SG · SF · PF · C</span></div>'
+                '<div class="nba-start-grid">'
+                + starting_team_html(away, away_roster, lineup_feed)
+                + starting_team_html(home, home_roster, lineup_feed)
+                + '</div></div>',
+                unsafe_allow_html=True,
+            )
+        if not ready:
+            st.info("No complete starting fives have been received yet. This view will populate as the RotoWire feed updates; "
+                    "do not treat a pending lineup as confirmed.")
+
     with slate_tab:
         for game in sorted({p["game"] for p in modeled}):
             group = [p for p in modeled if p["game"] == game]

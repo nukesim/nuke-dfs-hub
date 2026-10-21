@@ -28,18 +28,18 @@ class NbaSimTests(unittest.TestCase):
         return estimate_ownership(project_players(live, included_questionable=include_q))
 
     def test_real_dk_slate_has_valid_slots_and_unique_ids(self):
-        self.assertEqual(len(self.slate), 125)
+        self.assertEqual(len(self.slate), 381)
         self.assertFalse(self.warnings)
-        self.assertEqual(len({p["id"] for p in self.slate}), 125)
-        self.assertEqual(len({p["game"] for p in self.slate}), 3)
+        self.assertEqual(len({p["id"] for p in self.slate}), len(self.slate))
+        self.assertEqual(len({p["game"] for p in self.slate}), 11)
         for player in self.slate:
             self.assertTrue(player["eligible"])
             self.assertIn(player["team"], {player["game"].split("@")[0], player["game"].split("@")[1]})
 
     def test_rejects_team_game_mismatch(self):
-        sample = FIXTURE.read_text(encoding="utf-8-sig").replace(",SAS,51.7", ",LAL,51.7", 1)
+        sample = FIXTURE.read_text(encoding="utf-8-sig").replace(",LAL,60.2", ",SAS,60.2", 1)
         players, warnings = parse_slate(sample)
-        self.assertEqual(len(players), 124)
+        self.assertEqual(len(players), len(self.slate) - 1)
         self.assertTrue(any("mismatch" in w for w in warnings))
 
     def test_status_and_confirmed_vs_expected_are_separate(self):
@@ -63,11 +63,11 @@ class NbaSimTests(unittest.TestCase):
         for team in by_team:
             total = sum(p["minutes"] for p in players if p["team"] == team)
             self.assertAlmostEqual(total, 240, delta=0.7)
-        star = next(p for p in players if p["team"] == "SAS" and p["minutes"] >= 25)
+        star = next(p for p in players if p["team"] == "LAL" and p["minutes"] >= 25)
         injured = self.model()
         changed = project_players(injured, status_overrides={star["id"]: "OUT"})
         self.assertEqual(next(p for p in changed if p["id"] == star["id"])["minutes"], 0)
-        self.assertAlmostEqual(sum(p["minutes"] for p in changed if p["team"] == "SAS"), 240, delta=0.7)
+        self.assertAlmostEqual(sum(p["minutes"] for p in changed if p["team"] == "LAL"), 240, delta=0.7)
 
     def test_ownership_is_full_slate_prior_not_observed(self):
         players = self.model()
@@ -121,7 +121,7 @@ class NbaSimTests(unittest.TestCase):
         import numpy as np
         players = self.model()
         scores = simulate_slate(players, simulations=350, seed=12)
-        self.assertEqual(scores.shape, (125, 350))
+        self.assertEqual(scores.shape, (len(players), 350))
         estimate_ownership(players)
         lineup = optimize_once(players, [p["projection"] for p in players], min_salary=45000, max_team=4)
         self.assertIsNotNone(lineup)

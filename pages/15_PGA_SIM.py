@@ -203,6 +203,13 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
         out["status"]="Published R1/R2 tee times loaded"
         return out
 
+    # Butterfield Bermuda: keep the correct course context even before tee times appear in ESPN.
+    if "butterfieldbermuda" in wanted:
+        out.update({"course":"Port Royal Golf Course","location":"Southampton, Bermuda",
+            "lat":32.252,"lon":-64.835,"timezone":"Atlantic/Bermuda",
+            "timezone_label":"ADT","has_cut":True,
+            "round_dates":["2026-10-22","2026-10-23","2026-10-24","2026-10-25"]})
+
     # Generic ESPN discovery remains in place for future events and may fill richer metadata.
     try:
         sb=requests.get("https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard",timeout=8).json()
@@ -520,8 +527,11 @@ elif tee_ready:
 else:
     wcols[2].info("⚪ Weather/wave edge activates when tee times are published")
 if ctx.get("round_dates"):
-    st.caption(f"October 8–11, 2026 · No-cut event · Tee times and weather shown in {ctx.get('timezone_label','course local time')} (Japan). R1/R2: all golfers start in the morning.")
-    st.markdown(f"[Published R1/R2 tee sheet]({ctx['tee_url']})")
+    start_date, end_date = ctx["round_dates"][0], ctx["round_dates"][-1]
+    cut_label = "Cut event" if ctx.get("has_cut", True) else "No-cut event"
+    st.caption(f"{start_date} through {end_date} · {cut_label} · Tee times/weather in {ctx.get('timezone_label', 'course local time')}")
+    if ctx.get("tee_url"):
+        st.markdown(f"[Published R1/R2 tee sheet]({ctx['tee_url']})
 if ctx.get("forecast_summary"):
     st.info("🌦️ " + ctx["forecast_summary"])
     st.caption(f"PGA TOUR forecast issued {ctx['forecast_as_of']} · [Official forecast]({ctx['forecast_url']}). Golfer weather edges use the latest Open-Meteo hourly forecast when available.")
@@ -537,7 +547,7 @@ if not weather.empty and ctx.get("round_dates"):
                 "Max gust mph":round(float(play['wind_gusts_10m'].max())),
                 "Max rain chance %":round(float(play['precipitation_probability'].max()))})
     if daily:
-        with st.expander("Yokohama hourly forecast by round"):
+        with st.expander("Hourly forecast by round"):
             st.dataframe(pd.DataFrame(daily),hide_index=True,use_container_width=True)
 
 m1,m2,m3,m4=st.columns(4)

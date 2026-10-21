@@ -97,12 +97,27 @@ def history_stats(year):
     return fetch_espn_stats(year)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=150, show_spinner=False)
+def cached_injuries(refresh_token):
+    return fetch_espn_injuries()
+
+
+@st.cache_data(ttl=150, show_spinner=False)
+def cached_games(slate_date, refresh_token):
+    return fetch_espn_games(slate_date)
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def cached_starting_fives(slate_date, refresh_token):
+    return fetch_rotowire_lineups(slate_date)
+
+
+@st.cache_data(ttl=45, show_spinner=False)
 def live_feeds(slate_date, refresh_token):
     sources = {
-        "Injuries · ESPN": lambda: fetch_espn_injuries(),
-        "Starting fives · RotoWire": lambda: fetch_rotowire_lineups(slate_date),
-        "Games · ESPN": lambda: fetch_espn_games(slate_date),
+        "Injuries · ESPN": lambda: cached_injuries(refresh_token),
+        "Starting fives · RotoWire": lambda: cached_starting_fives(slate_date, refresh_token),
+        "Games · ESPN": lambda: cached_games(slate_date, refresh_token),
     }
     data, errors = {}, []
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -235,7 +250,7 @@ with st.sidebar:
     if st.button("↻ REFRESH INJURIES + STARTERS", use_container_width=True, type="primary"):
         st.session_state.nba_refresh += 1
         st.rerun()
-    st.caption("Lineups refresh approximately every five minutes while this page is open. Build: NBA 2026-10-21-FEED-FIX.")
+    st.caption("Lineups are checked about once a minute while this tab is open; ESPN injuries about every 2½ minutes. Use Refresh for an immediate recheck.")
     st.divider()
     st.markdown("### GPP ENGINE")
     entries = st.slider("Lineups", 1, 150, 20, 1)
@@ -277,7 +292,7 @@ if stale_slate:
 season_end = slate_date.year + 1 if slate_date.month >= 7 else slate_date.year
 
 
-@st.fragment(run_every="300s")
+@st.fragment(run_every="60s")
 def nba_dashboard():
     feeds, feed_errors, last_refresh = live_feeds(slate_date, st.session_state.nba_refresh)
     history_errors = []
@@ -296,7 +311,24 @@ def nba_dashboard():
     lineup_key = f"nba_last_good_lineups_{slate_date:%Y%m%d}"
     fresh_lineups = feeds.get("Starting fives · RotoWire") or {}
     cached_lineups = False
+    news_events = []
     if fresh_lineups:
+        # Record real status transitions only when the provider returned data.
+        # Never fabricate a "confirmed" event from a previous cached response.
+        previous = st.session_state.get(f"nba_news_snapshot_{slate_date:%Y%m%d}", {})
+        latest = {
+            team: (data.get("state", "unknown"), tuple(sorted(data.get("starters", set()))))
+            for team, data in fresh_lineups.items()
+        }
+        for team, (state, names) in latest.items():
+            if team in previous and previous[team] != (state, names):
+                if state == "confirmed" and previous[team][0] != "confirmed":
+                    news_events.append(f"{team}: STARTING FIVE CONFIRMED")
+                elif state == "confirmed" and previous[team][1] != names:
+                    news_events.append(f"{team}: CONFIRMED STARTERS CHANGED")
+                elif state == "expected" and previous[team][1] != names:
+                    news_events.append(f"{team}: EXPECTED FIVE UPDATED")
+        st.session_state[f"nba_news_snapshot_{slate_date:%Y%m%d}"] = latest
         st.session_state[lineup_key] = {"lineups": fresh_lineups, "checked": last_refresh}
     elif lineup_key in st.session_state:
         feeds = dict(feeds)
@@ -360,8 +392,20 @@ def nba_dashboard():
             st.error(f"Feed unavailable — {err}. Check player status before entering.")
     for warning in {p.get("minutes_warning") for p in modeled if p.get("minutes_warning")}:
         st.warning(warning)
+    conflicts = [p["name"] for p in modeled if p.get("confirmed_injury_conflict")]
+    if conflicts:
+        st.error(
+            "CONFLICTING STARTER / INJURY NEWS — " + ", ".join(conflicts[:6]) +
+            ". The OUT/DOUBTFUL designation takes precedence until verified. "
+            "These players are excluded to avoid a risky lineup."
+        )
+    if news_events:
+        st.success("🔔 LINEUP NEWS — " + " | ".join(news_events) +
+                   ". Minutes, projections and ownership have been recalculated.")
     if stale_results:
-        st.warning("Injury, minutes or contest settings changed since the last run. Rebuild the GPP portfolio before downloading.")
+        st.error("🚨 NEWS/PROJECTIONS CHANGED: Existing portfolio is now STALE. "
+                 "Rebuild your GPP lineups before exporting or entering. "
+                 "Downloaded CSV files and already-entered DK rosters will NOT update automatically.")
 
     starters_tab, slate_tab, player_tab, tournament_tab, portfolio_tab = st.tabs([
         "🏀 STARTING 5", "🏟 SLATE INTEL", "🧪 PLAYER LAB", "☢ GPP SIM", "📈 PORTFOLIO + EXPORT"
@@ -386,7 +430,7 @@ def nba_dashboard():
                      if cached_lineups and lineup_asof
                      else f"Last feed check {last_refresh.replace('T', ' ')} UTC")
         st.caption("Source: RotoWire reported/expected fives. Minutes are NUKE projections. "
-                   f"{freshness} · Refresh in sidebar or wait about five minutes.")
+                   f"{freshness} · Refresh in sidebar or wait about one minute.")
         st.link_button(
             "↗ Check starting lineups on RotoBaller",
             "https://www.rotoballer.com/todays-nba-starting-lineups-daily-basketball-starters",
@@ -414,8 +458,10 @@ def nba_dashboard():
                 unsafe_allow_html=True,
             )
         if not ready:
-            st.info("No complete starting fives have been received yet. This view will populate as the RotoWire feed updates; "
+            st.info("No complete starting fives have been received yet. This view populates as the lineup provider updates (roughly one-minute checks); "
                     "do not treat a pending lineup as confirmed.")
+        st.caption("⚠ A source-confirmed lineup is not the same as a guaranteed player-minute allotment. "
+                   "FPPM and injury-adjusted rotations remain modeled estimates; check updates before lock.")
 
     with slate_tab:
         for game in sorted({p["game"] for p in modeled}):
@@ -492,7 +538,7 @@ def nba_dashboard():
         )
         compact_columns = [
             "Player", "Pos", "Salary", "Own %", "Proj", "Min",
-            "P90", "Status", "Team",
+            "FPPM", "P90", "Status", "Team",
         ]
         visible_columns = list(GRID_COLUMNS) if extra_columns else compact_columns
         grid_data = pd.DataFrame(selected, columns=GRID_COLUMNS)
@@ -532,6 +578,8 @@ def nba_dashboard():
                     ),
                     "Proj": st.column_config.NumberColumn("PROJ DK", format="%.1f", width="small"),
                     "Min": st.column_config.NumberColumn("PROJ MIN", format="%.1f", width="small"),
+                    "FPPM": st.column_config.NumberColumn("DK FPPM", format="%.2f", width="small",
+                           help="Historical/model blended DK fantasy points per minute"),
                     "P90": st.column_config.NumberColumn("P90", format="%.1f", width="small"),
                     "P99": st.column_config.NumberColumn("P99", format="%.1f", width="small"),
                     "Value": st.column_config.NumberColumn("PTS/$1K", format="%.2f", width="small"),
@@ -544,6 +592,8 @@ def nba_dashboard():
                 },
             )
         st.caption(
+            "Projected points are modeled minutes × modeled DK FPPM × game context × availability. "
+            "Minutes reallocate within each team's 240-minute rotation when starters or injuries change. "
             "Position filters include multi-position eligible players. "
             "OUT and doubtful players are highlighted red; questionable/probable amber. "
             "The table scrolls horizontally on mobile."

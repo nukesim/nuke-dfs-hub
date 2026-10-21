@@ -392,6 +392,13 @@ def nba_dashboard():
             st.error(f"Feed unavailable — {err}. Check player status before entering.")
     for warning in {p.get("minutes_warning") for p in modeled if p.get("minutes_warning")}:
         st.warning(warning)
+    conflicts = [p["name"] for p in modeled if p.get("confirmed_injury_conflict")]
+    if conflicts:
+        st.error(
+            "CONFLICTING STARTER / INJURY NEWS — " + ", ".join(conflicts[:6]) +
+            ". The OUT/DOUBTFUL designation takes precedence until verified. "
+            "These players are excluded to avoid a risky lineup."
+        )
     if news_events:
         st.success("🔔 LINEUP NEWS — " + " | ".join(news_events) +
                    ". Minutes, projections and ownership have been recalculated.")

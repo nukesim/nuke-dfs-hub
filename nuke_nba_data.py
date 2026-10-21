@@ -306,13 +306,26 @@ def apply_live_data(players, prior_stats=None, current_stats=None, injuries=None
         status = max((dk_status, feed_status), key=lambda x: severity[x])
         lineup = lineups.get(p["team"], {})
         is_starter = key in lineup.get("starters", set())
+        confirmed = lineup.get("state") == "confirmed" and is_starter
+        confirmed_team = (lineup.get("state") == "confirmed"
+                          and len(lineup.get("starters", set())) == 5)
+        # DK and ESPN questionable designations can lag a confirmed starting
+        # five. A confirmed *individual* starter is eligible unless either
+        # feed explicitly says OUT/DOUBTFUL. Preserve an audit flag.
+        cleared_questionable = bool(confirmed and status in {"Q", "P"})
+        conflicting_out = bool(confirmed and status in {"OUT", "DOUBTFUL"})
+        if cleared_questionable:
+            status = "ACTIVE"
         p.update({
             "minutes_base": max(0.0, min(float(minutes), 40.0)),
             "fppm_base": max(0.1, min(float(fppm), 2.5)),
             "source": source,
             "status": status, "injury_note": injury.get("note", ""),
             "injury_updated": injury.get("updated", ""),
-            "starter": "CONFIRMED" if is_starter and lineup.get("state") == "confirmed" else
+            "confirmed_cleared_questionable": cleared_questionable,
+            "confirmed_injury_conflict": conflicting_out,
+            "confirmed_team": confirmed_team,
+            "starter": "CONFIRMED" if confirmed else
                        "EXPECTED" if is_starter and lineup.get("state") == "expected" else "UNKNOWN",
             "game_total": games.get(frozenset((p["team"], p["opp"])), {}).get("total"),
         })

@@ -8,6 +8,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -71,6 +72,21 @@ st.markdown("""
 @media(max-width:760px) {.nba-start-grid{grid-template-columns:1fr}.nba-start-team + .nba-start-team{border-left:none;border-top:1px solid rgba(255,255,255,.14)}}
 div[data-testid="stMetric"]{border:1px solid rgba(255,255,255,.11);border-radius:14px;padding:9px 12px;background:rgba(255,255,255,.022)}
 div[data-testid="stMetricValue"]{font-weight:950}
+
+/* Strong mobile contrast independent of the user's Streamlit theme. */
+div[data-testid="stMetricLabel"] *, div[data-testid="stMetricLabel"] {color:#c2d0df!important}
+div[data-testid="stMetricValue"] *, div[data-testid="stMetricValue"] {color:#f3f7fc!important}
+div[data-testid="stCaptionContainer"] *, div[data-testid="stCaptionContainer"] {color:#a8bbcb!important}
+div[data-testid="stTabs"] button {color:#c7d4e1!important}
+div[data-testid="stTabs"] button[aria-selected="true"] {color:#f47272!important}
+.nba-statstrip {display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
+.nba-stat {display:flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.15);
+ background:#17212c;border-radius:10px;padding:8px 11px;color:#b3c6d5;font-size:.75rem;font-weight:700}
+.nba-stat strong {color:#f5f8ff;font-size:1.05rem}
+.nba-stat.warn strong {color:#ffd57a}
+.nba-stat.danger strong {color:#ff9a9a}
+@media(max-width:760px){.nbahead{font-size:1.85rem}.nba-statstrip{gap:5px}.nba-stat{padding:6px 8px;font-size:.68rem}
+.nba-stat strong{font-size:.91rem}.nba-start-gamehead{font-size:.72rem}.nba-start-team{padding:11px 12px}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -218,7 +234,7 @@ with st.sidebar:
     if st.button("↻ REFRESH INJURIES + STARTERS", use_container_width=True, type="primary"):
         st.session_state.nba_refresh += 1
         st.rerun()
-    st.caption("Live information is fetched on refresh and rechecked about every five minutes while this page is open.")
+    st.caption("Lineups refresh approximately every five minutes while this page is open. Build: NBA 2026-10-21-FEED-FIX.")
     st.divider()
     st.markdown("### GPP ENGINE")
     entries = st.slider("Lineups", 1, 150, 20, 1)
@@ -249,6 +265,14 @@ if st.session_state.get("nba_slate_fingerprint") != slate_fingerprint:
     st.session_state.nba_excluded_ids = set()
 
 slate_date = slate[0]["start"].date()
+today_et = datetime.now(ZoneInfo("America/New_York")).date()
+stale_slate = slate_date < today_et
+if stale_slate:
+    st.error(
+        f"STALE DRAFTKINGS SLATE: Loaded {slate_date:%b %d, %Y}, but today is "
+        f"{today_et:%b %d, %Y} (ET). Do not submit yesterday's player IDs. "
+        "Refresh the Streamlit deployment or upload today's salary CSV in the sidebar."
+    )
 season_end = slate_date.year + 1 if slate_date.month >= 7 else slate_date.year
 
 
@@ -266,6 +290,19 @@ def nba_dashboard():
     except Exception as exc:
         current = {}
         history_errors.append(f"Current ESPN stats: {exc}")
+    # A temporary source outage must not erase a previously verified lineup.
+    # Cache is scoped to the exact DK slate date, never reused across days.
+    lineup_key = f"nba_last_good_lineups_{slate_date:%Y%m%d}"
+    fresh_lineups = feeds.get("Starting fives · RotoWire") or {}
+    cached_lineups = False
+    if fresh_lineups:
+        st.session_state[lineup_key] = {"lineups": fresh_lineups, "checked": last_refresh}
+    elif lineup_key in st.session_state:
+        feeds = dict(feeds)
+        feeds["Starting fives · RotoWire"] = st.session_state[lineup_key]["lineups"]
+        cached_lineups = True
+    lineup_asof = (st.session_state[lineup_key]["checked"]
+                   if lineup_key in st.session_state else None)
     players = apply_live_data(slate, prior, current,
                               feeds.get("Injuries · ESPN"),
                               feeds.get("Starting fives · RotoWire"),
@@ -291,17 +328,35 @@ def nba_dashboard():
     totals = Counter(p["status"] for p in modeled)
     expected = sum(p["starter"] == "EXPECTED" for p in modeled)
     confirmed = sum(p["starter"] == "CONFIRMED" for p in modeled)
-    first, second, third, fourth, fifth = st.columns(5)
-    first.metric("Slate players", len(modeled))
-    second.metric("OUT", totals["OUT"])
-    third.metric("Questionable", totals["Q"] + totals["DOUBTFUL"])
-    fourth.metric("Expected starters", expected)
-    fifth.metric("Confirmed starters", confirmed)
+    st.markdown(
+        '<div class="nba-statstrip">'
+        f'<span class="nba-stat"><strong>{len(modeled)}</strong> Players</span>'
+        f'<span class="nba-stat danger"><strong>{totals["OUT"]}</strong> OUT</span>'
+        f'<span class="nba-stat warn"><strong>{totals["Q"] + totals["DOUBTFUL"]}</strong> Q/D</span>'
+        f'<span class="nba-stat"><strong>{expected}</strong> Expected</span>'
+        f'<span class="nba-stat"><strong>{confirmed}</strong> Confirmed</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.caption(f"Slate {slate_date:%b %d, %Y} · Feed refresh {last_refresh.replace('T', ' ')} UTC · Historical model base: ESPN {season_end-2}–{str(season_end-1)[-2:]} season. Starter confirmations update only when a source confirms them.")
     for warning in csv_warnings:
         st.warning(warning)
     for err in feed_errors + history_errors:
-        st.error(f"Feed unavailable — {err}. The model uses existing DK information or a labeled fallback; confirm status before entering.")
+        if err.startswith("Starting fives"):
+            if cached_lineups:
+                st.warning(
+                    f"Lineup feed is temporarily unavailable. Showing cached lineups "
+                    f"from {lineup_asof.replace('T', ' ')} UTC, NOT live confirmations. "
+                    "Verify starters before submitting lineups."
+                )
+            else:
+                st.warning(
+                    "Starting-five feed is currently unavailable and no lineup has "
+                    "been verified for this slate. Check the external lineup link below "
+                    "or refresh later. No starting players will be invented."
+                )
+        else:
+            st.error(f"Feed unavailable — {err}. Check player status before entering.")
     for warning in {p.get("minutes_warning") for p in modeled if p.get("minutes_warning")}:
         st.warning(warning)
     if stale_results:
@@ -318,12 +373,23 @@ def nba_dashboard():
         expected_teams = sum(lineup_feed.get(t, {}).get("state") == "expected"
                              and len(lineup_feed.get(t, {}).get("positions", {})) == 5 for t in teams)
         ready = confirmed_teams + expected_teams
-        a, b, c = st.columns(3)
-        a.metric("Confirmed fives", confirmed_teams)
-        b.metric("Expected fives", expected_teams)
-        c.metric("Awaiting full lineup", len(teams) - ready)
-        st.caption("Starter identities and positions: RotoWire expected/confirmed feed. Minutes: NUKE model, not source minutes. "
-                   f"Last feed check {last_refresh.replace('T', ' ')} UTC · Refresh in the sidebar or wait about five minutes.")
+        st.markdown(
+            '<div class="nba-statstrip">'
+            f'<span class="nba-stat"><strong>{confirmed_teams}</strong> Confirmed fives</span>'
+            f'<span class="nba-stat warn"><strong>{expected_teams}</strong> Expected fives</span>'
+            f'<span class="nba-stat"><strong>{len(teams) - ready}</strong> Pending fives</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        freshness = (f"Cached as of {lineup_asof.replace('T', ' ')} UTC — NOT LIVE"
+                     if cached_lineups and lineup_asof
+                     else f"Last feed check {last_refresh.replace('T', ' ')} UTC")
+        st.caption("Source: RotoWire reported/expected fives. Minutes are NUKE projections. "
+                   f"{freshness} · Refresh in sidebar or wait about five minutes.")
+        st.link_button(
+            "↗ Check starting lineups on RotoBaller",
+            "https://www.rotoballer.com/todays-nba-starting-lineups-daily-basketball-starters",
+        )
         games_order = sorted({p["game"] for p in modeled},
                              key=lambda game: min(p["start"] for p in modeled if p["game"] == game))
         selected_matchup = st.selectbox("Matchup", ["All games"] + games_order, key="nba_starting_matchup")
@@ -420,7 +486,7 @@ def nba_dashboard():
         options = {f"{p['name']} ({p['team']}) · ${p['salary']:,}":p["id"] for p in core}
         locked = st.multiselect("100% lock players (optional)", list(options), key="nba_forced")
         faded = st.multiselect("Remove players from portfolio (optional)", [x for x in options if x not in locked], key="nba_banned")
-        if st.button("☢ RUN NBA SLATE SIM + BUILD PORTFOLIO", type="primary", use_container_width=True):
+        if st.button("☢ RUN NBA SLATE SIM + BUILD PORTFOLIO", type="primary", use_container_width=True, disabled=stale_slate):
             with st.spinner(f"Simulating {simulations:,} slates and generating up to {entries} unique legal lineups..."):
                 results, exposure, meta = build_portfolio(
                     modeled, scores, entries=entries, simulations=simulations,
@@ -463,7 +529,7 @@ def nba_dashboard():
             st.download_button("⬇ EXPORT DRAFTKINGS CLASSIC LINEUPS CSV",
                                export_dk_csv(results, data["players"]),
                                file_name=f"nuke_nba_{slate_date:%Y%m%d}_{len(results)}_lineups.csv",
-                               mime="text/csv", use_container_width=True, type="primary")
+                               mime="text/csv", use_container_width=True, type="primary", disabled=stale_slate)
             st.caption("Eight columns in DK order: PG, SG, SF, PF, C, G, F, UTIL. Import to the matching contest/slate only. The tool does not overwrite or automatically late-swap already locked DK entries.")
             st.subheader("Portfolio exposure")
             if exposure:

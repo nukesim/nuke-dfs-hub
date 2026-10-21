@@ -189,9 +189,8 @@ def fetch_espn_games(slate_date):
     return out
 
 
-def fetch_rotowire_lineups(slate_date):
-    """Parse public expected/confirmed five-man lists; never infer confirmation."""
-    raw = _text(f"https://www.rotowire.com/basketball/nba-lineups.php?date={slate_date:%Y-%m-%d}")
+def _parse_rotowire_lineups(raw):
+    """Parse source HTML; never infer a confirmed lineup from a projection."""
     result = {}
     starts = list(re.finditer(r'<div\s+class="lineup\s+is-nba"', raw))
     for number, match in enumerate(starts):
@@ -237,6 +236,31 @@ def fetch_rotowire_lineups(slate_date):
                     "display_positions": display_positions,
                 }
     return result
+
+
+def fetch_rotowire_lineups(slate_date):
+    """Try public RotoWire mirrors without depending on one slow server.
+
+    Throw when *all* hosts fail so the UI can show an explicitly stale
+    last-known-good result, rather than silently reporting zero starters.
+    """
+    hosts = (
+        "https://web7.rotowire.com",
+        "https://aws-prod-web9.rotowire.com",
+        "https://www.rotowire.com",
+    )
+    errors = []
+    for host in hosts:
+        url = f"{host}/basketball/nba-lineups.php?date={slate_date:%Y-%m-%d}"
+        try:
+            response = _text(url, timeout=5)
+            lineups = _parse_rotowire_lineups(response)
+            if lineups:
+                return lineups
+            errors.append(f"{host}: no parsable lineups")
+        except Exception as exc:
+            errors.append(f"{host}: {type(exc).__name__}")
+    raise ConnectionError("All starting-lineup sources unavailable (" + "; ".join(errors) + ")")
 
 
 def standardized_status(raw):

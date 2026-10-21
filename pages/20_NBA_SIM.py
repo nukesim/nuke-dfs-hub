@@ -22,6 +22,7 @@ from nuke_nba_engine import (
     build_portfolio, estimate_ownership, export_dk_csv, project_players,
     simulate_slate,
 )
+from nuke_nba_player_lab import GRID_COLUMNS, POSITION_ORDER, SORT_OPTIONS, player_lab_rows
 
 st.set_page_config(page_title="NUKE NBA Sim", page_icon="🏀", layout="wide")
 render_nav()
@@ -431,53 +432,152 @@ def nba_dashboard():
             st.write("Minutes are a modeled 240-minute rotation, not a feed's projected minutes. Player ownership is a salary/value/role prior calibrated to roughly 800 total percentage points, not observed DraftKings contest ownership. DK AvgPointsPerGame is only used for players missing ESPN statistical history.")
 
     with player_tab:
-        a, b, c = st.columns([1, 1, 1])
-        sort_name = a.selectbox("Rank players by", ["P90 ceiling", "Projected points", "20+ hit rate", "6x hit rate", "Value per $1k", "Leverage vs ownership"])
-        team_filter = b.selectbox("Team", ["ALL"] + sorted({p["team"] for p in modeled}))
-        role_filter = c.selectbox("Pool", ["Eligible", "All players", "Injury alerts", "Expected/confirmed starters"])
-        metric = {"P90 ceiling":"p90", "Projected points":"projection", "20+ hit rate":"hit_20",
-                  "6x hit rate":"hit_6x", "Value per $1k":"value", "Leverage vs ownership":"leverage"}[sort_name]
-        selected = [p for p in modeled if (team_filter == "ALL" or p["team"] == team_filter)]
-        if role_filter == "Eligible": selected = [p for p in selected if not p["excluded"] and p["minutes"] > 0]
-        if role_filter == "Injury alerts": selected = [p for p in selected if p["status"] != "ACTIVE"]
-        if role_filter == "Expected/confirmed starters": selected = [p for p in selected if p["starter"] != "UNKNOWN"]
-        selected.sort(key=lambda p: p.get(metric, 0), reverse=True)
-        st.caption("Probability-style rates shown below are outputs of the uncalibrated player model; they are not market-implied probabilities.")
-        for start in range(0, min(18, len(selected)), 3):
-            cols = st.columns(3)
-            for col, rank, p in zip(cols, range(start+1, start+4), selected[start:start+3]):
-                with col: player_card(p, rank, show_risk=True)
-        with st.expander(f"Full NBA player pool ({len(selected)} players)"):
-            df = pd.DataFrame([{
-                "Player":p["name"], "Team":p["team"], "Salary":p["salary"], "Pos":"/".join(p["eligible"]),
-                "Status":p["status"], "Starting":p["starter"], "Minutes":p["minutes"], "DK Projection":p["projection"],
-                "P90":p["p90"], "20+ %":p["hit_20"], "6x %":p["hit_6x"], "Model Own %":p["ownership"], "Data":p["source"],
-            } for p in selected])
-            st.dataframe(df, hide_index=True, use_container_width=True, height=500)
-        st.divider()
-        st.subheader("Manual injury and minutes overrides")
-        st.caption("Change a player after credible news arrives. Overrides persist for this slate, and any existing portfolio becomes stale.")
-        labels = {f"{p['name']} · {p['team']} · ${p['salary']:,}":p for p in modeled}
-        chosen = st.selectbox("Player to adjust", list(labels))
-        target = labels[chosen]
-        status_options = ["LIVE", "ACTIVE", "P", "Q", "DOUBTFUL", "OUT"]
-        current_status = statuses.get(target["id"], "LIVE")
-        col_a, col_b, col_c = st.columns([1.0, 1.0, .8])
-        status_override = col_a.selectbox("Availability", status_options, index=status_options.index(current_status), key=f"nba_status_input_{target['id']}")
-        default_minutes = float(overrides.get(target["id"], target["minutes"]))
-        minutes_input = col_b.number_input("Minutes (conditional)", min_value=0.0, max_value=42.0,
-                                          value=default_minutes, step=0.5, key=f"nba_min_input_{target['id']}")
-        excluded_input = col_c.checkbox("Exclude", value=target["id"] in excluded, key=f"nba_exclude_{target['id']}")
-        if st.button("APPLY PLAYER TAKE", type="primary"):
-            if status_override == "LIVE": statuses.pop(target["id"], None)
-            else: statuses[target["id"]] = status_override
-            overrides[target["id"]] = minutes_input
-            if excluded_input: excluded.add(target["id"])
-            else: excluded.discard(target["id"])
-            st.rerun()
-        if st.button("CLEAR THIS PLAYER'S OVERRIDES"):
-            statuses.pop(target["id"], None); overrides.pop(target["id"], None); excluded.discard(target["id"])
-            st.rerun()
+        st.markdown("### NBA PLAYER LAB")
+        st.caption(
+            "Full slate player grid · Tap a column heading to sort · "
+            "Model ownership is an estimate, not observed DraftKings ownership."
+        )
+        position_filter = st.segmented_control(
+            "POSITION", ["ALL", *POSITION_ORDER],
+            default="ALL", selection_mode="single", key="nba_lab_position",
+        ) or "ALL"
+        search_col, team_col, pool_col = st.columns([2, 1, 1])
+        name_query = search_col.text_input(
+            "Search player", placeholder="Find a player...", key="nba_lab_search",
+        )
+        team_filter = team_col.selectbox(
+            "Team", ["ALL", *sorted({p["team"] for p in modeled})], key="nba_lab_team",
+        )
+        pool_filter = pool_col.selectbox(
+            "Show", ["Eligible", "All players", "Injury watch", "Starting fives"],
+            key="nba_lab_pool",
+        )
+        full_min_salary = min(p["salary"] for p in modeled)
+        full_max_salary = max(p["salary"] for p in modeled)
+        with st.expander("⚙ Salary, minutes & ranking filters", expanded=False):
+            salary_col, minute_col, sort_col = st.columns([2, 1, 1])
+            if full_min_salary < full_max_salary:
+                salary_range = salary_col.slider(
+                    "Salary range", full_min_salary, full_max_salary,
+                    (full_min_salary, full_max_salary), step=100,
+                    key="nba_lab_salary_range",
+                )
+            else:
+                salary_range = (full_min_salary, full_max_salary)
+                salary_col.caption(f"All players cost {full_min_salary:,} USD.")
+            minimum_minutes = minute_col.slider(
+                "Min projected minutes", 0, 42, value=0, step=2,
+                key="nba_lab_min_minutes",
+            )
+            sort_by = sort_col.selectbox(
+                "Default ranking", list(SORT_OPTIONS), key="nba_lab_sort",
+            )
+        selected = player_lab_rows(
+            modeled, position=position_filter, team=team_filter, pool=pool_filter,
+            search=name_query, salary_range=salary_range,
+            minimum_minutes=minimum_minutes, sort_by=sort_by,
+        )
+        count = len(selected)
+        st.markdown(
+            '<div class="nba-statstrip">'
+            f'<span class="nba-stat"><strong>{count}</strong> Players shown</span>'
+            f'<span class="nba-stat"><strong>{len(modeled)}</strong> Slate total</span>'
+            f'<span class="nba-stat"><strong>{html.escape(position_filter)}</strong> Position</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        extra_columns = st.toggle(
+            "Show additional GPP metrics (P99, hit rates, starters, pool)",
+            value=False, key="nba_lab_extra_columns",
+        )
+        compact_columns = [
+            "Player", "Pos", "Salary", "Own %", "Proj", "Min",
+            "P90", "Status", "Team",
+        ]
+        visible_columns = list(GRID_COLUMNS) if extra_columns else compact_columns
+        grid_data = pd.DataFrame(selected, columns=GRID_COLUMNS)
+        if grid_data.empty:
+            st.info("No players match your filters. Try ALL positions, a wider salary range, or All players.")
+        else:
+            def highlight_status(status):
+                if status in {"OUT", "DOUBTFUL"}:
+                    return "background-color:#4a252a;color:#ffd6d9;font-weight:bold"
+                if status in {"Q", "P"}:
+                    return "background-color:#433821;color:#ffe3a1;font-weight:bold"
+                return ""
+
+            def highlight_projection(value):
+                if value >= 45:
+                    return "color:#8ef0b9;font-weight:bold"
+                if value >= 30:
+                    return "color:#b8ead2;font-weight:bold"
+                return ""
+
+            grid_style = (
+                grid_data[visible_columns].style
+                .map(highlight_status, subset=["Status"])
+                .map(highlight_projection, subset=["Proj"])
+            )
+            st.dataframe(
+                grid_style,
+                hide_index=True, use_container_width=True, height=640,
+                column_config={
+                    "Player": st.column_config.TextColumn("PLAYER", width="medium"),
+                    "Pos": st.column_config.TextColumn("POS", width="small", help="DraftKings eligible PG/SG/SF/PF/C positions"),
+                    "Team": st.column_config.TextColumn("TEAM", width="small"),
+                    "Salary": st.column_config.NumberColumn("SALARY", format="$%d", width="small"),
+                    "Own %": st.column_config.NumberColumn(
+                        "OWN %", format="%.1f%%", width="small",
+                        help="NUKE modeled projected ownership; not actual DK ownership",
+                    ),
+                    "Proj": st.column_config.NumberColumn("PROJ DK", format="%.1f", width="small"),
+                    "Min": st.column_config.NumberColumn("PROJ MIN", format="%.1f", width="small"),
+                    "P90": st.column_config.NumberColumn("P90", format="%.1f", width="small"),
+                    "P99": st.column_config.NumberColumn("P99", format="%.1f", width="small"),
+                    "Value": st.column_config.NumberColumn("PTS/$1K", format="%.2f", width="small"),
+                    "20+ %": st.column_config.NumberColumn("20+ %", format="%.1f%%", width="small"),
+                    "6x %": st.column_config.NumberColumn("6X %", format="%.1f%%", width="small"),
+                    "Status": st.column_config.TextColumn("INJURY", width="small"),
+                    "Starter": st.column_config.TextColumn("STARTER", width="small"),
+                    "Pool": st.column_config.TextColumn("POOL", width="small"),
+                    "Source": st.column_config.TextColumn("MODEL SOURCE", width="medium"),
+                },
+            )
+        st.caption(
+            "Position filters include multi-position eligible players. "
+            "OUT and doubtful players are highlighted red; questionable/probable amber. "
+            "The table scrolls horizontally on mobile."
+        )
+        st.download_button(
+            "⬇ DOWNLOAD FILTERED PLAYER GRID",
+            grid_data.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"nuke_nba_player_lab_{slate_date:%Y%m%d}.csv",
+            mime="text/csv", key="nba_lab_download",
+        )
+        with st.expander("⚙ Manual injury and minutes overrides", expanded=False):
+            st.subheader("Manual injury and minutes overrides")
+            st.caption("Change a player after credible news arrives. Overrides persist for this slate, and any existing portfolio becomes stale.")
+            labels = {f"{p['name']} · {p['team']} · ${p['salary']:,}":p for p in modeled}
+            chosen = st.selectbox("Player to adjust", list(labels))
+            target = labels[chosen]
+            status_options = ["LIVE", "ACTIVE", "P", "Q", "DOUBTFUL", "OUT"]
+            current_status = statuses.get(target["id"], "LIVE")
+            col_a, col_b, col_c = st.columns([1.0, 1.0, .8])
+            status_override = col_a.selectbox("Availability", status_options, index=status_options.index(current_status), key=f"nba_status_input_{target['id']}")
+            default_minutes = float(overrides.get(target["id"], target["minutes"]))
+            minutes_input = col_b.number_input("Minutes (conditional)", min_value=0.0, max_value=42.0,
+                                              value=default_minutes, step=0.5, key=f"nba_min_input_{target['id']}")
+            excluded_input = col_c.checkbox("Exclude", value=target["id"] in excluded, key=f"nba_exclude_{target['id']}")
+            if st.button("APPLY PLAYER TAKE", type="primary"):
+                if status_override == "LIVE": statuses.pop(target["id"], None)
+                else: statuses[target["id"]] = status_override
+                overrides[target["id"]] = minutes_input
+                if excluded_input: excluded.add(target["id"])
+                else: excluded.discard(target["id"])
+                st.rerun()
+            if st.button("CLEAR THIS PLAYER'S OVERRIDES"):
+                statuses.pop(target["id"], None); overrides.pop(target["id"], None); excluded.discard(target["id"])
+                st.rerun()
 
     with tournament_tab:
         st.markdown("### Build a first-place-oriented portfolio")

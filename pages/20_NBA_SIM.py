@@ -23,6 +23,10 @@ from nuke_nba_engine import (
     simulate_slate,
 )
 from nuke_nba_player_lab import GRID_COLUMNS, POSITION_ORDER, SORT_OPTIONS, player_lab_rows
+from nuke_nba_late_swap import (
+    MODES, export_dk_swaps, is_locked, optimize_late_entry, parse_dk_entries,
+    reorder_for_late_swap,
+)
 
 st.set_page_config(page_title="NUKE NBA Sim", page_icon="🏀", layout="wide")
 render_nav()
@@ -276,6 +280,7 @@ slate_fingerprint = hashlib.sha256(raw.encode()).hexdigest()
 if st.session_state.get("nba_slate_fingerprint") != slate_fingerprint:
     st.session_state.nba_slate_fingerprint = slate_fingerprint
     st.session_state.nba_results = None
+    st.session_state.nba_late_swap_results = None
     st.session_state.nba_minutes_overrides = {}
     st.session_state.nba_status_overrides = {}
     st.session_state.nba_excluded_ids = set()
@@ -407,8 +412,9 @@ def nba_dashboard():
                  "Rebuild your GPP lineups before exporting or entering. "
                  "Downloaded CSV files and already-entered DK rosters will NOT update automatically.")
 
-    starters_tab, slate_tab, player_tab, tournament_tab, portfolio_tab = st.tabs([
-        "🏀 STARTING 5", "🏟 SLATE INTEL", "🧪 PLAYER LAB", "☢ GPP SIM", "📈 PORTFOLIO + EXPORT"
+    starters_tab, slate_tab, player_tab, tournament_tab, portfolio_tab, late_swap_tab = st.tabs([
+        "🏀 STARTING 5", "🏟 SLATE INTEL", "🧪 PLAYER LAB",
+        "☢ GPP SIM", "📈 PORTFOLIO + EXPORT", "🔁 LATE SWAP"
     ])
     with starters_tab:
         lineup_feed = feeds.get("Starting fives · RotoWire") or {}
@@ -680,7 +686,9 @@ def nba_dashboard():
                                export_dk_csv(results, data["players"]),
                                file_name=f"nuke_nba_{slate_date:%Y%m%d}_{len(results)}_lineups.csv",
                                mime="text/csv", use_container_width=True, type="primary", disabled=stale_slate)
-            st.caption("Eight columns in DK order: PG, SG, SF, PF, C, G, F, UTIL. Import to the matching contest/slate only. The tool does not overwrite or automatically late-swap already locked DK entries.")
+            st.caption("Eight DK slots: PG, SG, SF, PF, C, G, F, UTIL. "
+                       "The optimizer now favors later starts in UTIL/G/F without sacrificing lineup scoring. "
+                       "For existing entered lineups use 🔁 LATE SWAP. DraftKings entries are never automatically changed.")
             st.subheader("Portfolio exposure")
             if exposure:
                 show = pd.DataFrame(exposure[:20]).set_index("name")
@@ -692,6 +700,199 @@ def nba_dashboard():
             for j, item in enumerate(results[:page_size], 1):
                 lineup_card(item, data["players"], j)
             st.caption(f"Field-beat and top-1% proxies compare against {meta['field_samples']} ownership-weighted synthetic lineups per simulation, scaled conservatively with contest size. This finite sample is not the full paid tournament field; do not read these figures as calibrated win probabilities.")
+
+    with late_swap_tab:
+        st.markdown("### 🔁 SMART NBA LATE SWAP CENTER")
+        st.caption(
+            "Import the DraftKings Edit Entries CSV for this exact slate. "
+            "NUKE freezes every started (or nearly starting) player's actual roster slot, "
+            "then reoptimizes ONLY unlocked slots using the latest minutes, projections, "
+            "ownership estimates and GPP ceilings. You upload the exported updates to DK yourself."
+        )
+        with st.container(border=True):
+            col_a, col_b, col_c = st.columns([1.15, 1.0, 0.8])
+            strategy = col_a.selectbox(
+                "Swap strategy", list(MODES), index=0,
+                help="Ceiling chase = first-place upside and leverage; "
+                     "Balanced GPP = blend; Protect lead = favor steadier projection.",
+                key="nba_swap_strategy",
+            )
+            entry_buffer = col_b.select_slider(
+                "Conservative lock buffer (min)", options=[0, 1, 2, 3, 5], value=2,
+                help="Prevent swapping athletes close to scheduled tipoff. "
+                     "DraftKings GameCenter has the actual lock status.",
+                key="nba_swap_buffer",
+            )
+            min_gain = col_c.select_slider(
+                "Minimum GPP-score improvement", options=[0.0, 0.2, 0.4, 0.8, 1.5],
+                value=0.4, key="nba_swap_gain",
+                help="If no meaningful player change improves the model score, "
+                     "just optimize the existing unlocked slot arrangement.",
+            )
+        entered_upload = st.file_uploader(
+            "Upload DK Edit Entries CSV (Entry ID, Contest Name and eight roster slots)",
+            type=["csv"], key="nba_edit_entries",
+        )
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        cutoff_display = now_et + pd.Timedelta(minutes=int(entry_buffer))
+        st.caption(
+            f"Current ET: {now_et:%I:%M:%S %p} · Conservative lock cutoff "
+            f"{cutoff_display:%I:%M:%S %p} · game locks are inferred from the slate. "
+            "Verify exact locks in DraftKings GameCenter."
+        )
+        game_times = sorted({p["game"]: p["start"] for p in modeled}.items(),
+                            key=lambda item: item[1])
+        status_lines = [
+            {
+                "Game": game,
+                "Start ET": tip.strftime("%I:%M %p"),
+                "Lock check": "LOCKED" if tip <= cutoff_display else "AVAILABLE",
+            }
+            for game, tip in game_times
+        ]
+        with st.expander("Game-by-game lock status", expanded=False):
+            st.dataframe(pd.DataFrame(status_lines), hide_index=True, use_container_width=True)
+        if entered_upload is None:
+            st.info("Upload the actual DraftKings Edit Entries CSV to calculate locked spots and legal late swaps.")
+        else:
+            content = entered_upload.getvalue()
+            upload_hash = hashlib.sha256(content).hexdigest()
+            try:
+                entry_headers, entry_rows, entry_errors = parse_dk_entries(content, modeled)
+            except (ValueError, UnicodeError, csv.Error) as exc:
+                st.error(f"DraftKings entries could not be validated: {exc}")
+                entry_headers, entry_rows, entry_errors = [], [], []
+            if entry_rows:
+                st.success(f"Validated {len(entry_rows)} NBA entries against this slate.")
+                locked_cells = sum(
+                    is_locked(modeled[i], now_et, entry_buffer)
+                    for row in entry_rows for i in row["lineup"]
+                )
+                left, right = st.columns(2)
+                left.metric("Locked roster spots", locked_cells)
+                right.metric("Swappable roster spots", len(entry_rows) * 8 - locked_cells)
+                for item in entry_errors[:15]:
+                    st.error(item)
+                if entry_errors:
+                    st.warning(
+                        f"{len(entry_errors)} invalid CSV row(s) will not be included "
+                        "in the export. Correct them in the original DK file first."
+                    )
+
+                current_locks = tuple(
+                    (row["number"], tuple(
+                        k for k, i in enumerate(row["lineup"])
+                        if is_locked(modeled[i], now_et, entry_buffer)
+                    )) for row in entry_rows
+                )
+                swap_fingerprint = hashlib.sha256(
+                    repr((signature, upload_hash, strategy, entry_buffer, min_gain,
+                          max_team, current_locks)).encode()
+                ).hexdigest()
+                previous_swap = st.session_state.get("nba_late_swap_results")
+                swap_stale = bool(previous_swap) and previous_swap.get("signature") != swap_fingerprint
+                if swap_stale:
+                    st.warning(
+                        "New projections, news, settings or additional player locks "
+                        "have changed since the last late-swap run. Re-optimize before export."
+                    )
+                st.caption("Optimizer leaves previously locked positions untouched. "
+                           "After late news, run again to get a fresh set of replacements.")
+                if st.button(
+                    "🔁 OPTIMIZE ALL UNLOCKED DK ENTRIES",
+                    type="primary", use_container_width=True,
+                    disabled=stale_slate, key="nba_run_late_swap",
+                ):
+                    latest_swaps = []
+                    errors = []
+                    progress = st.progress(0, text="Optimizing unlocked lineups...")
+                    for idx, entry in enumerate(entry_rows):
+                        try:
+                            original_teams = Counter(
+                                modeled[i]["team"] for i in entry["lineup"]
+                            )
+                            cap_per_team = max(max_team, max(original_teams.values()))
+                            swap = optimize_late_entry(
+                                modeled, entry["lineup"], now_et, mode=strategy,
+                                max_team=cap_per_team, buffer_minutes=entry_buffer,
+                                min_gain=min_gain, time_limit=0.75,
+                            )
+                            latest_swaps.append(swap)
+                        except (ValueError, RuntimeError) as exc:
+                            errors.append(f"Entry CSV row {entry['number']}: {exc}")
+                            original = entry["lineup"]
+                            latest_swaps.append({
+                                "lineup": original,
+                                "locked": tuple(
+                                    k for k, i in enumerate(original)
+                                    if is_locked(modeled[i], now_et, entry_buffer)
+                                ), "changes": 0, "gain": 0.0, "flex_gain": 0.0,
+                                "reason": "Failed validation",
+                            })
+                        progress.progress((idx + 1) / len(entry_rows),
+                                          text=f"Optimized {idx+1} / {len(entry_rows)}")
+                    progress.empty()
+                    st.session_state.nba_late_swap_results = {
+                        "signature": swap_fingerprint,
+                        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "headers": entry_headers, "entries": entry_rows,
+                        "swaps": latest_swaps, "errors": errors,
+                    }
+                    st.rerun()
+
+                swap_data = st.session_state.get("nba_late_swap_results")
+                if swap_data and not swap_stale and swap_data["signature"] == swap_fingerprint:
+                    changes = sum(x["changes"] > 0 for x in swap_data["swaps"])
+                    changed_slots = sum(x["changes"] for x in swap_data["swaps"])
+                    gain = sum(x["gain"] for x in swap_data["swaps"])
+                    flex = sum(x["flex_gain"] for x in swap_data["swaps"])
+                    a, b, c, d = st.columns(4)
+                    a.metric("Entries updated", changes)
+                    b.metric("Slots adjusted", changed_slots)
+                    c.metric("GPP model gain", f"{gain:+.1f}")
+                    d.metric("Late flex gain", f"{flex:+.1f}")
+                    for err in swap_data["errors"][:10]:
+                        st.error(err)
+                    preview = []
+                    for row, outcome in zip(swap_data["entries"], swap_data["swaps"]):
+                        preview.append({
+                            "CSV Row": row["number"],
+                            "Entry ID": row["row"].get("Entry ID", "—"),
+                            "Locked": len(outcome["locked"]),
+                            "Changes": outcome["changes"],
+                            "Model gain": outcome["gain"],
+                            "Flex gain": outcome["flex_gain"],
+                            "New salary": sum(modeled[i]["salary"] for i in outcome["lineup"]),
+                            "Status": outcome["reason"],
+                        })
+                    st.dataframe(pd.DataFrame(preview), use_container_width=True,
+                                 hide_index=True, height=400)
+                    swap_csv, export_count = export_dk_swaps(
+                        swap_data["headers"], swap_data["entries"],
+                        swap_data["swaps"], modeled, changed_only=True,
+                    )
+                    if export_count:
+                        st.download_button(
+                            f"⬇ DOWNLOAD {export_count} CHANGED DK ENTRIES",
+                            swap_csv.encode("utf-8-sig"),
+                            file_name=f"nuke_nba_late_swaps_{slate_date:%Y%m%d}.csv",
+                            mime="text/csv", use_container_width=True,
+                            type="primary", key="nba_swap_download",
+                        )
+                        st.warning(
+                            "Only changed entries are included. Import this file in "
+                            "DraftKings → Edit Entries, verify accepted swaps and "
+                            "roster spots, then save BEFORE each relevant game's lock."
+                        )
+                    else:
+                        st.info("No eligible changes were found under the selected strategy and lock state.")
+        st.caption(
+            "NUKE cannot directly submit or guarantee DraftKings accepts a CSV. "
+            "This works only for contests that offer late swap. It does not know "
+            "live DK GameCenter lock overrides, postponed games or exact lineup scores. "
+            "Always verify locks and upload results with enough time before tipoff."
+        )
+
 
 
 nba_dashboard()

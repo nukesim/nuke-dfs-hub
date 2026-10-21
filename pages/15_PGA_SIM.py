@@ -531,7 +531,7 @@ if ctx.get("round_dates"):
     cut_label = "Cut event" if ctx.get("has_cut", True) else "No-cut event"
     st.caption(f"{start_date} through {end_date} · {cut_label} · Tee times/weather in {ctx.get('timezone_label', 'course local time')}")
     if ctx.get("tee_url"):
-        st.markdown(f"[Published R1/R2 tee sheet]({ctx['tee_url']})
+        st.markdown(f"[Published R1/R2 tee sheet]({ctx['tee_url']})")
 if ctx.get("forecast_summary"):
     st.info("🌦️ " + ctx["forecast_summary"])
     st.caption(f"PGA TOUR forecast issued {ctx['forecast_as_of']} · [Official forecast]({ctx['forecast_url']}). Golfer weather edges use the latest Open-Meteo hourly forecast when available.")

@@ -242,7 +242,10 @@ def optimize_once(players, player_weights, *, min_salary=47500, max_team=4,
             chosen[k] = i
     if any(i is None for i in chosen) or not validate_lineup(chosen, players, min_salary, max_team):
         return None
-    return tuple(chosen)
+    # Preserve the selected eight players and exact DK eligibility, but leave
+    # the latest-starting compatible players in the most flexible slots.
+    from nuke_nba_late_swap import reorder_for_late_swap
+    return reorder_for_late_swap(tuple(chosen), players)
 
 
 def _field_lineups(players, count, seed, min_salary=44000):

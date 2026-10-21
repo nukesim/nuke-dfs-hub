@@ -43,13 +43,17 @@ def project_players(players, *, rotation_depth=11, minutes_overrides=None,
         for p in active:
             baseline = float(p.get("minutes_base", 0) or 0)
             if p.get("starter") == "CONFIRMED":
-                baseline = max(baseline, 27.0)
+                baseline = max(baseline, 29.0)
             elif p.get("starter") == "EXPECTED":
                 baseline = max(baseline, 25.0)
-            # Starters/high-minute players hold a larger share of 240 than an
-            # even proportional haircut would imply. Bench minutes absorb more
-            # of the rotation adjustment when 11 historical averages exceed 240.
-            p["rotation_weight"] = max(0.0, baseline) ** 1.6
+            # A *confirmed* team five should alter actual expected rotation
+            # share, not merely turn the badge green. Weight starters more and
+            # bench less, keeping all team minutes normalized to 240.
+            # This is a moderate prior, not a substitute for team-specific
+            # coach rotations or exact on/off-court usage rates.
+            news_weight = (1.18 if p.get("starter") == "CONFIRMED" else
+                           0.87 if p.get("confirmed_team") else 1.0)
+            p["rotation_weight"] = max(0.0, baseline) ** 1.6 * news_weight
         order = sorted(active, key=lambda p: (
             p.get("starter") == "CONFIRMED", p.get("starter") == "EXPECTED",
             p["rotation_weight"], p["salary"]), reverse=True)

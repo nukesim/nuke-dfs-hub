@@ -4,13 +4,14 @@ from __future__ import annotations
 
 POSITION_ORDER = ("PG", "SG", "SF", "PF", "C")
 GRID_COLUMNS = (
-    "Player", "Pos", "Team", "Salary", "Proj", "Min", "Own %",
+    "Player", "Pos", "Team", "Salary", "Proj", "Min", "FPPM", "Own %",
     "P90", "P99", "Value", "20+ %", "6x %",
     "Status", "Starter", "Pool", "Source",
 )
 SORT_OPTIONS = {
     "Projected points": "Proj",
     "Projected minutes": "Min",
+    "DK fantasy points per minute": "FPPM",
     "Ownership": "Own %",
     "P90 ceiling": "P90",
     "P99 ceiling": "P99",
@@ -78,6 +79,7 @@ def player_lab_rows(
             "Salary": salary,
             "Proj": round(float(p.get("projection", 0)), 1),
             "Min": round(minutes, 1),
+            "FPPM": round(float(p.get("fppm_base", 0)), 2),
             "Own %": round(float(p.get("ownership", 0)), 1),
             "P90": round(float(p.get("p90", 0)), 1),
             "P99": round(float(p.get("p99", 0)), 1),

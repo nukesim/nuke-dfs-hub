@@ -88,6 +88,35 @@ class NbaSimTests(unittest.TestCase):
         self.assertEqual(len(data["SAS"]["starters"]), 5)
         self.assertEqual(data["SAS"]["positions"], {})
 
+    def test_rotowire_retries_another_host_after_timeout(self):
+        from datetime import date
+        names = ["Guard A", "Guard B", "Wing C", "Forward D", "Center E"]
+        body = "".join(
+            f'<li class="lineup__player"><div class="lineup__pos">{slot}</div>'
+            f'<a title="{name}">{name}</a></li>'
+            for slot, name in zip(("PG", "SG", "SF", "PF", "C"), names)
+        )
+        markup = (
+            '<div class="lineup is-nba" data-lnum="1">'
+            '<a class="lineup__team is-visit"><div class="lineup__abbr">ATL</div></a>'
+            '<ul class="lineup__list is-visit">'
+            '<li class="lineup__status is-expected">Expected</li>'
+            + body + '</ul></div>'
+        )
+        with patch("nuke_nba_data._text", side_effect=[TimeoutError("first host"), markup]) as get:
+            lineups = fetch_rotowire_lineups(date(2026, 10, 21))
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(lineups["ATL"]["state"], "expected")
+        self.assertEqual(lineups["ATL"]["positions"]["PG"], norm_name("Guard A"))
+
+    def test_rotowire_reports_total_outage_instead_of_false_empty_fives(self):
+        from datetime import date
+        with patch("nuke_nba_data._text", side_effect=TimeoutError("source timeout")) as get:
+            with self.assertRaisesRegex(ConnectionError, "All starting-lineup sources unavailable"):
+                fetch_rotowire_lineups(date(2026, 10, 21))
+        self.assertEqual(get.call_count, 3)
+
+
     def test_rotowire_positions_are_preserved_for_starting_fives(self):
         from datetime import date
         positions = ("PG", "SG", "SF", "PF", "C")

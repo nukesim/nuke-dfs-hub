@@ -218,8 +218,8 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
-    if "butterfieldbermuda" in wanted:
-        # Deterministic published tee sheet; ESPN's event matching has been unreliable.
+    if "butterfieldbermuda" in wanted and datetime.now().year == 2026:
+        # Use the verified 2026 sheet only during its actual tournament year.
         return _bermuda_2026_context()
     if "baycurrent" in wanted:
         # Pin this week's verified course and tee sheet; unrelated ESPN events cannot overwrite it.

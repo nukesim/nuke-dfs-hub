@@ -16,7 +16,7 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
 
-PGA_PORTFOLIO_VERSION=7
+PGA_PORTFOLIO_VERSION=8
 if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)
@@ -179,11 +179,48 @@ def _baycurrent_2026_context():
         "forecast_as_of":"October 7, 2026, 5:30 AM JST",
         "forecast_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/baycurrentclassic/weather/Wednesday.pdf"}
 
+def _bermuda_2026_context():
+    """Verified October 22/23 2026 R1/R2 groupings, published October 21.
+
+    PGA TOUR: https://www.pgatour.com/tournaments/2026/butterfield-bermuda-championship/R2026528/tee-times
+    Cross-check: https://kalshi.com/golf/tee-times
+    Source times are US Eastern; the app displays course-local Atlantic/Bermuda.
+    Never infer or fabricate R1/R2 tee times from a group's order.
+    """
+    schedule=Path(__file__).resolve().parents[1]/"data"/"pga_bermuda_2026_pairings.psv"
+    groups=pd.read_csv(schedule,sep="|",dtype=str)
+    tee={}
+    for _,group in groups.iterrows():
+        r1=pd.Timestamp("2026-10-22 "+group["R1_ET"],tz="America/New_York")
+        r2=pd.Timestamp("2026-10-23 "+group["R2_ET"],tz="America/New_York")
+        for player in group["Players"].split(";"):
+            key=_norm_name(player)
+            if key in tee:
+                raise ValueError(f"Duplicate Bermuda tee sheet player: {player}")
+            tee[key]={1:r1.isoformat(),2:r2.isoformat()}
+    aliases={"Seung-Yul Noh":"S.Y. Noh",
+             "Cameron Davis":"Cam Davis",
+             "Willie Mack":"Willie Mack III"}
+    for dk_name,official_name in aliases.items():
+        tee[_norm_name(dk_name)]=dict(tee[_norm_name(official_name)])
+    return {"event_id":"2026528","event_name":"Butterfield Bermuda Championship",
+        "course":"Port Royal Golf Course","location":"Southampton, Bermuda",
+        "lat":32.252,"lon":-64.835,"timezone":"Atlantic/Bermuda",
+        "timezone_label":"ADT","has_cut":True,
+        "round_dates":["2026-10-22","2026-10-23","2026-10-24","2026-10-25"],
+        "tee_times":tee,"tee_source":"Published PGA TOUR R1/R2 pairings",
+        "status":"Published R1/R2 tee times loaded",
+        "tee_url":"https://www.pgatour.com/tournaments/2026/butterfield-bermuda-championship/R2026528/tee-times"}
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
+    if "butterfieldbermuda" in wanted:
+        # Deterministic published tee sheet; ESPN's event matching has been unreliable.
+        return _bermuda_2026_context()
     if "baycurrent" in wanted:
         # Pin this week's verified course and tee sheet; unrelated ESPN events cannot overwrite it.
         return _baycurrent_2026_context()
@@ -202,13 +239,6 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
         out["tee_times"]=_bank_utah_2026_pairings()
         out["status"]="Published R1/R2 tee times loaded"
         return out
-
-    # Butterfield Bermuda: keep the correct course context even before tee times appear in ESPN.
-    if "butterfieldbermuda" in wanted:
-        out.update({"course":"Port Royal Golf Course","location":"Southampton, Bermuda",
-            "lat":32.252,"lon":-64.835,"timezone":"Atlantic/Bermuda",
-            "timezone_label":"ADT","has_cut":True,
-            "round_dates":["2026-10-22","2026-10-23","2026-10-24","2026-10-25"]})
 
     # Generic ESPN discovery remains in place for future events and may fill richer metadata.
     try:
@@ -499,6 +529,14 @@ if lat is None or lon is None:
     lat,lon=geocode_location(ctx.get("location",""))
 weather=fetch_hourly_weather(lat,lon,ctx.get("timezone","auto"),pga_refresh_token)
 golfers=attach_tee_weather(golfers,ctx,weather)
+# A change in published tee times or refreshed weather invalidates stale simulations.
+pga_context_key=(tuple(golfers["R1 Tee"].astype(str)),
+                 tuple(golfers["R2 Tee"].astype(str)),
+                 tuple(golfers["Weather Edge"].round(2)))
+if st.session_state.get("pga_context_key") != pga_context_key:
+    st.session_state.pop("pga_results",None)
+    st.session_state.pop("pga_run_settings",None)
+    st.session_state["pga_context_key"]=pga_context_key
 
 course_label=ctx.get("course") or ctx.get("location") or "Course locating automatically"
 tee_ready=bool(ctx.get("tee_times"))

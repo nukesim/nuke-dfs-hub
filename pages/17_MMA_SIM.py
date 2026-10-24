@@ -35,7 +35,9 @@ def load_csv(src):
             d.loc[z[0],"Opp"]=d.loc[z[1],"Name"]; d.loc[z[1],"Opp"]=d.loc[z[0],"Name"]
     raw=d["Game Info"].astype(str).str.extract(r"(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}[AP]M)")[0]
     d["_start"]=pd.to_datetime(raw,format="%m/%d/%Y %I:%M%p",errors="coerce")
-    d["Rounds"]=np.where(d["_start"].eq(d["_start"].max()),5,3)
+    # The latest fight is normally the main event. This slate also has a five-round co-main.
+    extra_five=(d["Fight"].eq("Dvalishvili@Yan") & d["Game Info"].str.contains("10/24/2026",regex=False))
+    d["Rounds"]=np.where(d["_start"].eq(d["_start"].max())|extra_five,5,3)
     return d
 
 
@@ -492,7 +494,11 @@ m=re.search(r"(\d{1,2}/\d{1,2}/\d{4})",str(fighters["Game Info"].iloc[0])) if le
 if m: event_date=m.group(1)
 refresh_nonce=int(st.session_state.get("mma_live_refresh_nonce",0))
 refresh_token=f"{int(time.time()//900)}:{refresh_nonce}"
-slate_key=tuple(sorted(zip(fighters["ID"].astype(int),fighters["Game Info"].astype(str))))
+slate_key=tuple(sorted(zip(fighters["ID"].astype(int),fighters["Game Info"].astype(str),fighters["Rounds"].astype(int))))
+# Any corrected round count invalidates previous simulation results.
+if st.session_state.get("mma_results_slate_key") != slate_key:
+    st.session_state.pop("mma_results",None)
+    st.session_state["mma_results_slate_key"]=slate_key
 last_market=st.session_state.get("mma_last_market",{})
 if last_market.get("slate")==slate_key:
     for i,row in fighters.iterrows():
@@ -515,6 +521,8 @@ fighters["Win %"]=np.round(winp*100,1); fighters["Finish %"]=np.round(finishp*10
 fighters["Projection"]=np.round(proj,1); fighters["pOwn%"]=np.round(pown,1)
 
 st.success(f"{source}: {event_date or 'current card'} · {len(fighters)} fighters · {fighters['Fight'].nunique()} fights")
+five_rounds=sorted(fighters.loc[fighters["Rounds"]==5,"Fight"].unique().tolist())
+st.caption(f"🥊 Five-round matchups ({len(five_rounds)}): " + " · ".join(five_rounds))
 odds_cov=int(fighters["Market Win %"].notna().sum())
 stats_cov=int(fighters["SLpM"].notna().sum())
 last_live=st.session_state.get("mma_live_updated_at","Just now")
@@ -540,7 +548,7 @@ with st.expander("🧠 Large-field GPP construction baked into NUKE",expanded=Fa
     st.markdown("""
 - No same-fight pairing by default: one fighter's success directly hurts the opponent's ceiling.
 - Whole-card simulations force one winner per fight and model finish/decision tails instead of six independent projections.
-- The final scheduled fight is automatically treated as five rounds, adding ceiling to both sides.
+- Five-round main events are detected by fight schedule; on Oct 24, 2026 the Dvalishvili–Yan co-main is also five rounds. Both fighters in each such matchup get five-round scoring simulations.
 - Salary is not forced to $50K. Historical perfect lineups often leave salary unused; NUKE defaults to a $49,800 maximum.
 - One or two leverage fighters are useful; forcing an entire lineup of low-owned darts is not.
 - **Current moneylines** are pulled automatically when available and de-vigged into fair market win probabilities.

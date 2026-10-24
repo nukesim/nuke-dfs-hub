@@ -19,11 +19,11 @@ DEFAULT=Path(__file__).resolve().parents[1]/"data"/"mma_current.csv"
 
 def load_csv(src):
     d=pd.read_csv(src).copy()
-    req={"Name","ID","Salary","Game Info","AvgPointsPerGame"}
+    req={"Name","ID","Salary","Game Info"}
     if not req.issubset(d.columns): raise ValueError("This does not look like a DraftKings MMA Classic salary CSV.")
     d["ID"]=pd.to_numeric(d["ID"],errors="coerce").astype("Int64")
     d["Salary"]=pd.to_numeric(d["Salary"],errors="coerce").fillna(0).astype(int)
-    d["FPPG"]=pd.to_numeric(d["AvgPointsPerGame"],errors="coerce").fillna(0.0)
+    d=d.drop(columns=["AvgPointsPerGame","FPPG"],errors="ignore")
     status=d["Status"] if "Status" in d.columns else pd.Series("",index=d.index)
     d["Status"]=status.fillna("").astype(str).str.upper()
     d=d[~d["Status"].isin(["OUT","O","IR","WD"])].dropna(subset=["ID"]).drop_duplicates("ID").reset_index(drop=True)
@@ -301,7 +301,7 @@ def enrich_live_context(d,refresh_token=0):
     return x
 
 def model(d):
-    sal=d["Salary"].to_numpy(float); fppg=d["FPPG"].to_numpy(float)
+    sal=d["Salary"].to_numpy(float)
 
     # Salary-implied prior, then market moneyline if available.
     win=np.full(len(d),.5,dtype=float)
@@ -333,10 +333,9 @@ def model(d):
     favorite=np.abs(win-.5)*2
     finish=np.clip(.34+.15*favorite+.065*pressure-.025*defense+.055*five,.22,.78)
 
-    # Projection blends DK FPPG with market win probability and style scoring opportunity.
+    # Projection uses only market win probability and independently sourced style rates.
     style_pts=4.5*z_slpm+4.0*z_td+2.2*z_sub
-    market_proj=win*(82+43*finish+9*five)+(1-win)*(33+8*five)+style_pts
-    proj=np.where(fppg>0,.58*market_proj+.42*fppg,market_proj)
+    proj=win*(82+43*finish+9*five)+(1-win)*(33+8*five)+style_pts
 
     # Ownership estimate uses salary + projection + market strength, then normalizes to 600%.
     z=.43*(sal-sal.mean())/(sal.std()+1e-9)+.35*(proj-proj.mean())/(proj.std()+1e-9)+.22*(win-win.mean())/(win.std()+1e-9)
@@ -359,9 +358,6 @@ def simulate_card(d,n,seed):
             probs=np.array([.46,.27,.16,.07,.04]) if is5 else np.array([.50,.30,.20])
             fr=np.zeros(len(rows),dtype=int)
             if fin.any(): fr[fin]=rng.choice(np.arange(1,len(probs)+1),size=int(fin.sum()),p=probs)
-            wh=float(d.loc[w,"FPPG"]); lh=float(d.loc[l,"FPPG"])
-            wadj=float(np.clip((wh-75)*.12 if wh>0 else 0,-7,9))
-            ladj=float(np.clip((lh-70)*.06 if lh>0 else 0,-4,5))
             wstyle=0.0; lstyle=0.0
             for col,wt in [("SLpM",2.0),("TD Avg",2.6),("Sub Avg",1.8)]:
                 vals=pd.to_numeric(d[col],errors="coerce") if col in d.columns else pd.Series(np.nan,index=d.index)
@@ -370,8 +366,8 @@ def simulate_card(d,n,seed):
                 wstyle+=wt*((float(d.loc[w,col]) if pd.notna(d.loc[w,col]) else med)-med)/(sd+1e-9)
                 lstyle+=wt*((float(d.loc[l,col]) if pd.notna(d.loc[l,col]) else med)-med)/(sd+1e-9)
             bonus=np.array([119,104,92,86,82],float)
-            wbase=np.where(fin,bonus[np.maximum(fr-1,0)],96 if is5 else 78)+wadj+wstyle
-            lbase=np.where(fin,10+fr*12,66 if is5 else 48)+ladj+lstyle
+            wbase=np.where(fin,bonus[np.maximum(fr-1,0)],96 if is5 else 78)+wstyle
+            lbase=np.where(fin,10+fr*12,66 if is5 else 48)+lstyle
             scores[rows,w]=np.clip(wbase+rng.normal(0,10,len(rows)),0,170)
             scores[rows,l]=np.clip(lbase+rng.normal(0,10,len(rows)),0,110)
     return scores
@@ -534,10 +530,10 @@ with st.expander("🧠 Large-field GPP construction baked into NUKE",expanded=Fa
 - **Fighter style data** (SLpM, SApM, takedowns, takedown defense, submission attempts) changes fighter ceiling and score distributions.
 - Max exposure, Min/Max fighter exposure and minimum uniques build a portfolio across different card outcomes.
 """)
-    st.caption("Moneylines are live market inputs when available. Finish %, pOwn%, projections and tournament outputs remain model estimates, not sportsbook props.")
+    st.caption("Moneylines are market inputs when available. DK FPPG is completely excluded from the simulation. Finish %, pOwn%, projections and tournament outputs remain estimates.")
 
 st.subheader("🥋 Fighter Pool")
-ed=fighters[["ID","Name","Opp","Salary","Moneyline","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"]].copy()
+ed=fighters[["ID","Name","Opp","Salary","Moneyline","pOwn%","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"]].copy()
 ed.insert(0,"In",True); ed.insert(1,"Lock",False); ed["Boost %"]=0; ed["Min %"]=0; ed["Max %"]=100
 prefs=st.session_state.get("mma_prefs",{})
 for i,row in ed.iterrows():
@@ -549,11 +545,11 @@ if b1.button("✅ ADD ALL",use_container_width=True): st.session_state["mma_bulk
 if b2.button("🚫 REMOVE ALL",use_container_width=True): st.session_state["mma_bulk"]=False; st.session_state.pop("mma_editor",None); st.rerun()
 if "mma_bulk" in st.session_state: ed["In"]=bool(st.session_state.pop("mma_bulk"))
 edited=st.data_editor(ed,hide_index=True,use_container_width=True,height=520,column_order=[c for c in ed.columns if c!="ID"],
-    disabled=["ID","Name","Opp","Salary","Moneyline","pOwn%","FPPG","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"],
+    disabled=["ID","Name","Opp","Salary","Moneyline","pOwn%","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"],
     column_config={"In":st.column_config.CheckboxColumn("In"),"Lock":st.column_config.CheckboxColumn("🔒 Lock"),
     "Salary":st.column_config.NumberColumn("Salary",format="$%d"),"Moneyline":st.column_config.NumberColumn("Odds",format="%+d"),
     "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
-    "FPPG":st.column_config.NumberColumn("DK FPPG",format="%.1f"),"Win %":st.column_config.NumberColumn("Win %",format="%.1f%%"),
+    "Win %":st.column_config.NumberColumn("Win %",format="%.1f%%"),
     "Finish %":st.column_config.NumberColumn("Finish %",format="%.1f%%"),"Projection":st.column_config.NumberColumn("Proj",format="%.1f"),
     "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),
     "Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=5),

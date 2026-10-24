@@ -27,6 +27,18 @@ jobs:
           assert df['Game Info'].astype(str).str.contains('10/25/2026').any()
           print(f'Validated {len(df)} DK players: {SLATE_LABEL}')
           PY
+      - name: Execute Streamlit landing and NFL Sim pages
+        run: |
+          python - <<'PY'
+          from streamlit.testing.v1 import AppTest
+          for page in ("app.py", "pages/14_NUKE_SIM.py"):
+              print(f"Executing {page}", flush=True)
+              at = AppTest.from_file(page).run(timeout=45)
+              for error in at.exception:
+                  print(f"ERROR {page}: {error.message}")
+              assert not at.exception, f"Streamlit page crashed: {page}"
+              print(f"PASS {page}", flush=True)
+          PY
       - name: Start Streamlit and check local health
         run: |
           streamlit run app.py --server.headless=true --server.port=8501 --browser.gatherUsageStats=false > /tmp/nuke-streamlit.log 2>&1 &

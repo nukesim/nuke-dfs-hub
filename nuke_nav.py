@@ -33,7 +33,6 @@ def render_nav():
     """,unsafe_allow_html=True)
 
     with st.sidebar:
-        st.page_link("app.py", label="NFL Hand Builder", icon="🏈")
         st.page_link("pages/14_NUKE_SIM.py", label="NFL Sim", icon="☢️")
         st.page_link("pages/20_NBA_SIM.py", label="NBA Sim", icon="🏀")
         st.page_link("pages/13_SHOWDOWN_SIM.py", label="NFL Showdown Sim", icon="⚡")

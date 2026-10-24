@@ -8,28 +8,14 @@ st.title("❓ NUKE DFS GUIDE")
 st.caption("A quick guide to building, simulating, saving, and managing your NFL, NHL, and PGA DFS lineups.")
 
 st.markdown("### What is NUKE?")
-st.write("NUKE is a free DFS research, lineup-building, and simulation toolkit. NFL includes a hand builder, full-slate sim, and Showdown sim; PGA and NHL have dedicated DraftKings tournament simulators.")
+st.write("NUKE is a free DFS research, lineup-building, and simulation toolkit. NFL includes full-slate and Showdown simulators; PGA and NHL have dedicated DraftKings tournament simulators.")
 
-c1,c2=st.columns(2,gap="large")
-with c1:
-    with st.container(border=True):
-        st.markdown("### 🏈 Lineup Builder")
-        st.write("Hand-build and manage the lineups you actually plan to play.")
-        st.markdown("**Typical workflow**")
-        st.markdown("1. Choose DraftKings or FanDuel.\n2. Review the weekly slate and betting environment.\n3. Build your Player Pool.\n4. Set your QB Plan.\n5. Build lineups.\n6. Save completed lineups to your portfolio.\n7. Review exposure and combinations.")
-        st.info("BUILD lineups are drafts. A lineup does not become part of your portfolio until you save it under SAVED LINEUPS.")
-        st.page_link("app.py",label="OPEN LINEUP BUILDER",icon="🏈",use_container_width=True)
-
-with c2:
-    with st.container(border=True):
-        st.markdown("### ☢️ NUKE Sim")
-        st.write("Generate candidate lineups, simulate NFL outcomes and contest environments, and build a diversified tournament portfolio.")
-        st.markdown("**Typical workflow**")
-        st.markdown("1. Choose DraftKings or FanDuel.\n2. Confirm the current slate.\n3. Adjust the player pool, role/usage assumptions, and any player locks.\n4. Set contest and portfolio controls.\n5. Run NUKE Sim.\n6. Review results, paths, exposures, and portfolio intelligence.\n7. Send the portfolio to the Lineup Builder when you want to work with it there.")
-        st.info("NUKE Sim is designed to model ranges of outcomes, not predict one exact future result.")
-        st.caption("FanDuel: use **FLEX position** to choose Any, RB, WR, or TE. Selecting RB forces every generated lineup to use 3 RBs, placing an RB in FLEX. Because this changes candidate construction, rerun NUKE Sim after changing the FLEX position setting.")
-        st.caption("DraftKings & FanDuel: **No players vs opposing defense** is enabled by default. When checked, a lineup containing a defense cannot contain any QB/RB/WR/TE from that defense's opponent. Turn it off only if you intentionally want offense-vs-defense combinations, then rerun NUKE Sim.")
-        st.page_link("pages/6_SIM.py",label="OPEN NUKE SIM",icon="☢️",use_container_width=True)
+with st.container(border=True):
+    st.markdown("### ☢️ NFL NUKE Sim")
+    st.write("Create tournament lineups with correlated football simulations, contest simulations, and portfolio controls.")
+    st.markdown("1. Select DraftKings or FanDuel.\n2. Review current slate and player pool.\n3. Adjust usage and locks.\n4. Select contest and portfolio settings.\n5. Run NUKE Sim.\n6. Review exposures, results, and export lineups.")
+    st.info("The manual NFL Hand Builder has been retired. Use NFL NUKE Sim instead.")
+    st.page_link("pages/14_NUKE_SIM.py", label="OPEN NFL NUKE SIM", icon="☢️",use_container_width=True)
 
 st.markdown("#### 🔒 Locking a player in NUKE Sim")
 st.write("Use **Lock** when late news creates a player you intentionally want in every generated main-slate lineup — for example, a newly announced starter whose salary was set before the role change. A locked player is forced into the candidate lineups themselves, which is different from setting a high minimum exposure after the simulation.")
@@ -85,7 +71,7 @@ st.page_link("pages/17_MMA_SIM.py",label="OPEN MMA SIM",icon="🥊",use_containe
 st.divider()
 st.markdown("### 💾 Save your work")
 st.write("Use **Save workspace** when you want to stop and continue later. Download the workspace JSON file to your computer. When you return, upload that file and choose **Restore/Load workspace**.")
-st.markdown("**Lineup Builder workspace:** restores your platform, player pool, QB plan, BUILD drafts, Saved Lineups portfolio, role adjustments, and related builder settings.\n\n**NUKE Sim workspace:** restores your SIM settings, player pool, Player Takes, portfolio controls, and completed simulation results saved in that workspace.\n\n**Showdown workspace:** restores the selected platform, player exclusions, player-level controls, simulation settings, construction preferences, and completed Showdown results for that game. DraftKings and FanDuel workspaces are kept platform-specific to prevent incompatible roster settings from being mixed.")
+st.markdown("**NUKE Sim workspace:** restores your SIM settings, player pool, Player Takes, portfolio controls, and completed simulation results saved in that workspace.\n\n**Showdown workspace:** restores the selected platform, player exclusions, player-level controls, simulation settings, construction preferences, and completed Showdown results for that game. DraftKings and FanDuel workspaces are kept platform-specific to prevent incompatible roster settings from being mixed.")
 st.warning("A workspace is a snapshot. If weekly slate data, odds, injuries, or other live inputs change after you save it, review the current information before entering contests.")
 
 st.divider()

@@ -9,6 +9,7 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from nuke_nav import render_nav
 
 st.set_page_config(page_title="NUKE UFC Single Entry", page_icon="🥊", layout="wide")
@@ -17,45 +18,12 @@ render_nav()
 CAP = 50000
 ROSTER = 6
 
-# UFC Edmonton — Oct. 17, 2026. Salaries are DraftKings Classic prices.
-TODAY = [
-    ("Nick Galanti", "Julien Leblanc", 9500, -600, 3),
-    ("Julien Leblanc", "Nick Galanti", 6700, 440, 3),
-    ("Erin Blanchfield", "Jasmine Jasudavicius", 9300, -310, 3),
-    ("Jasmine Jasudavicius", "Erin Blanchfield", 6900, 250, 3),
-    ("Cristian Perez", "Kyle Nelson", 9200, -375, 3),
-    ("Kyle Nelson", "Cristian Perez", 7000, 295, 3),
-    ("Mandel Nallo", "Nate Landwehr", 9100, -280, 3),
-    ("Nate Landwehr", "Mandel Nallo", 7100, 225, 3),
-    ("Katlyn Cerminara", "Mackenzie Stiller", 9000, -280, 3),
-    ("Mackenzie Stiller", "Katlyn Cerminara", 7200, 225, 3),
-    ("Melissa Croden", "Chelsea Chandler", 8900, -280, 3),
-    ("Chelsea Chandler", "Melissa Croden", 7300, 225, 3),
-    ("Jhonata Diniz", "Tanner Boser", 8800, -250, 3),
-    ("Tanner Boser", "Jhonata Diniz", 7400, 205, 3),
-    ("Kyle Daukaus", "Marc-Andre Barriault", 8700, -205, 3),
-    ("Marc-Andre Barriault", "Kyle Daukaus", 7400, 170, 3),
-    ("Louis Jourdain", "Timmy Cuamba", 8600, -200, 3),
-    ("Timmy Cuamba", "Louis Jourdain", 7600, 165, 3),
-    ("Cody Chovancek", "Su Young You", 8500, -150, 3),
-    ("Su Young You", "Cody Chovancek", 7700, 125, 3),
-    ("Mike Malott", "Joaquin Buckley", 8400, -135, 5),
-    ("Joaquin Buckley", "Mike Malott", 7800, 115, 5),
-    ("Javad Mahjoub", "Joel Faglier", 8300, -115, 3),
-    ("Joel Faglier", "Javad Mahjoub", 7900, -105, 3),
-    ("Chad Anheliger", "Steven Koslow", 8200, 100, 3),
-    ("Steven Koslow", "Chad Anheliger", 8000, -120, 3),
-]
+# Both UFC tools use the same versioned DraftKings salary file by default.
+# An uploaded DK CSV overrides the default for the user's current session.
+DEFAULT_DK = Path(__file__).resolve().parents[1] / "data" / "mma_current.csv"
 
-FIGHT_VOL = {
-    frozenset(("Nick Galanti", "Julien Leblanc")): 0.74,
-    frozenset(("Cristian Perez", "Kyle Nelson")): 0.68,
-    frozenset(("Mandel Nallo", "Nate Landwehr")): 0.72,
-    frozenset(("Kyle Daukaus", "Marc-Andre Barriault")): 0.67,
-    frozenset(("Jhonata Diniz", "Tanner Boser")): 0.60,
-    frozenset(("Louis Jourdain", "Timmy Cuamba")): 0.47,
-    frozenset(("Mike Malott", "Joaquin Buckley")): 0.58,
-}
+# Avoid carrying fighter-specific volatility assumptions from older fight cards.
+FIGHT_VOL = {}
 
 st.markdown("""
 <style>
@@ -112,17 +80,6 @@ def slug_name(x):
     x = unicodedata.normalize("NFKD", str(x)).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", "-", x).strip("-")
 
-def today_df():
-    rows = []
-    name_to_idx = {name: i + 1 for i, (name, *_rest) in enumerate(TODAY)}
-    for name, opp, salary, odds, rounds in TODAY:
-        pair = " vs ".join(sorted([name, opp]))
-        rows.append({
-            "ID": name_to_idx[name], "Name": name, "Opp": opp, "Salary": salary,
-            "Moneyline": odds, "Rounds": rounds, "Fight": pair, "DK_ID": ""
-        })
-    return pd.DataFrame(rows)
-
 def load_dk_csv(upload):
     d = pd.read_csv(upload).copy()
     req = {"Name", "ID", "Salary", "Game Info"}
@@ -140,15 +97,29 @@ def load_dk_csv(upload):
         if len(z) == 2:
             d.loc[z[0], "Opp"] = d.loc[z[1], "Name"]
             d.loc[z[1], "Opp"] = d.loc[z[0], "Name"]
-    # Keep current known odds when names match; otherwise salary-implied prior.
-    known = {norm_name(n): (o, r) for n, _op, _s, o, r in TODAY}
-    d["Moneyline"] = [known.get(norm_name(n), (np.nan, 3))[0] for n in d["Name"]]
+    # Accept market odds only for the same fighter/opponent/full DK bout.
+    # Never silently apply a previous card's moneyline to today's fighter.
+    d["Moneyline"] = np.nan
+    snapshot = DEFAULT_DK.parent / "mma_market.csv"
+    if snapshot.exists():
+        market = pd.read_csv(snapshot)
+        needed = {"Name", "Opp", "Game Info", "Moneyline"}
+        if needed.issubset(market.columns):
+            by_match = {
+                (norm_name(r["Name"]), norm_name(r["Opp"]), str(r["Game Info"])):
+                    pd.to_numeric(r["Moneyline"], errors="coerce")
+                for _, r in market.iterrows()
+            }
+            d["Moneyline"] = [
+                by_match.get((norm_name(r["Name"]), norm_name(r["Opp"]), str(r["Game Info"])), np.nan)
+                for _, r in d.iterrows()
+            ]
     start = pd.to_datetime(
         d["Game Info"].astype(str).str.extract(r"(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}[AP]M)")[0],
         format="%m/%d/%Y %I:%M%p", errors="coerce"
     )
     d["Rounds"] = np.where(start.eq(start.max()), 5, 3)
-    return d[["ID", "Name", "Opp", "Salary", "Moneyline", "Rounds", "Fight", "DK_ID"]]
+    return d[["ID", "Name", "Opp", "Salary", "Moneyline", "Rounds", "Fight", "DK_ID", "Game Info"]]
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_stats(name, refresh_nonce=0):
@@ -463,13 +434,32 @@ with st.sidebar:
 
 with st.expander("📥 Optional — upload the actual DraftKings MMA salary CSV", expanded=False):
     upload = st.file_uploader("DraftKings MMA Classic salaries", type=["csv"], key="ufc_se_upload")
-    st.caption("Uploading the real DK file preserves DraftKings fighter IDs so the tool can export lineups ready for DK upload. Without it, today's built-in salaries still work for analysis.")
+    st.caption("Defaults to the same current DraftKings slate as MMA 150-Max; upload a different Classic salary CSV to override it. Real DK fighter IDs are preserved for lineup exports.")
 
 try:
-    fighters = load_dk_csv(upload) if upload is not None else today_df()
+    fighters = load_dk_csv(upload if upload is not None else DEFAULT_DK)
 except Exception as e:
     st.error(str(e))
     st.stop()
+
+# Prevent cached lineup results and editable overrides from leaking between slates.
+slate_signature = tuple(sorted(
+    (int(r["ID"]), int(r["Salary"]), str(r["Fight"]))
+    for _, r in fighters.iterrows()
+))
+if st.session_state.get("ufc_se_slate_signature") != slate_signature:
+    for key in ("ufc_se_results", "ufc_se_prefs", "ufc_se_editor"):
+        st.session_state.pop(key, None)
+    st.session_state["ufc_se_slate_signature"] = slate_signature
+
+slate_date = pd.to_datetime(
+    fighters["Game Info"].astype(str).str.extract(r"(\d{1,2}/\d{1,2}/\d{4})")[0],
+    format="%m/%d/%Y", errors="coerce"
+).dropna()
+if not slate_date.empty:
+    st.caption(f"DraftKings slate: {slate_date.iloc[0]:%B %d, %Y} · {'Uploaded CSV' if upload is not None else 'Shared MMA 150-Max CSV'} · Real DK fighter IDs")
+if fighters["Moneyline"].notna().sum() == 0:
+    st.caption("No verified odds snapshot for this card: win probabilities use a salary-based prior until odds are supplied in the fighter editor.")
 
 nonce = int(st.session_state.get("ufc_se_nonce", 0))
 with st.spinner("Pulling live fighter style rates..."):
@@ -668,6 +658,6 @@ if "ufc_se_results" in st.session_state:
     if csv is not None:
         st.download_button("⬇️ DOWNLOAD TOP 10 — DK FORMAT", csv, "NUKE_UFC_SE_TOP10.csv", "text/csv", type="primary", use_container_width=True)
     else:
-        st.info("Upload the actual DraftKings salary CSV above if you want a DK-upload-ready file with official fighter IDs. The built-in UFC Edmonton prices are still valid for lineup analysis.")
+        st.info("Lineup export requires a valid DraftKings fighter ID for every selected fighter.")
 
     st.caption("Model outputs are estimates, not guarantees. The objective is to maximize first-place paths in this specific contest structure, not to maximize median projection.")

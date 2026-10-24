@@ -293,9 +293,26 @@ def enrich_live_context(d,refresh_token=0):
         else:
             x[col]=pd.to_numeric(x[col],errors="coerce")
 
+    # Only replace existing verified values with a complete, coherent two-sided market.
+    # A single scraped price or malformed response must not corrupt win probabilities.
+    for _, group in x.groupby("Fight"):
+        if len(group) != 2:
+            continue
+        a, b = list(group.index)
+        ka, kb = _norm_name(x.at[a,"Name"]), _norm_name(x.at[b,"Name"])
+        va, vb = market.get(ka, {}), market.get(kb, {})
+        if "Moneyline" not in va or "Moneyline" not in vb:
+            continue
+        pa, pb = _american_prob(va["Moneyline"]), _american_prob(vb["Moneyline"])
+        if not (np.isfinite(pa) and np.isfinite(pb) and .80 <= pa + pb <= 1.35):
+            continue
+        for i, payload, implied in [(a,va,pa),(b,vb,pb)]:
+            for col,val in payload.items():
+                if col != "Market Win %": x.at[i,col] = val
+            x.at[i,"Market Win %"] = implied / (pa+pb) * 100
+
     for i,row in x.iterrows():
         k=_norm_name(row["Name"])
-        for col,val in market.get(k,{}).items(): x.at[i,col]=val
         for col,val in stats.get(k,{}).items(): x.at[i,col]=val
         if stats.get(k): x.at[i,"Stats Updated"]=datetime.now(ZoneInfo("UTC")).isoformat()
     return x
@@ -506,9 +523,9 @@ c1.metric("Odds available",f"{odds_cov}/{len(fighters)}")
 c2.metric("Fighter stats",f"{stats_cov}/{len(fighters)}")
 c3.caption(f"🕒 Last live refresh attempt: **{last_live}** · auto-checks every 15 minutes while active.")
 if odds_cov<len(fighters):
-    st.caption("Missing odds safely fall back to DraftKings salary-implied win probability. Missing fighter stats stay neutral in the style model.")
+    st.warning(f"Verified moneylines are missing for {len(fighters)-odds_cov} fighter(s). Their win probabilities use a salary-based estimate—not live betting odds. Missing fighter stats stay neutral.")
 with st.expander("Odds and fighter stat sources",expanded=False):
-    st.caption("Verified saved odds and stats remain available if a live source fails. Dates show when each value was retrieved. Saved odds only apply to the same matchup and card date.")
+    st.caption("Saved odds are a dated snapshot, not necessarily live. Each odds row lists its source and retrieval date. Live refreshes override only with valid two-sided quotes.")
     cols=[c for c in ["Name","Moneyline","Odds Source","Odds Updated","SLpM","SApM","TD Avg","TD Acc %","TD Def %","Sub Avg","Stats Source","Stats Updated"] if c in fighters]
     st.dataframe(fighters[cols],hide_index=True,use_container_width=True)
 if st.button("🔄 REFRESH LIVE MMA DATA",use_container_width=True,key="mma_refresh_live"):
@@ -530,7 +547,7 @@ with st.expander("🧠 Large-field GPP construction baked into NUKE",expanded=Fa
 - **Fighter style data** (SLpM, SApM, takedowns, takedown defense, submission attempts) changes fighter ceiling and score distributions.
 - Max exposure, Min/Max fighter exposure and minimum uniques build a portfolio across different card outcomes.
 """)
-    st.caption("Moneylines are market inputs when available. DK FPPG is completely excluded from the simulation. Finish %, pOwn%, projections and tournament outputs remain estimates.")
+    st.caption("Moneylines use verified current-card market inputs when available. Finish %, pOwn%, projections and tournament outputs remain estimates.")
 
 st.subheader("🥋 Fighter Pool")
 ed=fighters[["ID","Name","Opp","Salary","Moneyline","pOwn%","Win %","Finish %","Projection","SLpM","TD Avg","Sub Avg","Rounds","Fight"]].copy()

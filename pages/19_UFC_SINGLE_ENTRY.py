@@ -118,7 +118,9 @@ def load_dk_csv(upload):
         d["Game Info"].astype(str).str.extract(r"(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}[AP]M)")[0],
         format="%m/%d/%Y %I:%M%p", errors="coerce"
     )
-    d["Rounds"] = np.where(start.eq(start.max()), 5, 3)
+    # October 24, 2026 has two five-round fights, including the Yan/Dvalishvili co-main.
+    extra_five = (d["Fight"].eq("Dvalishvili@Yan") & d["Game Info"].str.contains("10/24/2026", regex=False))
+    d["Rounds"] = np.where(start.eq(start.max()) | extra_five, 5, 3)
     return d[["ID", "Name", "Opp", "Salary", "Moneyline", "Rounds", "Fight", "DK_ID", "Game Info"]]
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -444,7 +446,7 @@ except Exception as e:
 
 # Prevent cached lineup results and editable overrides from leaking between slates.
 slate_signature = tuple(sorted(
-    (int(r["ID"]), int(r["Salary"]), str(r["Fight"]))
+    (int(r["ID"]), int(r["Salary"]), str(r["Fight"]), int(r["Rounds"]))
     for _, r in fighters.iterrows()
 ))
 if st.session_state.get("ufc_se_slate_signature") != slate_signature:
@@ -458,6 +460,8 @@ slate_date = pd.to_datetime(
 ).dropna()
 if not slate_date.empty:
     st.caption(f"DraftKings slate: {slate_date.iloc[0]:%B %d, %Y} · {'Uploaded CSV' if upload is not None else 'Shared MMA 150-Max CSV'} · Real DK fighter IDs")
+five_rounds=sorted(fighters.loc[fighters["Rounds"]==5,"Fight"].unique().tolist())
+st.caption(f"🥊 Five-round matchups ({len(five_rounds)}): " + " · ".join(five_rounds))
 if fighters["Moneyline"].notna().sum() == 0:
     st.caption("No verified odds snapshot for this card: win probabilities use a salary-based prior until odds are supplied in the fighter editor.")
 

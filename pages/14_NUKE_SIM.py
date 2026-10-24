@@ -17,7 +17,6 @@ from nuke_combos import combo_exposure_table
 from nuke_game_pool import game_environment, style_environment
 from nuke_odds import load_current_odds, load_odds_history, odds_status, movement_for_game
 from nuke_portfolio_story import portfolio_story
-from nuke_bridge import sync_hub_pool_to_sim, portfolio_to_hub_rows
 from dfs_platform import get_platform
 from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
 from nuke_availability import availability_status
@@ -67,8 +66,6 @@ def render_player_takes_fragment(sim_players, portfolio, contest_results, portfo
         st.session_state["nuke_portfolio"]=new_portfolio
         st.session_state["nuke_portfolio_paths"]=new_paths
         st.session_state["nuke_portfolio_stats"]=new_stats
-        st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(sim_players,new_portfolio)
-        st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
         st.session_state["nuke_path_exposure"]=path_exposure(new_portfolio,len(new_portfolio))
         st.rerun()
 
@@ -145,7 +142,7 @@ with st.sidebar:
             "nuke_sim_results","nuke_sim_players","nuke_sim_exposure","nuke_path_exposure",
             "nuke_contest_results","nuke_contest_summary","nuke_portfolio","nuke_portfolio_paths",
             "nuke_portfolio_stats","nuke_sim_runtime","nuke_stage_times","nuke_candidate_diagnostics",
-            "nuke_player_takes","nuke_shared_portfolio_rows","nuke_shared_portfolio_version",
+            "nuke_player_takes",
             "nuke_pregame_pool","nuke_pool_editor_version"
         ]:
             st.session_state.pop(key,None)
@@ -236,23 +233,11 @@ if rendered_odds_status.get("available"):
         + (f" · Updated {rendered_odds_status.get('snapshot','')}" if rendered_odds_status.get("snapshot") else "")
     )
 
-# Bring across hand-builder pool choices when they match this slate.
+# NFL Sim owns the player-pool state independently of the retired hand builder.
 pool_state=st.session_state.get("nuke_pregame_pool",{})
 if not isinstance(pool_state,dict):
     pool_state={}
 editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
-hub_pool=st.session_state.get("pool_ids",[])
-hub_pool=list(hub_pool) if isinstance(hub_pool,(list,tuple,set)) else []
-hub_adjust=st.session_state.get("projection_overrides",{})
-hub_adjust=dict(hub_adjust) if isinstance(hub_adjust,dict) else {}
-hub_signature=(tuple(sorted(map(str,hub_pool))),tuple(sorted((str(k),float(v)) for k,v in hub_adjust.items())))
-last_hub_signature=st.session_state.get("nuke_sim_hub_signature")
-if (hub_pool or hub_adjust) and hub_signature!=last_hub_signature:
-    pool_state=sync_hub_pool_to_sim(players,pool_state,hub_pool,hub_adjust)
-    st.session_state["nuke_pregame_pool"]=pool_state
-    st.session_state["nuke_sim_hub_signature"]=hub_signature
-    st.session_state["nuke_pool_editor_version"]=editor_version+1
-    editor_version+=1
 updated_state=dict(pool_state)
 needs_rerun=False
 
@@ -580,8 +565,6 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         st.session_state["nuke_sim_runtime"]=total_runtime
         st.session_state["nuke_stage_times"]=stage_times
         st.session_state["nuke_candidate_diagnostics"]=candidate_diag
-        st.session_state["nuke_shared_portfolio_rows"]=portfolio_to_hub_rows(players,portfolio)
-        st.session_state["nuke_shared_portfolio_version"]=int(st.session_state.get("nuke_shared_portfolio_version",0))+1
         status.update(label=f"NUKE SIM complete in {total_runtime:.1f}s",state="complete")
     st.rerun()
 

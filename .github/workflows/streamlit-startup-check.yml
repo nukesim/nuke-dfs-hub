@@ -1,0 +1,49 @@
+name: Streamlit Startup Check
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install app requirements
+        run: pip install -r requirements.txt
+      - name: Verify Python source compiles
+        run: python -m py_compile app.py default_slate.py nuke_nav.py pages/14_NUKE_SIM.py pages/11_GUIDE.py
+      - name: Validate current weekly DraftKings slate
+        run: |
+          python - <<'PY'
+          from default_slate import load_default_slate, SLATE_LABEL
+          df = load_default_slate()
+          assert len(df) == 518, f'Expected 518 players, got {len(df)}'
+          assert '2026-10-25' in SLATE_LABEL
+          assert df['Game Info'].astype(str).str.contains('10/25/2026').any()
+          print(f'Validated {len(df)} DK players: {SLATE_LABEL}')
+          PY
+      - name: Start Streamlit and check local health
+        run: |
+          streamlit run app.py --server.headless=true --server.port=8501 --browser.gatherUsageStats=false > /tmp/nuke-streamlit.log 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 35); do
+            if curl --silent --fail http://localhost:8501/_stcore/health > /tmp/nuke-health.txt; then
+              cat /tmp/nuke-health.txt
+              echo "Streamlit responded to health endpoint"
+              kill $APP_PID || true
+              exit 0
+            fi
+            if ! kill -0 $APP_PID 2>/dev/null; then
+              cat /tmp/nuke-streamlit.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/nuke-streamlit.log
+          echo "Timed out waiting for Streamlit"
+          exit 1

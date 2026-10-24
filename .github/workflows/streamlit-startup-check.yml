@@ -31,13 +31,16 @@ jobs:
         run: |
           python - <<'PY'
           from streamlit.testing.v1 import AppTest
-          for page in ("app.py", "pages/14_NUKE_SIM.py"):
-              print(f"Executing {page}", flush=True)
-              at = AppTest.from_file(page).run(timeout=45)
-              for error in at.exception:
-                  print(f"ERROR {page}: {error.message}")
-              assert not at.exception, f"Streamlit page crashed: {page}"
-              print(f"PASS {page}", flush=True)
+          at = AppTest.from_file("app.py").run(timeout=45)
+          for error in at.exception:
+              print(f"ERROR app.py: {error.message}", flush=True)
+          assert not at.exception, "Streamlit landing page crashed"
+          print("PASS app.py", flush=True)
+          at.switch_page("pages/14_NUKE_SIM.py").run(timeout=45)
+          for error in at.exception:
+              print(f"ERROR NFL SIM: {error.message}", flush=True)
+          assert not at.exception, "Streamlit NFL Sim page crashed"
+          print("PASS pages/14_NUKE_SIM.py", flush=True)
           PY
       - name: Start Streamlit and check local health
         run: |

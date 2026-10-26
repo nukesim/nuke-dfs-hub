@@ -676,20 +676,24 @@ else:
         else:
             new_mins = {k: v["min"] / 100.0 for k, v in new_state.items()}
             new_maxes = {k: v["max"] / 100.0 for k, v in new_state.items()}
-            rebuilt = build_portfolio(
-                results, sim_players, count=portfolio_n,
-                max_player_pct=max_player, max_cpt_pct=max_cpt,
-                player_mins={i: float(applied_player.get(str(row["Player Key"]), {}).get("min", control_state.get(str(row["Player Key"]), {}).get("min", 0))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
-                player_maxes={i: float(applied_player.get(str(row["Player Key"]), {}).get("max", min(int(control_state.get(str(row["Player Key"]), {}).get("max", 100)), round(max_player * 100)))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
-                captain_mins={i: float(applied_cpt.get(str(row["Player Key"]), {}).get("min", 0)) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
-                captain_maxes={i: float(applied_cpt.get(str(row["Player Key"]), {}).get("max", round(max_cpt * 100))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
-                construction_mins=new_mins, construction_maxes=new_maxes,
-            )
-            st.session_state["showdown_construction_controls"] = new_state
-            st.session_state["showdown_sim_portfolio"] = rebuilt
-            st.session_state["showdown_construction_editor_version"] = construction_editor_version + 1
-            st.session_state["showdown_construction_rebuild_notice"] = True
-            st.rerun()
+            try:
+                rebuilt = build_portfolio(
+                    results, sim_players, count=portfolio_n,
+                    max_player_pct=max_player, max_cpt_pct=max_cpt,
+                    player_mins={i: float(applied_player.get(str(row["Player Key"]), {}).get("min", control_state.get(str(row["Player Key"]), {}).get("min", 0))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                    player_maxes={i: float(applied_player.get(str(row["Player Key"]), {}).get("max", min(int(control_state.get(str(row["Player Key"]), {}).get("max", 100)), round(max_player * 100)))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                    captain_mins={i: float(applied_cpt.get(str(row["Player Key"]), {}).get("min", 0)) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                    captain_maxes={i: float(applied_cpt.get(str(row["Player Key"]), {}).get("max", round(max_cpt * 100))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                    construction_mins=new_mins, construction_maxes=new_maxes,
+                )
+            except ValueError as exc:
+                st.error(f"Construction mix was not applied: {exc}")
+            else:
+                st.session_state["showdown_construction_controls"] = new_state
+                st.session_state["showdown_sim_portfolio"] = rebuilt
+                st.session_state["showdown_construction_editor_version"] = construction_editor_version + 1
+                st.session_state["showdown_construction_rebuild_notice"] = True
+                st.rerun()
 
 st.info(
     "Showdown SIM V1 intentionally ranks lineups by simulated outcome quality rather than contest payout simulation. "

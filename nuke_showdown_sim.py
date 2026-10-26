@@ -261,65 +261,142 @@ def add_lineup_labels(results, players):
     return out
 
 
-def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35, player_mins=None, player_maxes=None, construction_mins=None, construction_maxes=None):
-    if results.empty:
-        return results
+def build_portfolio(results, players, count=20, max_player_pct=.75, max_cpt_pct=.35,
+                    player_mins=None, player_maxes=None, captain_mins=None, captain_maxes=None,
+                    construction_mins=None, construction_maxes=None):
+    """Select exactly count lineups while enforcing every player, CPT and build limit.
+
+    A binary mixed-integer optimizer replaces the previous greedy picker, which
+    rewarded minimum-exposure deficits but never guaranteed they were met.
+    Explicit per-player/CPT maximums override the global default for that player.
+    """
+    from scipy.optimize import Bounds, LinearConstraint, milp
+    from scipy.sparse import coo_matrix, vstack
+
     target = max(1, int(count))
+    if results is None or len(results) < target:
+        raise ValueError(
+            f"Need at least {target} candidate lineups, but only "
+            f"{0 if results is None else len(results)} were generated. "
+            "Run the SIM with more candidate lineups."
+        )
+
     player_mins = player_mins or {}
     player_maxes = player_maxes or {}
+    captain_mins = captain_mins or {}
+    captain_maxes = captain_maxes or {}
     construction_mins = construction_mins or {}
     construction_maxes = construction_maxes or {}
+    roster = players.reset_index(drop=True)
+    n_players = len(roster)
 
-    global_player_max = max(1, int(np.floor(target * float(max_player_pct) + 1e-9)))
-    global_cpt_max = max(1, int(np.floor(target * float(max_cpt_pct) + 1e-9)))
-    min_counts = {i: int(np.ceil(target * max(0.0, min(1.0, float(player_mins.get(i, 0.0)))))) for i in range(len(players))}
-    max_counts = {}
-    for i in range(len(players)):
-        personal = max(0.0, min(1.0, float(player_maxes.get(i, 1.0))))
-        max_counts[i] = min(global_player_max, int(np.floor(target * personal + 1e-9)))
+    def min_count(pct):
+        return int(np.ceil(target * max(0., min(1., float(pct))) - 1e-9))
 
-    construction_min_counts = {str(k): int(np.ceil(target * max(0.0, min(1.0, float(v))))) for k, v in construction_mins.items()}
-    construction_max_counts = {str(k): int(np.floor(target * max(0.0, min(1.0, float(v))) + 1e-9)) for k, v in construction_maxes.items()}
+    def max_count(pct):
+        return int(np.floor(target * max(0., min(1., float(pct))) + 1e-9))
 
-    player_counts = Counter(); cpt_counts = Counter(); construction_counts = Counter()
-    chosen = []; used = set()
-    band = results.head(min(len(results), 6000)).reset_index(drop=True)
-    teams = players.reset_index(drop=True)["Team"].astype(str).to_numpy()
+    p_min = np.array([min_count(player_mins.get(i, 0)) for i in range(n_players)], dtype=int)
+    p_max = np.array([
+        max_count(player_maxes.get(i, max_player_pct)) for i in range(n_players)
+    ], dtype=int)
+    c_min = np.array([min_count(captain_mins.get(i, 0)) for i in range(n_players)], dtype=int)
+    c_max = np.array([
+        max_count(captain_maxes.get(i, max_cpt_pct)) for i in range(n_players)
+    ], dtype=int)
 
-    # Precompute lineup membership and construction once instead of rebuilding from pandas
-    # on every portfolio-selection pass.
-    pre = []
-    for ridx, r in band.iterrows():
-        cpt = int(r["_cpt"])
-        flex = tuple(map(int, r["_flex"]))
+    names = roster["Name"].astype(str).tolist()
+    for i in range(n_players):
+        if p_min[i] > p_max[i]:
+            raise ValueError(f"{names[i]}: player minimum exceeds player maximum.")
+        if c_min[i] > c_max[i]:
+            raise ValueError(f"{names[i]}: captain minimum exceeds captain maximum.")
+        if c_min[i] > p_max[i]:
+            raise ValueError(f"{names[i]}: captain minimum exceeds total player maximum.")
+    if int(p_min.sum()) > 6 * target or int(p_max.sum()) < 6 * target:
+        raise ValueError("Player exposure bounds must accommodate six players per lineup (600% total).")
+    if int(c_min.sum()) > target or int(c_max.sum()) < target:
+        raise ValueError("Captain exposure bounds must accommodate one captain per lineup (100% total).")
+
+    # Include the complete scored pool, not just the first 6,000 lineups:
+    # lower-exposure players often require candidates further down the ranks.
+    band = results.reset_index(drop=True)
+    n_choices = len(band)
+    teams = roster["Team"].astype(str).to_numpy()
+    member_r, member_c, cpt_r, cpt_c = [], [], [], []
+    construction_labels = []
+    for j, row in enumerate(band.itertuples(index=False, name=None)):
+        # Pandas may rename private columns in itertuples, so access by position.
+        cpt = int(row[band.columns.get_loc("_cpt")])
+        flex = tuple(map(int, row[band.columns.get_loc("_flex")]))
         inds = (cpt,) + flex
-        construction = _construction_label_fast(cpt, flex, teams)
-        pre.append((ridx, cpt, inds, construction, float(r.get("NUKE Score", 0.0))))
+        member_r.extend(inds)
+        member_c.extend([j] * len(inds))
+        cpt_r.append(cpt)
+        cpt_c.append(j)
+        construction_labels.append(_construction_label_fast(cpt, flex, teams))
 
-    for _ in range(target):
-        best_idx = None; best_value = None; best_meta = None
-        for ridx, cpt, inds, construction, score in pre:
-            if ridx in used: continue
-            if cpt_counts[cpt] >= global_cpt_max: continue
-            if any(player_counts[i] >= max_counts.get(i, global_player_max) for i in inds): continue
-            if construction in construction_max_counts and construction_counts[construction] >= construction_max_counts[construction]: continue
+    members = coo_matrix(
+        (np.ones(len(member_r)), (member_r, member_c)),
+        shape=(n_players, n_choices),
+    ).tocsr()
+    captains = coo_matrix(
+        (np.ones(n_choices), (cpt_r, cpt_c)),
+        shape=(n_players, n_choices),
+    ).tocsr()
+    labels = sorted(set(construction_mins) | set(construction_maxes))
+    label_index = {label: idx for idx, label in enumerate(labels)}
+    construction_r = [label_index[label] for label in construction_labels if label in label_index]
+    construction_c = [j for j, label in enumerate(construction_labels) if label in label_index]
+    builds = coo_matrix(
+        (np.ones(len(construction_r)), (construction_r, construction_c)),
+        shape=(len(labels), n_choices),
+    ).tocsr()
+    b_min = np.array([min_count(construction_mins.get(s, 0)) for s in labels], dtype=int)
+    b_max = np.array([max_count(construction_maxes.get(s, 1)) for s in labels], dtype=int)
+    if np.any(b_min > b_max):
+        raise ValueError("A construction minimum exceeds its maximum.")
+    if len(labels) and (b_min.sum() > target or b_max.sum() < target):
+        raise ValueError("Construction ranges cannot add up to the requested portfolio size.")
 
-            deficit_bonus = sum(max(0, min_counts.get(i, 0) - player_counts[i]) * 1000.0 for i in inds)
-            deficit_bonus += max(0, construction_min_counts.get(construction, 0) - construction_counts[construction]) * 1500.0
-            value = deficit_bonus + score
-            if best_value is None or value > best_value:
-                best_value = value; best_idx = ridx; best_meta = (cpt, inds, construction)
+    if np.any(p_min > np.asarray(members.getnnz(axis=1))):
+        raise ValueError("A player minimum needs more candidate lineups than this SIM produced.")
+    if np.any(c_min > np.asarray(captains.getnnz(axis=1))):
+        raise ValueError("A captain minimum needs more candidate lineups than this SIM produced.")
+    if len(labels) and np.any(b_min > np.asarray(builds.getnnz(axis=1))):
+        raise ValueError("A construction minimum needs more candidate lineups than this SIM produced.")
 
-        if best_idx is None:
-            break
-        chosen.append(band.iloc[best_idx])
-        used.add(best_idx)
-        cpt, inds, construction = best_meta
-        cpt_counts[cpt] += 1
-        player_counts.update(inds)
-        construction_counts[construction] += 1
-
-    return pd.DataFrame(chosen).reset_index(drop=True) if chosen else results.iloc[0:0].copy()
+    matrix = vstack(
+        [coo_matrix(np.ones((1, n_choices))), members, captains, builds],
+        format="csc",
+    )
+    lower = np.concatenate(([target], p_min, c_min, b_min))
+    upper = np.concatenate(([target], p_max, c_max, b_max))
+    score = np.nan_to_num(
+        band["NUKE Score"].to_numpy(dtype=float), nan=-1000., neginf=-1000., posinf=1000.
+    )
+    cost = (score.max() - score) / max(1., float(np.ptp(score)))
+    solution = milp(
+        c=cost,
+        integrality=np.ones(n_choices, dtype=np.int32),
+        bounds=Bounds(np.zeros(n_choices), np.ones(n_choices)),
+        constraints=LinearConstraint(matrix, lower, upper),
+        options={"time_limit": 20.0, "mip_rel_gap": 0.025},
+    )
+    if solution.x is None:
+        raise ValueError(
+            "No complete portfolio satisfies all the player, captain and construction "
+            "Min/Max limits in the current candidate pool. Loosen conflicting ranges "
+            "or rerun the SIM with more candidates."
+        )
+    selected = np.flatnonzero(solution.x > 0.5)
+    observed = matrix @ (solution.x > 0.5).astype(float)
+    if (len(selected) != target or np.any(observed < lower - 1e-6)
+            or np.any(observed > upper + 1e-6)):
+        raise ValueError("Could not verify a complete portfolio meeting every exposure limit.")
+    return band.iloc[selected].sort_values(
+        ["NUKE Score", "Top 1% Score"], ascending=False
+    ).reset_index(drop=True)
 
 def exposure_table(portfolio, players):
     if portfolio.empty: return pd.DataFrame(), pd.DataFrame()

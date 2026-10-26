@@ -41,7 +41,7 @@ if st.session_state.get("showdown_last_site") != site:
     for _key in [
         "showdown_sim_results", "showdown_sim_portfolio", "showdown_sim_players",
         "showdown_sim_scripts", "showdown_sim_seed", "showdown_player_controls",
-        "showdown_construction_controls",
+        "showdown_construction_controls", "showdown_exposure_overrides",
     ]:
         st.session_state.pop(_key, None)
 
@@ -121,7 +121,7 @@ if st.session_state.get("showdown_sim_slate_sig") != slate_sig:
     st.session_state["showdown_sim_slate_sig"] = slate_sig
     for key in [
         "showdown_sim_results", "showdown_sim_portfolio", "showdown_sim_players",
-        "showdown_sim_scripts", "showdown_sim_seed", "showdown_player_controls",
+        "showdown_sim_scripts", "showdown_sim_seed", "showdown_player_controls", "showdown_exposure_overrides",
     ]:
         st.session_state.pop(key, None)
 
@@ -284,7 +284,9 @@ if locked_flex_indices:
 
 boosts = {i: float(control_state.get(str(r["Player Key"]), {}).get("boost", 0.0)) for i, r in players.iterrows()}
 player_mins = {i: float(control_state.get(str(r["Player Key"]), {}).get("min", 0)) / 100.0 for i, r in players.iterrows()}
-player_maxes = {i: float(control_state.get(str(r["Player Key"]), {}).get("max", 100)) / 100.0 for i, r in players.iterrows()}
+player_maxes = {i: float(control_state[str(r["Player Key"])]["max"]) / 100.0 for i, r in players.iterrows() if int(control_state.get(str(r["Player Key"]), {}).get("max", 100)) < 100}
+captain_mins = {}
+captain_maxes = {}
 
 st.subheader("🧱 Construction Limits")
 st.caption("Control the team build mix in the final portfolio. 3-3 is even; team-specific 4-2 and 5-1 builds show which team supplies the majority of the lineup.")
@@ -389,6 +391,7 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
             results, players, count=portfolio_n,
             max_player_pct=max_player, max_cpt_pct=max_cpt,
             player_mins=player_mins, player_maxes=player_maxes,
+            captain_mins=captain_mins, captain_maxes=captain_maxes,
             construction_mins=construction_mins, construction_maxes=construction_maxes,
         )
         st.session_state["showdown_sim_results"] = results
@@ -408,6 +411,8 @@ if results is None or sim_players is None or results.empty:
 
 if run_seed:
     st.caption(f"Current run seed: {int(run_seed):,}")
+if st.session_state.pop("showdown_exposure_rebuild_notice", False):
+    st.success("Exposure limits applied — portfolio and download updated without rerunning game simulations.")
 if st.session_state.pop("showdown_construction_rebuild_notice", False):
     st.success("Construction mix applied — portfolio rebuilt from the existing SIM results. No new football simulation was required.")
 
@@ -525,6 +530,91 @@ else:
         st.markdown(f"#### {multiplier_label} Exposure")
         st.dataframe(captains, use_container_width=True, hide_index=True)
 
+    # Post-SIM exposure controls rebuild only the portfolio, not game simulations.
+    overrides = st.session_state.get("showdown_exposure_overrides", {}) or {}
+    applied_player = overrides.get("player", {})
+    applied_cpt = overrides.get("captain", {})
+    st.markdown("#### 🎚️ Portfolio Exposure Limits")
+    st.caption(
+        "Edit the Min/Max percentages for overall exposure and captain exposure, "
+        "then click Apply to Portfolio. Limits are enforced across all lineups; "
+        "the DraftKings export updates with the rebuilt portfolio."
+    )
+    all_rows = sim_players.reset_index(drop=True)
+    overall_counts = {str(row["Player"]): int(row["Lineups"]) for _, row in overall.iterrows()}
+    cpt_counts = {str(row["Player"]): int(row["Lineups"]) for _, row in captains.iterrows()}
+    exposure_rows = []
+    for idx, row in all_rows.iterrows():
+        key = str(row["Player Key"])
+        cfg = control_state.get(key, {})
+        p_limit = applied_player.get(key, {})
+        c_limit = applied_cpt.get(key, {})
+        exposure_rows.append({
+            "_key": key,
+            "Player": str(row["Name"]),
+            "Team": str(row["Team"]),
+            "Pos": str(row["Pos"]),
+            "Player %": round(100 * overall_counts.get(str(row["Name"]), 0) / len(portfolio), 1),
+            "Player Min %": int(p_limit.get("min", cfg.get("min", 0))),
+            "Player Max %": int(p_limit.get("max", min(int(cfg.get("max", 100)), int(round(max_player * 100))))),
+            f"{multiplier_label} %": round(100 * cpt_counts.get(str(row["Name"]), 0) / len(portfolio), 1),
+            f"{multiplier_label} Min %": int(c_limit.get("min", 0)),
+            f"{multiplier_label} Max %": int(c_limit.get("max", round(max_cpt * 100))),
+        })
+    version = int(st.session_state.get("showdown_exposure_editor_version", 0))
+    with st.form("showdown_exposure_apply_form"):
+        exposure_edit = st.data_editor(
+            pd.DataFrame(exposure_rows).drop(columns=["_key"]),
+            use_container_width=True, hide_index=True,
+            disabled=["Player", "Team", "Pos", "Player %", f"{multiplier_label} %"],
+            column_config={
+                "Player": st.column_config.TextColumn("Player", width="medium"),
+                "Player %": st.column_config.NumberColumn("Player %", format="%.1f%%"),
+                f"{multiplier_label} %": st.column_config.NumberColumn(f"{multiplier_label} %", format="%.1f%%"),
+                **{col: st.column_config.NumberColumn(col, min_value=0, max_value=100, step=1, format="%d%%")
+                   for col in ["Player Min %", "Player Max %", f"{multiplier_label} Min %", f"{multiplier_label} Max %"]},
+            },
+            key=f"showdown_exposure_editor_{site_key}_{version}",
+        )
+        apply_exposure = st.form_submit_button("✅ APPLY TO PORTFOLIO", type="primary", use_container_width=True)
+    if apply_exposure:
+        p_settings, c_settings, errors = {}, {}, []
+        for idx, edited in exposure_edit.iterrows():
+            key = exposure_rows[idx]["_key"]
+            name = str(edited["Player"])
+            pmn, pmx = int(edited["Player Min %"]), int(edited["Player Max %"])
+            cmn, cmx = int(edited[f"{multiplier_label} Min %"]), int(edited[f"{multiplier_label} Max %"])
+            if any(x < 0 or x > 100 for x in (pmn, pmx, cmn, cmx)):
+                errors.append(f"{name}: percentages must be within 0–100.")
+            if pmn > pmx or cmn > cmx or cmn > pmx:
+                errors.append(f"{name}: minimums cannot exceed their maximums (including CPT vs player).")
+            p_settings[key] = {"min": pmn, "max": pmx}
+            c_settings[key] = {"min": cmn, "max": cmx}
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            pmin = {i: p_settings[str(row["Player Key"])]["min"] / 100 for i, row in all_rows.iterrows()}
+            pmax = {i: p_settings[str(row["Player Key"])]["max"] / 100 for i, row in all_rows.iterrows()}
+            cmin = {i: c_settings[str(row["Player Key"])]["min"] / 100 for i, row in all_rows.iterrows()}
+            cmax = {i: c_settings[str(row["Player Key"])]["max"] / 100 for i, row in all_rows.iterrows()}
+            try:
+                rebuilt = build_portfolio(
+                    results, sim_players, count=portfolio_n,
+                    max_player_pct=max_player, max_cpt_pct=max_cpt,
+                    player_mins=pmin, player_maxes=pmax,
+                    captain_mins=cmin, captain_maxes=cmax,
+                    construction_mins=construction_mins, construction_maxes=construction_maxes,
+                )
+            except ValueError as exc:
+                st.error(f"Portfolio was not changed: {exc}")
+            else:
+                st.session_state["showdown_exposure_overrides"] = {"player": p_settings, "captain": c_settings}
+                st.session_state["showdown_sim_portfolio"] = rebuilt
+                st.session_state["showdown_exposure_editor_version"] = version + 1
+                st.session_state["showdown_exposure_rebuild_notice"] = True
+                st.rerun()
+
     construction_counts = p["Construction"].value_counts().reindex(construction_styles, fill_value=0)
     construction_mix = construction_counts.rename_axis("Construction").reset_index(name="Lineups")
     construction_mix["Construction %"] = (100.0 * construction_mix["Lineups"] / max(1, len(p))).round(1)
@@ -575,7 +665,10 @@ else:
             rebuilt = build_portfolio(
                 results, sim_players, count=portfolio_n,
                 max_player_pct=max_player, max_cpt_pct=max_cpt,
-                player_mins=player_mins, player_maxes=player_maxes,
+                player_mins={i: float(applied_player.get(str(row["Player Key"]), {}).get("min", control_state.get(str(row["Player Key"]), {}).get("min", 0))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                player_maxes={i: float(applied_player.get(str(row["Player Key"]), {}).get("max", min(int(control_state.get(str(row["Player Key"]), {}).get("max", 100)), round(max_player * 100)))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                captain_mins={i: float(applied_cpt.get(str(row["Player Key"]), {}).get("min", 0)) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
+                captain_maxes={i: float(applied_cpt.get(str(row["Player Key"]), {}).get("max", round(max_cpt * 100))) / 100 for i, row in sim_players.reset_index(drop=True).iterrows()},
                 construction_mins=new_mins, construction_maxes=new_maxes,
             )
             st.session_state["showdown_construction_controls"] = new_state

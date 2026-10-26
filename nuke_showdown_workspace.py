@@ -17,6 +17,7 @@ CONTROL_KEYS = [
     "showdown_fixed_seed",
     "showdown_manual_seed",
     "showdown_construction_controls",
+    "showdown_exposure_overrides",
 ]
 
 STATE_KEYS = [

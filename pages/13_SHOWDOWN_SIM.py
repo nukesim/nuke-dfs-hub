@@ -387,15 +387,28 @@ if st.button("☢️ RUN SHOWDOWN SIM", type="primary", use_container_width=True
             required_flex_indices=locked_flex_indices if site == "FanDuel" else None,
         )
         results = evaluate_candidates(players, cand, sims, scripts)
-        portfolio = build_portfolio(
-            results, players, count=portfolio_n,
-            max_player_pct=max_player, max_cpt_pct=max_cpt,
-            player_mins=player_mins, player_maxes=player_maxes,
-            captain_mins=captain_mins, captain_maxes=captain_maxes,
-            construction_mins=construction_mins, construction_maxes=construction_maxes,
-        )
+        saved_limits = st.session_state.get("showdown_exposure_overrides", {}) or {}
+        p_over = saved_limits.get("player", {})
+        c_over = saved_limits.get("captain", {})
+        run_pmin = {i: p_over.get(str(r["Player Key"]), {}).get("min", player_mins.get(i, 0) * 100) / 100 for i, r in players.iterrows()}
+        run_pmax = {i: p_over.get(str(r["Player Key"]), {}).get("max", player_maxes.get(i, max_player) * 100) / 100 for i, r in players.iterrows()}
+        run_cmin = {i: c_over.get(str(r["Player Key"]), {}).get("min", 0) / 100 for i, r in players.iterrows()}
+        run_cmax = {i: c_over.get(str(r["Player Key"]), {}).get("max", max_cpt * 100) / 100 for i, r in players.iterrows()}
+        try:
+            portfolio = build_portfolio(
+                results, players, count=portfolio_n,
+                max_player_pct=max_player, max_cpt_pct=max_cpt,
+                player_mins=run_pmin, player_maxes=run_pmax,
+                captain_mins=run_cmin, captain_maxes=run_cmax,
+                construction_mins=construction_mins, construction_maxes=construction_maxes,
+            )
+        except ValueError as exc:
+            portfolio = results.iloc[0:0].copy()
+            st.session_state["showdown_portfolio_error"] = str(exc)
         st.session_state["showdown_sim_results"] = results
         st.session_state["showdown_sim_portfolio"] = portfolio
+        if not portfolio.empty:
+            st.session_state.pop("showdown_portfolio_error", None)
         st.session_state["showdown_sim_players"] = players
         st.session_state["showdown_sim_scripts"] = pd.Series(scripts).value_counts().to_dict()
         st.session_state["showdown_sim_seed"] = seed
@@ -433,7 +446,7 @@ st.dataframe(
 
 st.subheader("NUKE Showdown Portfolio")
 if portfolio is None or portfolio.empty:
-    st.info("No portfolio could be built with the current exposure limits.")
+    st.error(st.session_state.get("showdown_portfolio_error", "No portfolio satisfies the current exposure limits."))
 else:
     if len(portfolio) < int(portfolio_n):
         st.warning(
@@ -611,6 +624,7 @@ else:
             else:
                 st.session_state["showdown_exposure_overrides"] = {"player": p_settings, "captain": c_settings}
                 st.session_state["showdown_sim_portfolio"] = rebuilt
+                st.session_state.pop("showdown_portfolio_error", None)
                 st.session_state["showdown_exposure_editor_version"] = version + 1
                 st.session_state["showdown_exposure_rebuild_notice"] = True
                 st.rerun()

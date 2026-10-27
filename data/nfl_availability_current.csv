@@ -1,11 +1,11 @@
 player_id,name,team,status,status_short,practice,probability_of_playing,comment,injury_type,injury_update_date,updated
-16393,Christian McCaffrey,SF,,,DNP / Full / Full,1,,,,2026-10-26T22:42:01+00:00
-19217,Jonathan Taylor,IND,,,Limit / Full / Full,1,,,,2026-10-26T22:42:01+00:00
-23180,Puka Nacua,LAR,,,Limit / Limit / Full,1,,,,2026-10-26T22:42:01+00:00
-22916,Zay Flowers,BAL,Questionable,Q,Limit / Full / Limit,0.95,,Hamstring,2026-10-04 11:20:03,2026-10-26T22:42:01+00:00
-19210,D'Andre Swift,CHI,,,-- / DNP / Full,1,,,,2026-10-26T22:42:01+00:00
-19792,Chuba Hubbard,CAR,,,DNP / Full / Full,1,,,,2026-10-26T22:42:01+00:00
-25989,Ashton Jeanty,LV,,,Full / Full / Full,1,,,,2026-10-26T22:42:01+00:00
-25981,Bucky Irving,TB,,,Limit / Limit / Full,1,,,,2026-10-26T22:42:01+00:00
-23046,Drake Maye,NE,,,Full / Full / Full,1,,,,2026-10-26T22:42:01+00:00
-22955,Brock Bowers,LV,,,-- / -- / Limit,1,,,,2026-10-26T22:42:01+00:00
+16393,Christian McCaffrey,SF,,,DNP / Full / Full,1,,,,2026-10-27T05:10:07+00:00
+19217,Jonathan Taylor,IND,,,Limit / Full / Full,1,,,,2026-10-27T05:10:07+00:00
+23180,Puka Nacua,LAR,,,Limit / Limit / Full,1,,,,2026-10-27T05:10:07+00:00
+22916,Zay Flowers,BAL,Questionable,Q,Limit / Full / Limit,0.95,,Hamstring,2026-10-04 11:20:03,2026-10-27T05:10:07+00:00
+19210,D'Andre Swift,CHI,,,-- / DNP / Full,1,,,,2026-10-27T05:10:07+00:00
+25989,Ashton Jeanty,LV,,,Full / Full / Full,1,,,,2026-10-27T05:10:07+00:00
+19792,Chuba Hubbard,CAR,,,DNP / Full / Full,1,,,,2026-10-27T05:10:07+00:00
+25981,Bucky Irving,TB,,,Limit / Limit / Full,1,,,,2026-10-27T05:10:07+00:00
+23046,Drake Maye,NE,,,Full / Full / Full,1,,,,2026-10-27T05:10:07+00:00
+22955,Brock Bowers,LV,,,-- / -- / Limit,1,,,,2026-10-27T05:10:07+00:00

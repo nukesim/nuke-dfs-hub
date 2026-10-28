@@ -20,6 +20,7 @@ jobs:
           import urllib.request
           from nuke_nba_data import _parse_rotowire_lineups
           urls = [
+              "https://www.rotoballer.com/wp-json/rb/v1/nba-lineups",
               "https://www.rotoballer.com/todays-nba-starting-lineups-daily-basketball-starters",
               "https://rotogrinders.com/lineups/nba",
           ]
@@ -43,7 +44,20 @@ jobs:
                           print("MARKUP", token, html[max(0,ix-130):ix+320] if ix>=0 else "NOT FOUND", flush=True)
                   else:
                       import re
+                      if "wp-json" in url:
+                          import json
+                          try:
+                              obj=json.loads(html)
+                              print("API type",type(obj).__name__,"keys",list(obj)[:20] if isinstance(obj,dict) else "list", "size",len(obj),flush=True)
+                              print("API start",repr(str(obj)[:1800]),flush=True)
+                          except Exception as e: print("API parse error",type(e).__name__,flush=True)
                       from html import unescape
+                      if "rotogrinders" in url:
+                          for token in ['<div class="lineup-card-body ', '<div class="game-card-lineups">']:
+                              m = list(re.finditer(re.escape(token),html,re.I))
+                              print("CARDS",token,len(m),flush=True)
+                              for i,x in enumerate(m[:4]):
+                                  print("CARD",i,html[max(0,x.start()-250):x.start()+2500].replace("\\n"," ")[:2550],flush=True)
                       for pattern in [r'window\\.rbNba', r'rbNbaLineups', r'wp-json', r'"date":"', r'"games":', r'"card":', r'class="lineup-card-body']:
                           matches=list(re.finditer(pattern, html, re.I))
                           print("STRUCT",pattern,len(matches),flush=True)

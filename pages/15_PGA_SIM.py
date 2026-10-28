@@ -179,6 +179,58 @@ def _baycurrent_2026_context():
         "forecast_as_of":"October 7, 2026, 5:30 AM JST",
         "forecast_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/baycurrentclassic/weather/Wednesday.pdf"}
 
+def _mexico_2026_context():
+    """Official PGA TOUR Mexico Open R1/R2 tee sheet (October 29-30, 2026).
+
+    Course-local times (America/Bahia_Banderas, UTC-6) are transcribed from
+    PGA TOUR's published R1/R2 pairings, not estimated from group order:
+    https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/vidantaworldmexicoopen/roundInfo/R1-R2%20Tee%20Times.pdf
+    """
+    schedule=Path(__file__).resolve().parents[1]/"data"/"pga_mexico_2026_pairings.psv"
+    groups=pd.read_csv(schedule,sep="|",dtype=str)
+    tee={}
+    for _,group in groups.iterrows():
+        r1=pd.Timestamp("2026-10-29 "+group["R1_Local"],tz="America/Bahia_Banderas")
+        r2=pd.Timestamp("2026-10-30 "+group["R2_Local"],tz="America/Bahia_Banderas")
+        for player in group["Players"].split(";"):
+            key=_norm_name(player)
+            if key in tee:
+                raise ValueError(f"Duplicate Mexico Open tee sheet player: {player}")
+            tee[key]={1:r1.isoformat(),2:r2.isoformat()}
+    # DraftKings name variants (never infer playing times for unlisted players).
+    aliases={
+        "Benjamin James":"Ben James",
+        "Jordan L. Smith":"Jordan Smith",
+        "Zachary Bauchou":"Zach Bauchou",
+        "Kris Ventura":"Kristoffer Ventura",
+        "Cameron Davis":"Cam Davis",
+        "Mauricio Figueroa":"Mauricio Figueroa Ramirez",
+    }
+    for dk_name,official_name in aliases.items():
+        found=tee.get(_norm_name(official_name))
+        if found: tee[_norm_name(dk_name)]=dict(found)
+    return {
+        "event_id":"2026540","event_name":"VidantaWorld Mexico Open",
+        "course":"Vidanta Vallarta","location":"Vallarta, Mexico",
+        "lat":20.68374,"lon":-105.26654,
+        "timezone":"America/Bahia_Banderas","timezone_label":"CST (local)",
+        "has_cut":True,
+        "round_dates":["2026-10-29","2026-10-30","2026-10-31","2026-11-01"],
+        "tee_times":tee,"tee_source":"PGA TOUR official R1/R2 tee sheet",
+        "status":"Published R1/R2 tee times loaded",
+        "tee_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/vidantaworldmexicoopen/roundInfo/R1-R2%20Tee%20Times.pdf",
+        "forecast_summary":(
+            "PGA TOUR forecast (Oct 28, 6 AM local): Thu 25% chance of a shower or thunderstorm, "
+            "76–86°F, light morning winds increasing to S/SW 8–12 mph in the afternoon. "
+            "Fri 10% rain chance, 76–88°F, morning winds 3–6 mph increasing to W 8–14 mph. "
+            "Sat/Sun mostly sunny, with similarly stronger afternoon westerlies. "
+            "Golfer weather edges use live hourly forecasts and can change."
+        ),
+        "forecast_as_of":"October 28, 2026, 6:00 AM course-local",
+        "forecast_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/vidantaworldmexicoopen/weather/Wednesday.pdf",
+    }
+
+
 def _bermuda_2026_context():
     """Verified October 22/23 2026 R1/R2 groupings, published October 21.
 
@@ -218,15 +270,9 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
-    if "vidantaworldmexicoopen" in wanted:
-        # Keep the new slate anchored to its own venue. Do not assign a
-        # similarly named ESPN event's tee sheet to this tournament.
-        # Tee times remain TBD until verified against published R1/R2 groups.
-        return {"event_id":None,"event_name":event_name,
-            "course":"Vidanta Vallarta","location":"Nuevo Nayarit, Mexico",
-            "lat":None,"lon":None,"timezone":"America/Bahia_Banderas",
-            "timezone_label":"CST","has_cut":True,
-            "tee_times":{},"status":"Tee times awaiting verification"}
+    if "vidantaworldmexicoopen" in wanted and datetime.now().year == 2026:
+        # Use the verified event sheet, not ESPN's closest unrelated event.
+        return _mexico_2026_context()
     if "butterfieldbermuda" in wanted and datetime.now().year == 2026:
         # Use the verified 2026 sheet only during its actual tournament year.
         return _bermuda_2026_context()
@@ -529,6 +575,11 @@ if st.session_state.get("pga_slate_key") != slate_key:
             st.session_state.pop(key,None)
     st.session_state["pga_slate_key"]=slate_key
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
+if "vidantaworldmexicoopen" in _norm_name(event) and "Adam Hadwin" not in set(golfers["Name"]):
+    st.caption("Field update Oct 28: C.T. Pan withdrew and Adam Hadwin replaced him. "
+               "C.T. Pan is excluded by the DK CSV; Adam Hadwin is not in this DK salary file, "
+               "so he cannot be added to lineups until DraftKings publishes his salary and ID.")
+
 
 pga_refresh_nonce=int(st.session_state.get("pga_tee_refresh_nonce",0))
 pga_refresh_token=f"{int(datetime.now().timestamp()//900)}:{pga_refresh_nonce}"

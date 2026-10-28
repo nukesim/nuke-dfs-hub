@@ -357,6 +357,86 @@ def fetch_rotowire_lineups(slate_date):
     return merged
 
 
+def fetch_rotoballer_lineups(slate_date):
+    """Fetch explicitly labeled live starting fives from RotoBaller's JSON feed.
+
+    The endpoint also supplies projected prior-game lineups; they MUST NEVER be
+    treated as confirmations. Confirmed cards have postedAt and source metadata.
+    """
+    url = "https://www.rotoballer.com/wp-json/rb/v1/nba-lineups"
+    req = Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/131.0.0.0 Safari/537.36"),
+        "Accept": "application/json",
+    })
+    with urlopen(req, timeout=7) as response:
+        data = json.load(response)
+    if data.get("date") != slate_date.isoformat():
+        raise ValueError(f"RotoBaller returned the wrong slate date: {data.get('date')}")
+    result = {}
+    for game in data.get("games", []):
+        for side in ("away", "home"):
+            item = game.get(side) or {}
+            team = norm_team(item.get("team"))
+            if team not in TEAM_NAMES:
+                continue
+            card = item.get("card") or {}
+            raw_state = str(card.get("status") or "").lower()
+            if raw_state not in {"confirmed", "projected"}:
+                continue
+            starters = card.get("starters") or []
+            if len(starters) != 5:
+                continue
+            names = [str(p.get("name") or "").strip() for p in starters]
+            keys = [norm_name(name) for name in names]
+            if not all(keys) or len(set(keys)) != 5:
+                continue
+
+            confirmed = (raw_state == "confirmed"
+                         and bool(card.get("postedAt"))
+                         and bool((card.get("source") or {}).get("url")))
+            if raw_state == "confirmed" and not confirmed:
+                continue  # Do not upgrade a source-less card to confirmed.
+
+            slots = ("PG", "SG", "SF", "PF", "C")
+            declared = [str(p.get("pos") or "").upper() for p in starters]
+            authentic = set(declared) == set(slots) and len(set(declared)) == 5
+            positions = {slot: key for slot, key in
+                         zip(declared if authentic else slots, keys)}
+            display = {slot: name for slot, name in
+                       zip(declared if authentic else slots, names)}
+            result[team] = {
+                "state": "confirmed" if confirmed else "expected",
+                "starters": set(keys),
+                "positions": positions,
+                "display_positions": display,
+                "source": "RotoBaller",
+                "positions_estimated": not authentic,
+                "projected_from": card.get("projectedFrom", ""),
+                "posted_at": card.get("postedAt") if confirmed else None,
+                "source_url": ((card.get("source") or {}).get("url")
+                               if confirmed else None),
+            }
+    if not result:
+        raise ValueError("RotoBaller provided no valid lineup cards for the slate")
+    return result
+
+
+def reconcile_lineup_sources(rotowire=None, rotoballer=None):
+    """Prefer explicit confirmations; RotoBaller fills gaps when RW is blocked.
+
+    A projected RotoBaller five never overwrites an expected RotoWire five.
+    Both sources' confirmed states count only when their parser verifies them.
+    """
+    merged = {team: dict(data) for team, data in (rotowire or {}).items()}
+    for team, data in (rotoballer or {}).items():
+        previous = merged.get(team)
+        if previous is None or data.get("state") == "confirmed":
+            merged[team] = dict(data)
+    return merged
+
+
 def merge_lineup_updates(previous, fresh):
     """Keep last verified team data when a mirror regresses or omits that team.
 

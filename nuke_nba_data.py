@@ -189,49 +189,106 @@ def fetch_espn_games(slate_date):
     return out
 
 
+def _html_classes(tag):
+    """Read CSS classes regardless of attribute order, quoting or extra classes."""
+    match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', tag, re.I | re.S)
+    return set(match.group(2).split()) if match else set()
+
+
+def _html_attribute(tag, attribute):
+    match = re.search(r'\b' + re.escape(attribute) + r'\s*=\s*(["\'])(.*?)\1',
+                      tag, re.I | re.S)
+    return html.unescape(match.group(2)) if match else ""
+
+
 def _parse_rotowire_lineups(raw):
-    """Parse source HTML; never infer a confirmed lineup from a projection."""
+    """Only an explicit provider confirmation can mark a starting five confirmed.
+
+    Parse individual list elements so a bench player, class order or unrelated
+    'is-confirmed' marker cannot turn an expected lineup into confirmed.
+    """
     result = {}
-    starts = list(re.finditer(r'<div\s+class="lineup\s+is-nba"', raw))
+    div_tags = re.finditer(r'<div\b[^>]*>', raw, re.I | re.S)
+    starts = [m for m in div_tags
+              if {"lineup", "is-nba"} <= _html_classes(m.group(0))]
     for number, match in enumerate(starts):
-        section = raw[match.start(): starts[number + 1].start() if number + 1 < len(starts) else len(raw)]
+        section = raw[match.start():starts[number+1].start()
+                      if number+1 < len(starts) else len(raw)]
         for side in ("visit", "home"):
-            team_match = re.search(
-                rf'class="lineup__team is-{side}".*?<div class="lineup__abbr">\s*([A-Z]{{2,4}})\s*</div>',
-                section, re.S,
-            )
-            lineup_match = re.search(rf'<ul\s+class="lineup__list is-{side}">(.*?)</ul>', section, re.S)
-            if not team_match or not lineup_match:
+            team = ""
+            for tag in re.finditer(r'<(?:a|div)\b[^>]*>', section, re.I | re.S):
+                if {"lineup__team", "is-" + side} <= _html_classes(tag.group(0)):
+                    snippet = section[tag.end():tag.end()+1800]
+                    for abbr in re.finditer(r'<(?:div|span)\b[^>]*>(.*?)</(?:div|span)>',
+                                            snippet, re.S | re.I):
+                        opening = abbr.group(0).split(">", 1)[0] + ">"
+                        if "lineup__abbr" in _html_classes(opening):
+                            team = norm_team(re.sub(r'<[^>]+>', '', abbr.group(1)).strip())
+                            break
+                    break
+            if team not in TEAM_NAMES:
                 continue
-            team = norm_team(team_match.group(1))
-            block = lineup_match.group(1)
-            starter_block = re.split(r'<li class="lineup__title', block, maxsplit=1)[0]
-            starter_names = re.findall(
-                r'<li class="lineup__player[^>]*>.*?<a\s+title="([^"]+)"', starter_block, re.S,
-            )
-            status_match = re.search(r'lineup__status\s+is-([a-z]+)', starter_block)
-            state = (status_match.group(1) if status_match else "unknown").lower()
-            if len(starter_names) == 5 and state in {"expected", "confirmed"}:
-                # Preserve RotoWire's real PG/SG/SF/PF/C assignments for the
-                # visual lineup board; a set of names alone loses positions.
-                positions, display_positions = {}, {}
-                for player_tag in re.finditer(
-                    r'<li\b[^>]*class="[^"]*\blineup__player\b[^"]*"[^>]*>(.*?)</li>',
-                    starter_block, re.S,
+
+            block = ""
+            for ul in re.finditer(r'<ul\b[^>]*>', section, re.I | re.S):
+                if {"lineup__list", "is-" + side} <= _html_classes(ul.group(0)):
+                    closing = re.search(r'</ul\s*>', section[ul.end():], re.I)
+                    if closing:
+                        block = section[ul.end():ul.end()+closing.start()]
+                    break
+            if not block:
+                continue
+
+            # Ignore the non-starter bench list, even if it contains player tags.
+            tags = []
+            for li in re.finditer(r'<li\b[^>]*>.*?</li\s*>', block, re.I | re.S):
+                opening = li.group(0).split(">", 1)[0] + ">"
+                if "lineup__title" in _html_classes(opening):
+                    break
+                tags.append(li.group(0))
+            starter_block = "".join(tags)
+            state = "unknown"
+            for tag in re.finditer(r'<[a-z][^>]*>', starter_block, re.I | re.S):
+                classes = _html_classes(tag.group(0))
+                if "lineup__status" in classes:
+                    if "is-confirmed" in classes:
+                        state = "confirmed"
+                    elif "is-expected" in classes:
+                        state = "expected"
+                    break
+
+            names, positions, display_positions = [], {}, {}
+            for li in tags:
+                opening = li.split(">", 1)[0] + ">"
+                if "lineup__player" not in _html_classes(opening):
+                    continue
+                anchor = re.search(r'<a\b[^>]*>(.*?)</a\s*>', li, re.I | re.S)
+                if anchor is None:
+                    continue
+                anchor_tag = anchor.group(0).split(">", 1)[0] + ">"
+                name = _html_attribute(anchor_tag, "title")
+                if not name:
+                    name = html.unescape(re.sub(r'<[^>]+>', '', anchor.group(1)).strip())
+                if not name:
+                    continue
+                names.append(name)
+                for pos in re.finditer(
+                    r'<(?:div|span)\b[^>]*>\s*(PG|SG|SF|PF|C)\s*</(?:div|span)\s*>',
+                    li, re.I | re.S,
                 ):
-                    fragment = player_tag.group(1)
-                    slot = re.search(
-                        r'<div\b[^>]*class="[^"]*\blineup__pos\b[^"]*"[^>]*>\s*(PG|SG|SF|PF|C)\s*</div>',
-                        fragment, re.S,
-                    )
-                    name = re.search(r'<a\b[^>]*\btitle="([^"]+)"', fragment, re.S)
-                    if slot and name:
-                        label = html.unescape(name.group(1))
-                        positions[slot.group(1)] = norm_name(label)
-                        display_positions[slot.group(1)] = label
+                    pos_opening = pos.group(0).split(">", 1)[0] + ">"
+                    if "lineup__pos" in _html_classes(pos_opening):
+                        slot = pos.group(1).upper()
+                        positions[slot] = norm_name(name)
+                        display_positions[slot] = name
+                        break
+
+            if state in {"expected", "confirmed"} and len(names) == 5 and len(
+                {norm_name(name) for name in names}
+            ) == 5:
                 result[team] = {
                     "state": state,
-                    "starters": {norm_name(html.unescape(n)) for n in starter_names},
+                    "starters": {norm_name(name) for name in names},
                     "positions": positions,
                     "display_positions": display_positions,
                 }
@@ -239,28 +296,93 @@ def _parse_rotowire_lineups(raw):
 
 
 def fetch_rotowire_lineups(slate_date):
-    """Try public RotoWire mirrors without depending on one slow server.
+    """Reconcile RotoWire mirrors instead of accepting the first *expected* five.
 
-    Throw when *all* hosts fail so the UI can show an explicitly stale
-    last-known-good result, rather than silently reporting zero starters.
+    Main site takes precedence if equally confirmed. A confirmed five from any
+    date-matched mirror outranks an expected five, without inventing confirmations.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     hosts = (
+        "https://www.rotowire.com",
         "https://web7.rotowire.com",
         "https://aws-prod-web9.rotowire.com",
-        "https://www.rotowire.com",
     )
-    errors = []
-    for host in hosts:
-        url = f"{host}/basketball/nba-lineups.php?date={slate_date:%Y-%m-%d}"
-        try:
-            response = _text(url, timeout=5)
-            lineups = _parse_rotowire_lineups(response)
-            if lineups:
-                return lineups
-            errors.append(f"{host}: no parsable lineups")
-        except Exception as exc:
-            errors.append(f"{host}: {type(exc).__name__}")
-    raise ConnectionError("All starting-lineup sources unavailable (" + "; ".join(errors) + ")")
+
+    def read_host(rank, host):
+        response = _text(
+            f"{host}/basketball/nba-lineups.php?date={slate_date:%Y-%m-%d}",
+            timeout=6,
+        )
+        # A mirror can ignore ?date and serve an older page; reject it if the
+        # published header explicitly identifies a different date.
+        plain = re.sub(r'<[^>]+>', ' ', response)
+        plain = html.unescape(re.sub(r'\s+', ' ', plain))
+        date_match = re.search(r'Starting lineups for\s+([A-Za-z]+ \d{1,2}, \d{4})',
+                               plain, re.I)
+        if date_match:
+            try:
+                posted = datetime.strptime(date_match.group(1), "%B %d, %Y").date()
+            except ValueError:
+                posted = None
+            if posted and posted != slate_date:
+                raise ValueError(f"wrong slate date ({posted})")
+        parsed = _parse_rotowire_lineups(response)
+        if not parsed:
+            raise ValueError("no parsable lineups")
+        return rank, parsed
+
+    results, errors = [], []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(read_host, n, host): host
+                   for n, host in enumerate(hosts)}
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                errors.append(f"{futures[future]}: {type(exc).__name__}: {exc}")
+
+    if not results:
+        raise ConnectionError(
+            "All starting-lineup sources unavailable (" + "; ".join(errors) + ")"
+        )
+
+    merged = {}
+    for _, lineups in sorted(results, key=lambda item: item[0]):
+        for team, new in lineups.items():
+            old = merged.get(team)
+            if old is None or (old["state"] != "confirmed"
+                               and new["state"] == "confirmed"):
+                merged[team] = dict(new)
+    return merged
+
+
+def merge_lineup_updates(previous, fresh):
+    """Keep last verified team data when a mirror regresses or omits that team.
+
+    Returns (combined, stale_teams). Retained lineups are visibly stale; they
+    must never be presented as if the current fetch just confirmed them.
+    """
+    merged = {}
+    stale = []
+    for team, update in (fresh or {}).items():
+        earlier = (previous or {}).get(team)
+        if earlier and earlier.get("state") == "confirmed" and update.get("state") != "confirmed":
+            entry = dict(earlier)
+            entry["_stale"] = True
+            merged[team] = entry
+            stale.append(team)
+        else:
+            entry = dict(update)
+            entry.pop("_stale", None)
+            merged[team] = entry
+    for team, earlier in (previous or {}).items():
+        if team not in merged:
+            entry = dict(earlier)
+            entry["_stale"] = True
+            merged[team] = entry
+            stale.append(team)
+    return merged, sorted(set(stale))
 
 
 def standardized_status(raw):

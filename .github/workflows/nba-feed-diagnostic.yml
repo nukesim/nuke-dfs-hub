@@ -1,0 +1,52 @@
+name: NBA live feed diagnosis
+on:
+  push:
+    paths:
+      - ".github/workflows/nba-feed-diagnostic.yml"
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Query starting-lineup sources directly
+        run: |
+          python - <<'PY'
+          from datetime import date
+          import re
+          import urllib.request
+          from nuke_nba_data import _parse_rotowire_lineups
+          urls = [
+              "https://www.rotowire.com/basketball/nba-lineups.php?date=2026-10-28",
+              "https://web7.rotowire.com/basketball/nba-lineups.php?date=2026-10-28",
+              "https://aws-prod-web9.rotowire.com/basketball/nba-lineups.php?date=2026-10-28",
+              "https://www.rotoballer.com/todays-nba-starting-lineups-daily-basketball-starters",
+              "https://rotogrinders.com/lineups/nba",
+          ]
+          for url in urls:
+              print("URL", url, flush=True)
+              try:
+                  req = urllib.request.Request(url, headers={
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                      "Accept": "text/html,application/xhtml+xml",
+                      "Accept-Language": "en-US,en;q=0.9",
+                  })
+                  with urllib.request.urlopen(req, timeout=9) as resp:
+                      html = resp.read().decode("utf-8", "replace")
+                      print("HTTP", resp.status, "URL", resp.url, "LEN", len(html), flush=True)
+                  print("COUNTS", {"lineup_is_nba":html.count("is-nba"),"lineup__player":html.count("lineup__player"),"is-confirmed":html.count("is-confirmed"),"confirmedLineup":html.count("Confirmed Lineup"),"is-expected":html.count("is-expected")}, flush=True)
+                  if "rotowire" in url:
+                      out=_parse_rotowire_lineups(html)
+                      print("PARSED", len(out), "CONFIRMED", sorted(t for t,d in out.items() if d["state"]=="confirmed"), "EXPECTED", sorted(t for t,d in out.items() if d["state"]=="expected"), flush=True)
+                      for token in ["lineup is-nba", "is-confirmed", "lineup__team", "lineup__list"]:
+                          ix=html.find(token)
+                          print("MARKUP", token, html[max(0,ix-130):ix+320] if ix>=0 else "NOT FOUND", flush=True)
+                  else:
+                      for token in ["confirmed", "lineup", "starter"]:
+                          print("OTHER",token,html.lower().find(token),flush=True)
+              except Exception as exc:
+                  print("FAILED", type(exc).__name__, repr(str(exc))[:270], flush=True)
+          PY

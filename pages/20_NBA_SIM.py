@@ -16,7 +16,8 @@ import streamlit as st
 from nuke_nav import render_nav
 from nuke_nba_data import (
     DK_SLOTS, TEAM_NAMES, apply_live_data, fetch_espn_games, fetch_espn_injuries,
-    fetch_espn_stats, fetch_rotowire_lineups, merge_lineup_updates, norm_name, parse_slate,
+    fetch_espn_stats, fetch_rotowire_lineups, fetch_rotoballer_lineups,
+    reconcile_lineup_sources, merge_lineup_updates, norm_name, parse_slate,
 )
 from nuke_nba_engine import (
     build_portfolio, estimate_ownership, export_dk_csv, project_players,
@@ -117,14 +118,20 @@ def cached_starting_fives(slate_date, refresh_token):
 
 
 @st.cache_data(ttl=45, show_spinner=False)
+def cached_rotoballer_lineups(slate_date, refresh_token):
+    return fetch_rotoballer_lineups(slate_date)
+
+
+@st.cache_data(ttl=45, show_spinner=False)
 def live_feeds(slate_date, refresh_token):
     sources = {
         "Injuries · ESPN": lambda: cached_injuries(refresh_token),
         "Starting fives · RotoWire": lambda: cached_starting_fives(slate_date, refresh_token),
+        "Starting fives · RotoBaller": lambda: cached_rotoballer_lineups(slate_date, refresh_token),
         "Games · ESPN": lambda: cached_games(slate_date, refresh_token),
     }
     data, errors = {}, []
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {name: pool.submit(action) for name, action in sources.items()}
         for name, future in futures.items():
             try:
@@ -207,8 +214,13 @@ def starting_team_html(team, roster, lineups):
             warning_list += f" · +{len(watched)-5} more"
     else:
         warning_list = "No OUT / doubtful / questionable flags in the current feed"
-    source_note = ("Starting positions supplied by RotoWire"
+    provider = html.escape(lineup.get("source") or "RotoWire")
+    source_note = (f"Starting five supplied by {provider}"
                    if complete else "Source has not supplied a complete five by position")
+    if lineup.get("positions_estimated"):
+        source_note += " · Display positions approximate"
+    if lineup.get("projected_from") and state == "expected":
+        source_note += " · Projected from earlier game"
     if lineup.get("_stale"):
         source_note += " · Last-known data, not a fresh confirmation"
     return (
@@ -324,11 +336,14 @@ def nba_dashboard():
     lineup_key = f"nba_last_good_lineups_{slate_date:%Y%m%d}"
     saved = st.session_state.get(lineup_key, {})
     previous_lineups = saved.get("lineups", {})
-    fresh_lineups = feeds.get("Starting fives · RotoWire") or {}
+    fresh_lineups = reconcile_lineup_sources(
+        feeds.get("Starting fives · RotoWire"),
+        feeds.get("Starting fives · RotoBaller"),
+    )
     lineup_feed, stale_teams = merge_lineup_updates(previous_lineups, fresh_lineups)
     cached_lineups = not fresh_lineups and bool(previous_lineups)
     feeds = dict(feeds)
-    feeds["Starting fives · RotoWire"] = lineup_feed
+    feeds["Starting fives · Merged"] = lineup_feed
     news_events = []
     previous = st.session_state.get(f"nba_news_snapshot_{slate_date:%Y%m%d}", {})
     latest = {
@@ -388,25 +403,31 @@ def nba_dashboard():
     st.caption(f"Slate {slate_date:%b %d, %Y} · Feed refresh {last_refresh.replace('T', ' ')} UTC · Historical model base: ESPN {season_end-2}–{str(season_end-1)[-2:]} season. Starter confirmations update only when a source confirms them.")
     for warning in csv_warnings:
         st.warning(warning)
-    for err in feed_errors + history_errors:
-        if err.startswith("Starting fives"):
-            if cached_lineups:
-                st.warning(
-                    f"Lineup feed is temporarily unavailable. Showing cached lineups "
-                    f"from {lineup_asof.replace('T', ' ')} UTC, NOT live confirmations. "
-                    "Verify starters before submitting lineups."
-                )
-            else:
-                st.warning(
-                    "Starting-five feed is currently unavailable and no lineup has "
-                    "been verified for this slate. Check the external lineup link below "
-                    "or refresh later. No starting players will be invented."
-                )
+    failed_lineup_sources = [err for err in feed_errors if err.startswith("Starting fives")]
+    if failed_lineup_sources:
+        working = [name for name in ("RotoWire", "RotoBaller")
+                   if feeds.get("Starting fives · " + name)]
+        if working:
+            st.caption("Live lineup sources: " + ", ".join(working) +
+                       ". Unavailable: " + ", ".join(
+                           "RotoWire" if "RotoWire" in err else "RotoBaller"
+                           for err in failed_lineup_sources) +
+                       ". Verified confirmations from the working source remain usable.")
+        elif cached_lineups:
+            stamp = (lineup_asof or "unknown").replace("T", " ")
+            st.warning("Both lineup sources unavailable. Showing cached starters from " +
+                       stamp + " UTC; these are NOT fresh confirmations.")
         else:
+            st.warning("Both starting-five sources unavailable. Verify official starters "
+                       "before entering lineups; no confirmations will be invented.")
+    for err in feed_errors + history_errors:
+        if not err.startswith("Starting fives"):
             st.error(f"Feed unavailable — {err}. Check player status before entering.")
     if stale_teams and not cached_lineups:
-        st.warning("⚠ LINEUP FEED DISAGREEMENT OR PARTIAL UPDATE — showing last-known "
-                   "starters for " + ", ".join(stale_teams) +
+        shown_stale = sorted(set(stale_teams) & {p["team"] for p in slate})
+        if shown_stale:
+            st.warning("⚠ LINEUP FEED DISAGREEMENT OR PARTIAL UPDATE — showing last-known "
+                   "starters for " + ", ".join(shown_stale) +
                    ". These teams are marked CACHED; verify before lock.")
     for warning in {p.get("minutes_warning") for p in modeled if p.get("minutes_warning")}:
         st.warning(warning)
@@ -430,7 +451,7 @@ def nba_dashboard():
         "☢ GPP SIM", "📈 PORTFOLIO + EXPORT", "🔁 LATE SWAP"
     ])
     with starters_tab:
-        lineup_feed = feeds.get("Starting fives · RotoWire") or {}
+        lineup_feed = feeds.get("Starting fives · Merged") or {}
         teams = sorted({p["team"] for p in modeled})
         confirmed_teams = sum(lineup_feed.get(t, {}).get("state") == "confirmed"
                               and len(lineup_feed.get(t, {}).get("positions", {})) == 5 for t in teams)
@@ -450,7 +471,7 @@ def nba_dashboard():
                      else f"Last feed check {last_refresh.replace('T', ' ')} UTC")
         if stale_teams and not cached_lineups:
             freshness += " · Some teams showing cached data: " + ", ".join(stale_teams)
-        st.caption("Source: RotoWire reported/expected fives. Minutes are NUKE projections. "
+        st.caption("Sources: RotoBaller live lineup feed + RotoWire when available. Minutes are NUKE projections. "
                    f"{freshness} · Refresh in sidebar or wait about one minute.")
         st.link_button(
             "↗ Check starting lineups on RotoBaller",

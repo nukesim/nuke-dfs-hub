@@ -9,6 +9,8 @@ on:
       - "data/pga_current.csv"
       - "requirements.txt"
       - "tests/test_pga_portfolio.py"
+      - "tests/test_pga_mexico_tee_times.py"
+      - "data/pga_mexico_2026_pairings.psv"
       - ".github/workflows/pga-smoke-test.yml"
   pull_request:
     paths:
@@ -30,4 +32,6 @@ jobs:
       - name: Compile PGA page and portfolio engine
         run: python -m py_compile pages/15_PGA_SIM.py nuke_pga_portfolio.py
       - name: Verify complete PGA portfolios and exposure constraints
-        run: python -m unittest discover -s tests -p test_pga_portfolio.py -v
+        run: |
+          python -m unittest discover -s tests -p test_pga_portfolio.py -v
+          python -m unittest discover -s tests -p test_pga_mexico_tee_times.py -v

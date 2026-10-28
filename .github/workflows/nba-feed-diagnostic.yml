@@ -50,6 +50,10 @@ jobs:
                               obj=json.loads(html)
                               print("API type",type(obj).__name__,"keys",list(obj)[:20] if isinstance(obj,dict) else "list", "size",len(obj),flush=True)
                               print("API start",repr(str(obj)[:1800]),flush=True)
+                              from nuke_nba_data import fetch_rotoballer_lineups
+                              from datetime import date
+                              parsed = fetch_rotoballer_lineups(date(2026,10,28))
+                              print("LIVE_PARSED",len(parsed),"CONFIRMED",sorted((t, d.get("source")) for t,d in parsed.items() if d["state"]=="confirmed"),"EXPECTED",sum(d["state"]=="expected" for d in parsed.values()),flush=True)
                           except Exception as e: print("API parse error",type(e).__name__,flush=True)
                       from html import unescape
                       if "rotogrinders" in url:

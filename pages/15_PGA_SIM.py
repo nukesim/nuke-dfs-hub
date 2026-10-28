@@ -405,8 +405,17 @@ def attach_tee_weather(d,ctx,weather):
                 parsed.append((rnd,dt))
             except Exception: pass
         if parsed:
-            hr=parsed[0][1].hour
-            x.at[i,"Wave"]="AM" if hr<12 else "PM"
+            # The official Mexico/Bermuda afternoon wave can start *before* noon.
+            # Compare the R1 and R2 swapped slots when both are published; using
+            # clock-noon alone incorrectly marks 11:45 AM afternoon groups as AM.
+            r1=next((dt for rnd,dt in parsed if rnd==1),parsed[0][1])
+            r2=next((dt for rnd,dt in parsed if rnd==2),None)
+            r1_mins=r1.hour*60+r1.minute
+            r2_mins=(r2.hour*60+r2.minute) if r2 is not None else None
+            if r2_mins is not None and abs(r1_mins-r2_mins)>=120:
+                x.at[i,"Wave"]="AM" if r1_mins<r2_mins else "PM"
+            else:
+                x.at[i,"Wave"]="AM" if r1_mins<12*60 else "PM"
             sevs=[]
             for _,dt in parsed:
                 if not weather.empty:

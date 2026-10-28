@@ -20,9 +20,6 @@ jobs:
           import urllib.request
           from nuke_nba_data import _parse_rotowire_lineups
           urls = [
-              "https://www.rotowire.com/basketball/nba-lineups.php?date=2026-10-28",
-              "https://web7.rotowire.com/basketball/nba-lineups.php?date=2026-10-28",
-              "https://aws-prod-web9.rotowire.com/basketball/nba-lineups.php?date=2026-10-28",
               "https://www.rotoballer.com/todays-nba-starting-lineups-daily-basketball-starters",
               "https://rotogrinders.com/lineups/nba",
           ]
@@ -47,6 +44,12 @@ jobs:
                   else:
                       import re
                       from html import unescape
+                      for pattern in [r'window\\.rbNba', r'rbNbaLineups', r'wp-json', r'"date":"', r'"games":', r'"card":', r'class="lineup-card-body']:
+                          matches=list(re.finditer(pattern, html, re.I))
+                          print("STRUCT",pattern,len(matches),flush=True)
+                          if matches:
+                              m=matches[-1]
+                              print("STRUCTCTX",html[max(0,m.start()-1100):m.start()+800].replace("\\n"," ")[:1900],flush=True)
                       for term in ["CJ McCollum", "McCollum", "Atlanta Hawks", "MIA", "ATL", "lineup not released", "lineup confirmed", "lineup status", "confirmed"]:
                           match = list(re.finditer(re.escape(term), html, re.I))
                           print("SNIPPET",term,"MATCHES",len(match),flush=True)

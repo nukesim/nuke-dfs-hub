@@ -16,7 +16,7 @@ import streamlit as st
 from nuke_nav import render_nav
 from nuke_nba_data import (
     DK_SLOTS, TEAM_NAMES, apply_live_data, fetch_espn_games, fetch_espn_injuries,
-    fetch_espn_stats, fetch_rotowire_lineups, norm_name, parse_slate,
+    fetch_espn_stats, fetch_rotowire_lineups, merge_lineup_updates, norm_name, parse_slate,
 )
 from nuke_nba_engine import (
     build_portfolio, estimate_ownership, export_dk_csv, project_players,
@@ -166,8 +166,13 @@ def starting_team_html(team, roster, lineups):
         status_label, status_class = "● EXPECTED", ""
     elif lineup.get("starters"):
         status_label, status_class = "● POSITIONS PENDING", "pending"
+
     else:
         status_label, status_class = "● LINEUP PENDING", "pending"
+
+    if lineup.get("_stale"):
+        status_label = status_label + " · CACHED"
+        status_class = "pending"
 
     rows = []
     for slot in STARTING_POSITIONS:
@@ -204,6 +209,8 @@ def starting_team_html(team, roster, lineups):
         warning_list = "No OUT / doubtful / questionable flags in the current feed"
     source_note = ("Starting positions supplied by RotoWire"
                    if complete else "Source has not supplied a complete five by position")
+    if lineup.get("_stale"):
+        source_note += " · Last-known data, not a fresh confirmation"
     return (
         '<div class="nba-start-team">'
         '<div class="nba-start-teamhead">'
@@ -311,39 +318,41 @@ def nba_dashboard():
     except Exception as exc:
         current = {}
         history_errors.append(f"Current ESPN stats: {exc}")
-    # A temporary source outage must not erase a previously verified lineup.
-    # Cache is scoped to the exact DK slate date, never reused across days.
+    # Preserve team-specific verified news when one mirror is stale or only
+    # partially updated. A previously confirmed five must not regress to
+    # "expected" on a later fetch without an explicit new confirmation.
     lineup_key = f"nba_last_good_lineups_{slate_date:%Y%m%d}"
+    saved = st.session_state.get(lineup_key, {})
+    previous_lineups = saved.get("lineups", {})
     fresh_lineups = feeds.get("Starting fives · RotoWire") or {}
-    cached_lineups = False
+    lineup_feed, stale_teams = merge_lineup_updates(previous_lineups, fresh_lineups)
+    cached_lineups = not fresh_lineups and bool(previous_lineups)
+    feeds = dict(feeds)
+    feeds["Starting fives · RotoWire"] = lineup_feed
     news_events = []
+    previous = st.session_state.get(f"nba_news_snapshot_{slate_date:%Y%m%d}", {})
+    latest = {
+        team: (data.get("state", "unknown"), tuple(sorted(data.get("starters", set()))))
+        for team, data in lineup_feed.items()
+    }
+    for team, (state, names) in latest.items():
+        if team in stale_teams:
+            continue  # Last-known news is not a new event.
+        if team in previous and previous[team] != (state, names):
+            if state == "confirmed" and previous[team][0] != "confirmed":
+                news_events.append(f"{team}: STARTING FIVE CONFIRMED")
+            elif state == "confirmed" and previous[team][1] != names:
+                news_events.append(f"{team}: CONFIRMED STARTERS CHANGED")
+            elif state == "expected" and previous[team][1] != names:
+                news_events.append(f"{team}: EXPECTED FIVE UPDATED")
     if fresh_lineups:
-        # Record real status transitions only when the provider returned data.
-        # Never fabricate a "confirmed" event from a previous cached response.
-        previous = st.session_state.get(f"nba_news_snapshot_{slate_date:%Y%m%d}", {})
-        latest = {
-            team: (data.get("state", "unknown"), tuple(sorted(data.get("starters", set()))))
-            for team, data in fresh_lineups.items()
-        }
-        for team, (state, names) in latest.items():
-            if team in previous and previous[team] != (state, names):
-                if state == "confirmed" and previous[team][0] != "confirmed":
-                    news_events.append(f"{team}: STARTING FIVE CONFIRMED")
-                elif state == "confirmed" and previous[team][1] != names:
-                    news_events.append(f"{team}: CONFIRMED STARTERS CHANGED")
-                elif state == "expected" and previous[team][1] != names:
-                    news_events.append(f"{team}: EXPECTED FIVE UPDATED")
         st.session_state[f"nba_news_snapshot_{slate_date:%Y%m%d}"] = latest
-        st.session_state[lineup_key] = {"lineups": fresh_lineups, "checked": last_refresh}
-    elif lineup_key in st.session_state:
-        feeds = dict(feeds)
-        feeds["Starting fives · RotoWire"] = st.session_state[lineup_key]["lineups"]
-        cached_lineups = True
-    lineup_asof = (st.session_state[lineup_key]["checked"]
-                   if lineup_key in st.session_state else None)
+        st.session_state[lineup_key] = {"lineups": lineup_feed, "checked": last_refresh}
+    lineup_asof = (st.session_state.get(lineup_key, {}).get("checked"))
+
     players = apply_live_data(slate, prior, current,
                               feeds.get("Injuries · ESPN"),
-                              feeds.get("Starting fives · RotoWire"),
+                              lineup_feed,
                               feeds.get("Games · ESPN"))
     overrides = st.session_state.nba_minutes_overrides
     statuses = st.session_state.nba_status_overrides
@@ -395,6 +404,10 @@ def nba_dashboard():
                 )
         else:
             st.error(f"Feed unavailable — {err}. Check player status before entering.")
+    if stale_teams and not cached_lineups:
+        st.warning("⚠ LINEUP FEED DISAGREEMENT OR PARTIAL UPDATE — showing last-known "
+                   "starters for " + ", ".join(stale_teams) +
+                   ". These teams are marked CACHED; verify before lock.")
     for warning in {p.get("minutes_warning") for p in modeled if p.get("minutes_warning")}:
         st.warning(warning)
     conflicts = [p["name"] for p in modeled if p.get("confirmed_injury_conflict")]
@@ -435,6 +448,8 @@ def nba_dashboard():
         freshness = (f"Cached as of {lineup_asof.replace('T', ' ')} UTC — NOT LIVE"
                      if cached_lineups and lineup_asof
                      else f"Last feed check {last_refresh.replace('T', ' ')} UTC")
+        if stale_teams and not cached_lineups:
+            freshness += " · Some teams showing cached data: " + ", ".join(stale_teams)
         st.caption("Source: RotoWire reported/expected fives. Minutes are NUKE projections. "
                    f"{freshness} · Refresh in sidebar or wait about one minute.")
         st.link_button(

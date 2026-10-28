@@ -45,6 +45,13 @@ jobs:
                           ix=html.find(token)
                           print("MARKUP", token, html[max(0,ix-130):ix+320] if ix>=0 else "NOT FOUND", flush=True)
                   else:
+                      import re
+                      from html import unescape
+                      for term in ["CJ McCollum", "McCollum", "Atlanta Hawks", "MIA", "ATL", "lineup not released", "lineup confirmed", "lineup status", "confirmed"]:
+                          match = list(re.finditer(re.escape(term), html, re.I))
+                          print("SNIPPET",term,"MATCHES",len(match),flush=True)
+                          for m in (match[:2] + match[-2:] if len(match)>3 else match):
+                              print("CTX",html[max(0,m.start()-350):min(len(html),m.end()+480)].replace("\\n"," ")[:950],flush=True)
                       for token in ["confirmed", "lineup", "starter"]:
                           print("OTHER",token,html.lower().find(token),flush=True)
               except Exception as exc:

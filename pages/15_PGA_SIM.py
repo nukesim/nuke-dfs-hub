@@ -218,6 +218,15 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
+    if "vidantaworldmexicoopen" in wanted:
+        # Keep the new slate anchored to its own venue. Do not assign a
+        # similarly named ESPN event's tee sheet to this tournament.
+        # Tee times remain TBD until verified against published R1/R2 groups.
+        return {"event_id":None,"event_name":event_name,
+            "course":"Vidanta Vallarta","location":"Nuevo Nayarit, Mexico",
+            "lat":None,"lon":None,"timezone":"America/Bahia_Banderas",
+            "timezone_label":"CST","has_cut":True,
+            "tee_times":{},"status":"Tee times awaiting verification"}
     if "butterfieldbermuda" in wanted and datetime.now().year == 2026:
         # Use the verified 2026 sheet only during its actual tournament year.
         return _bermuda_2026_context()

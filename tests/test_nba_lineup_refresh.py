@@ -1,12 +1,15 @@
 """Regression tests for NBA confirmed-starter feed updates and cache safety."""
 
+import io
+import json
 import unittest
 from datetime import date
 from unittest.mock import patch
 
 from nuke_nba_data import (
     _parse_rotowire_lineups, apply_live_data, fetch_rotowire_lineups,
-    merge_lineup_updates, norm_name,
+    merge_lineup_updates, norm_name, fetch_rotoballer_lineups,
+    reconcile_lineup_sources,
 )
 
 
@@ -87,6 +90,49 @@ class ConfirmedStarterRefreshTests(unittest.TestCase):
         self.assertEqual(merged2["ATL"]["starters"], updated["starters"])
         self.assertNotIn("_stale", merged2["ATL"])
         self.assertEqual(stale2, ["BOS"])
+
+    def test_rotoballer_explicit_confirmed_five_overrides_projected_roto_wire(self):
+        names = ("Starter Alpha", "Starter Bravo", "Starter Charlie",
+                 "Starter Delta", "Starter Echo")
+        def card(status, names):
+            return {
+                "status": status,
+                "postedAt": 1793226606 if status == "confirmed" else None,
+                "source": {"url": "https://example.org/team-lineup"} if status == "confirmed" else {},
+                "starters": [{"name": name, "pos": slot}
+                             for name, slot in zip(names, SLOTS)],
+            }
+        payload = {
+            "date": "2026-10-28", "games": [{
+                "away": {"team": "MIA", "card": card("confirmed", names)},
+                "home": {"team": "ATL", "card": card("projected", names)},
+            }],
+        }
+        with patch("nuke_nba_data.urlopen",
+                   return_value=io.BytesIO(json.dumps(payload).encode())):
+            feed = fetch_rotoballer_lineups(date(2026, 10, 28))
+        self.assertEqual(feed["MIA"]["state"], "confirmed")
+        self.assertEqual(feed["ATL"]["state"], "expected")
+        self.assertEqual(feed["MIA"]["source"], "RotoBaller")
+        self.assertEqual(len(feed["MIA"]["positions"]), 5)
+        old = {"MIA": {"state": "expected", "starters": {"oldstarter"}}}
+        merged = reconcile_lineup_sources(old, feed)
+        self.assertEqual(merged["MIA"]["state"], "confirmed")
+        self.assertNotIn("oldstarter", merged["MIA"]["starters"])
+
+    def test_unverified_rotoballer_confirmed_card_is_rejected(self):
+        names = ("A", "B", "C", "D", "E")
+        card = {"status": "confirmed",
+                "starters": [{"name": n, "pos": pos} for n, pos in zip(names, SLOTS)]}
+        payload = {"date": "2026-10-28",
+                   "games": [{"away": {"team": "ATL", "card": card},
+                              "home": {"team": "MIA", "card": {
+                                  "status": "projected", "starters": card["starters"]}}}]}
+        with patch("nuke_nba_data.urlopen",
+                   return_value=io.BytesIO(json.dumps(payload).encode())):
+            data = fetch_rotoballer_lineups(date(2026, 10, 28))
+        self.assertNotIn("ATL", data)
+        self.assertEqual(data["MIA"]["state"], "expected")
 
     def test_extra_classes_and_single_quotes_parse_correctly(self):
         markup = lineup_page(loose=True, state="confirmed")

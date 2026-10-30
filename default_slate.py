@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-SLATE_LABEL = "2026 Week 7 Sunday Main · 2026-10-25 · Updated 2026-10-24"
+SLATE_LABEL = "2026 Week 8 Sunday Main · 2026-11-01 · Updated 2026-10-30"
 
 def load_default_slate():
     """Load the current DraftKings NFL salary CSV."""
@@ -14,3 +14,4 @@ def load_default_slate():
     if missing or slate.empty:
         raise ValueError(f"Invalid NFL slate: missing={sorted(missing)}")
     return slate
+

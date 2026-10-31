@@ -95,13 +95,22 @@ def _valid_lineup(indices,p,min_salary,max_salary=None,site="DK",no_offense_vs_d
             if ((r.Game.eq(dr.Game)) & (~r.Team.eq(dr.Team)) & r.Position.ne("DST")).any():return False
     q=r[r.Position.eq("QB")]; return not("auto_qb_eligible" in q.columns and not bool(q.iloc[0].auto_qb_eligible))
 
-def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None,locked_indices=None,no_offense_vs_dst=True):
+def generate_lineups(players,n_lineups=600,min_salary=None,seed=26,site="DK",flex_position=None,locked_indices=None,no_offense_vs_dst=True,lineup_rules=None):
     """Candidate Engine V3: salary-aware tournament construction.
 
     Builds the first eight roster spots under the existing stack/profile rules, then solves
     the final FLEX directly inside the legal salary window instead of repeatedly creating
     full lineups that must be rejected afterward.
     """
+    from nuke_rules import active_rules, generate_rule_candidates
+    if active_rules(lineup_rules):
+        minimum = int(get_platform(site).default_min_salary if min_salary is None else min_salary)
+        return generate_rule_candidates(
+            players, lineup_rules, n_lineups, minimum, seed, site, flex_position,
+            locked_indices or [],
+            baseline=lambda: generate_lineups(players, n_lineups, minimum, seed, site,
+                                               flex_position, locked_indices, no_offense_vs_dst),
+        )
     # Hard rule: offense vs opposing defense is never allowed on DK or FD.
     # Keep the argument for backward compatibility, but do not allow callers to disable the rule.
     no_offense_vs_dst=True
@@ -365,3 +374,4 @@ def position_exposure_table(players,results,top_n=None):
 def flex_exposure_table(players,results,top_n=None):
     if results is None or results.empty:return pd.DataFrame()
     x=results.head(min(int(top_n),len(results))) if top_n else results; vc=x["FLEX Pos"].value_counts(); return pd.DataFrame({"FLEX Position":vc.index,"Lineups":vc.values,"Exposure %":np.round(100*vc.values/len(x),1)})
+

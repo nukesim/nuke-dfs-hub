@@ -65,3 +65,20 @@ conservative fallback. Missing ESPN history is labeled as a DK-average fallback.
 Ownership and simulated field-beat percentages are heuristic research estimates,
 not real DraftKings contest ownership or calibrated winning probabilities. The
 CSV export does not implement locked-player late swaps on already-entered lineups.
+
+## NFL Strategy Studio
+
+Open **NFL Sim → Strategy Studio** next to Player Pool. Rules use the active pool and each platform keeps a separate rulebook.
+
+1. Start with **QB + receiver**, **QB + bring-back**, or **Limit a combination**, or create a custom rule.
+2. Choose an optional anchor and check the other players in the group. Search the whole slate to make cross-game groups. The anchor is separate from the group's counts.
+3. Set minimum / maximum group players. **Every** means 100%; **Most** means at least 75%; **Custom** lets you choose another minimum percentage. The preview spells out the rule before saving.
+4. Run NUKE SIM to create compatible candidates, or **Apply rulebook to portfolio** to select from an existing run using sidebar size/caps and saved Player Takes. Rebuilding through Portfolio Manager also enforces the rulebook.
+5. Review **Portfolio check** for triggered-lineup counts, matching counts, required counts and actual percentages. Conditional rules never force anchor exposure: use Player Takes minimums for that. No anchor lineups is labeled **Not used**.
+
+The Game map shows saved rule relationships. After selection, bubble size grows with measured portfolio exposure; it is not projected ownership or an estimated correlation coefficient. Drafts and active rules are not recommendations to play particular players.
+
+Every rules constrain individual candidates. Percentage rules constrain the selected portfolio, with counts rounded upward (75% of three requires three). Exact selection honors player/QB/team/game caps, player minimums and maximum overlap. Infeasible or timed-out selections produce an explanation instead of substituting a noncompliant portfolio. Constrained candidate construction has a 45-second supplement budget and may return a smaller candidate pool; this is reported. Portfolio exports are verified; ranked candidate exports are explicitly labeled as research views that may not satisfy the rulebook.
+
+Workspace saves preserve rulebooks. Rules use official player IDs so reordering cannot retarget them. On a new slate, review, edit or pause rules with unavailable anchors or insufficient active group members. Healthy-player status and all news/projection limitations elsewhere in the app still apply.
+

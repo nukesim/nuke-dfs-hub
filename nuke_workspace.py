@@ -16,7 +16,7 @@ CONTROL_KEYS = [
 
 STATE_KEYS = [
     "nuke_pregame_pool", "nuke_player_takes", "nuke_pool_editor_version",
-    "nuke_sim_hub_signature",
+    "nuke_sim_hub_signature", "nuke_lineup_rules_DK", "nuke_lineup_rules_FD",
 ]
 
 # A saved workspace is a true snapshot. If the user has already run NUKE SIM, these
@@ -165,6 +165,12 @@ def apply_workspace(session_state, workspace):
         session_state["nuke_sim_active_site"] = restored_site
 
     state = workspace.get("state", {}) or {}
+    # Old workspaces must not inherit a different session's rulebook or editor draft.
+    for site in ("DK", "FD"):
+        session_state[f"nuke_lineup_rules_{site}"] = []
+    for key in list(session_state):
+        if key.startswith("nr_"):
+            session_state.pop(key, None)
     for key, value in state.items():
         if key not in STATE_KEYS:
             continue
@@ -189,3 +195,4 @@ def apply_workspace(session_state, workspace):
         # completed run outputs. Old files still load their controls/pool normally.
         for key in RESULT_KEYS:
             session_state.pop(key, None)
+

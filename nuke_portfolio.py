@@ -31,7 +31,7 @@ def _lineup_team_game_sets(players,lineup_ids):
     return teams,games
 
 
-def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leverage_weight=0.0,max_player_exposure=0.45,max_qb_exposure=0.30,player_preferences=None,players=None,max_team_exposure=1.0,max_game_exposure=1.0):
+def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leverage_weight=0.0,max_player_exposure=0.45,max_qb_exposure=0.30,player_preferences=None,players=None,max_team_exposure=1.0,max_game_exposure=1.0,lineup_rules=None):
     """Portfolio Intelligence V7: select lineups as a portfolio of tournament bets.
 
     V7 preserves V6 exposure/overlap/core controls while adding scenario coverage,
@@ -40,11 +40,19 @@ def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leve
     the next highest individually ranked lineup.
     """
     if contest_results is None or contest_results.empty: return pd.DataFrame()
+    from nuke_rules import active_rules, compile_rules, RuleError, select_rule_portfolio, rule_report
+    rules = active_rules(lineup_rules)
+    if rules:
+        if players is None or players.empty:
+            raise RuleError("The saved player table is required to apply lineup rules.")
+        compile_rules(players, rules)
+        if len(contest_results) < int(size):
+            raise RuleError("Not enough candidates for this portfolio size. Generate more candidates or reduce the size.")
     x=contest_results.reset_index(drop=True).copy(); n=len(x); size=max(1,min(int(size),n)); max_overlap=int(np.clip(max_overlap,0,8))
     max_player_exposure=float(np.clip(max_player_exposure,.01,1)); max_qb_exposure=float(np.clip(max_qb_exposure,.01,1)); max_team_exposure=float(np.clip(max_team_exposure,.01,1)); max_game_exposure=float(np.clip(max_game_exposure,.01,1))
     gp=max(1,int(np.floor(size*max_player_exposure+1e-9))); qmax=max(1,int(np.floor(size*max_qb_exposure+1e-9))); tmax=max(1,int(np.floor(size*max_team_exposure+1e-9))); gmax=max(1,int(np.floor(size*max_game_exposure+1e-9)))
     prefs=_normalize_player_preferences(player_preferences,size,max_player_exposure)
-    def num(c,d=0): return pd.to_numeric(x.get(c,d),errors="coerce").fillna(d).to_numpy(float)
+    def num(c,d=0): return pd.to_numeric(x.get(c,pd.Series(d,index=x.index)),errors="coerce").fillna(d).to_numpy(float)
     roi=num("Sim ROI %"); first=num("1st %"); top01=num("Top 0.1%"); top1=num("Top 1%"); ceil=num("Ceiling 95"); nuke=num("NUKE Score"); pathscore=num("Path Score",50); dup=num("Expected Duplicates",0); fieldpop=num("Field Popularity",0)
     base=.72*_z(roi)+.95*_z(first)+.78*_z(top01)+.42*_z(top1)+.58*_z(ceil)+.28*_z(nuke)+.15*_z(pathscore)
     # Protect truly elite tournament lineups from being diversified away.
@@ -128,6 +136,20 @@ def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leve
         for g in lineup_games[bi]: gamec[g]=gamec.get(g,0)+1
         for c in pairs[bi]: pairc[c]=pairc.get(c,0)+1
         for c in triples[bi]: triplec[c]=triplec.get(c,0)+1
+    if rules:
+        selected = select_rule_portfolio(
+            x, players, rules, size, base + pref_adj, selected, max_overlap,
+            max_player_exposure, max_qb_exposure, max_team_exposure,
+            max_game_exposure, prefs, path_balance,
+        )
+        # Recompute metadata from the verified selection, not the preliminary V7 picks.
+        pc[:] = 0; pairc = {}; triplec = {}; scenec = {}
+        for i in selected:
+            reasons[i] = "Rules verified | " + reasons.get(i, "V7-guided constrained selection")
+            for pid in ids[i]: pc[pid] += 1
+            for c in pairs[i]: pairc[c] = pairc.get(c, 0) + 1
+            for c in triples[i]: triplec[c] = triplec.get(c, 0) + 1
+            scenec[scenario[i]] = scenec.get(scenario[i], 0) + 1
     out=x.iloc[selected].copy().reset_index(drop=True)
     if not out.empty:
         out.insert(0,"Portfolio Slot",np.arange(1,len(out)+1)); out["Portfolio Reason"]=[reasons[i] for i in selected]; out["Portfolio Scenario"]=[scenario[i] for i in selected]
@@ -137,6 +159,9 @@ def build_portfolio(contest_results,size=20,max_overlap=7,path_balance=1.25,leve
         actual=int(pc[pid]) if 0<=pid<=maxpid else 0
         if actual<p["min_count"]: unmet[pid]={"requested":p["min_count"],"actual":actual}
     out.attrs["unmet_minimums"]=unmet
+    if rules:
+        out.attrs["rule_report"] = rule_report(players, out["_indices"], rules).to_dict("records")
+        out.attrs["rules_verified"] = True
     return out
 
 
@@ -194,3 +219,4 @@ def portfolio_health(players,portfolio):
     if not game_df.empty and float(game_df.iloc[0]["Exposure %"])>=55: flags.append(f"Game concentration: {game_df.iloc[0]['Game']} appears in {game_df.iloc[0]['Exposure %']:.1f}% of lineups.")
     if not cdf.empty and float(cdf.iloc[0]["Exposure %"])>=25: flags.append(f"Core concentration: {cdf.iloc[0]['3-Player Core']} appears together in {cdf.iloc[0]['Exposure %']:.1f}% of lineups.")
     return {"flags":flags,"top_core":cdf,"core_count":len(core)}
+

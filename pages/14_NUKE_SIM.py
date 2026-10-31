@@ -22,6 +22,8 @@ from fanduel_slate import load_fanduel_slate, has_fanduel_slate, FD_SLATE_LABEL
 from nuke_availability import availability_status
 from fd_export import lineup_to_fd_slots, ANALYSIS_ROSTER_HEADERS, build_fd_lineup_only_csv
 from nuke_workspace import workspace_bytes, load_workspace_bytes, apply_workspace, invalidate_sim_results
+from nuke_rules import RuleError, active_rules, compile_rules, rule_report
+from nuke_rules_ui import render_strategy_studio
 
 @st.fragment
 def render_player_takes_fragment(sim_players, portfolio, contest_results, portfolio_stats, manage_size, manage_overlap, manage_player, manage_qb, manage_path, manage_team, manage_game):
@@ -60,8 +62,13 @@ def render_player_takes_fragment(sim_players, portfolio, contest_results, portfo
         if invalid:
             st.error("Min % cannot be greater than Max % for: "+", ".join(invalid))
             st.stop()
-        new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences,players=sim_players,max_team_exposure=float(manage_team)/100.0,max_game_exposure=float(manage_game)/100.0)
+        try:
+            new_portfolio=build_portfolio(contest_results,size=int(manage_size),max_overlap=int(manage_overlap),path_balance=float(manage_path),max_player_exposure=float(manage_player)/100.0,max_qb_exposure=float(manage_qb)/100.0,player_preferences=preferences,players=sim_players,max_team_exposure=float(manage_team)/100.0,max_game_exposure=float(manage_game)/100.0,lineup_rules=st.session_state.get(f"nuke_lineup_rules_{site}",[]))
+        except RuleError as exc:
+            st.error(str(exc))
+            st.stop()
         new_paths,new_stats=portfolio_summary(new_portfolio)
+        st.session_state.pop(f"nr_notice_{site}",None)
         st.session_state["nuke_player_takes"]=preferences
         st.session_state["nuke_portfolio"]=new_portfolio
         st.session_state["nuke_portfolio_paths"]=new_paths
@@ -241,239 +248,241 @@ editor_version=int(st.session_state.get("nuke_pool_editor_version",0))
 updated_state=dict(pool_state)
 needs_rerun=False
 
-game_values=players.Game.drop_duplicates().tolist()
-game_labels={}
-for game in game_values:
-    gp0=players[players.Game.eq(game)]
-    teams0=list(dict.fromkeys(gp0.Team.astype(str).tolist()))
-    game_labels[game]=" vs ".join(teams0[:2]) if len(teams0)>=2 else str(game)
-
-pool_game_tab,pool_current_tab=st.tabs(["🏈 Game-by-Game","👥 Current Player Pool"])
-with pool_game_tab:
-    selected_game=st.selectbox(
-        "Open game",game_values,
-        format_func=lambda g: f"🏈 {game_labels.get(g,str(g))}",
-        key="nuke_active_pool_game",
-        help="Only the selected game is rendered. This keeps the SIM page fast even on large slates."
-    ) if game_values else None
-
-    if selected_game is not None:
-        game=selected_game
-        gp=players[players.Game.eq(game)].copy()
-        teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
-        label=game_labels.get(game,str(game))
-        ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
-        st.markdown(f"### 🏈 {label}")
-        if not ge.empty:
-            env_cols=["Team","Opponent","Spread","Team Total","Team Total Rank","Game Total","Game Total Rank","Books","Source"]
-            env_show=ge[[c for c in env_cols if c in ge.columns]]
-            st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
-            book_rows=ge[ge["Source"].eq("Sportsbook Consensus")] if "Source" in ge.columns else pd.DataFrame()
-            if not book_rows.empty:
-                last_update=str(book_rows.iloc[0].get("Last Update",""))
-                st.caption(f"Consensus across {int(book_rows['Books'].max()) if 'Books' in book_rows.columns else 0} US sportsbooks · Last odds snapshot: {last_update}")
-                movement=movement_for_game(odds_history,teams)
-                if not movement.empty:
-                    with st.expander("📈 Odds movement this week",expanded=False):
-                        chart_cols=[c for c in ["Game Total",f"{teams[0]} Team Total",f"{teams[1]} Team Total"] if c in movement.columns]
-                        if chart_cols:
-                            chart_df=movement[["Timestamp"]+chart_cols].copy().set_index("Timestamp")
-                            st.line_chart(chart_df,use_container_width=True)
-                        first,last=movement.iloc[0],movement.iloc[-1]
-                        m1,m2,m3=st.columns(3)
-                        gt0=float(first.get("Game Total",0)); gt1=float(last.get("Game Total",0))
-                        a_col=f"{teams[0]} Team Total"; b_col=f"{teams[1]} Team Total"
-                        a0=float(first.get(a_col,0)); a1=float(last.get(a_col,0)); b0=float(first.get(b_col,0)); b1=float(last.get(b_col,0))
-                        m1.metric("Game Total",f"{gt1:.1f}",delta=f"{gt1-gt0:+.1f} vs first snapshot")
-                        m2.metric(f"{teams[0]} Team Total",f"{a1:.1f}",delta=f"{a1-a0:+.1f}")
-                        m3.metric(f"{teams[1]} Team Total",f"{b1:.1f}",delta=f"{b1-b0:+.1f}")
-                        spread_cols=[c for c in [f"{teams[0]} Spread",f"{teams[1]} Spread"] if c in movement.columns]
-                        if spread_cols:
-                            st.caption("Spread movement")
-                            st.line_chart(movement[["Timestamp"]+spread_cols].set_index("Timestamp"),use_container_width=True)
-        st.caption("Only this game's controls are loaded. Make as many changes as you want, then click Apply changes once.")
-        with st.form(key=f"pool_form_{str(game)}_{editor_version}",clear_on_submit=False):
-            st.markdown("**Game Action**")
-            game_action=st.selectbox("Game bulk action",["No bulk change","✅ Include entire game","🚫 Exclude entire game"],key=f"game_bulk_{str(game)}_{editor_version}",label_visibility="collapsed")
-            visible_teams=teams[:2]
-            team_cols=st.columns(len(visible_teams),gap="medium") if visible_teams else [st.container()]
-            pending_by_team={}
-            team_actions={}
-            for team_col,team in zip(team_cols,visible_teams):
-                tp=gp[gp.Team.eq(team)].copy()
-                pos_order={"QB":0,"RB":1,"WR":2,"TE":3,"DST":4}
-                tp["_pos_order"]=tp.Position.map(pos_order).fillna(9)
-                tp=tp.sort_values(["_pos_order","Salary"],ascending=[True,False])
-                trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
-                with team_col:
-                    with st.container(border=True):
-                        if trow is not None:
-                            team_total=float(trow['Team Total'])
-                            team_rank=int(trow['Team Total Rank'])
-                            rank_badge="🏆" if team_rank<=3 else ""
-                            st.markdown(
-                                f"""<div style='display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-bottom:.25rem'>
-                                <span style='font-size:1.55rem;font-weight:800;letter-spacing:.01em'>{team}</span>
-                                <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>TEAM TOTAL {team_total:.1f}</span>
-                                <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>{rank_badge} SLATE RANK #{team_rank}</span>
-                                </div>""",
-                                unsafe_allow_html=True,
+pool_workspace,strategy_workspace=st.tabs(["👥 Player Pool","🧠 Strategy Studio"])
+with pool_workspace:
+    game_values=players.Game.drop_duplicates().tolist()
+    game_labels={}
+    for game in game_values:
+        gp0=players[players.Game.eq(game)]
+        teams0=list(dict.fromkeys(gp0.Team.astype(str).tolist()))
+        game_labels[game]=" vs ".join(teams0[:2]) if len(teams0)>=2 else str(game)
+    
+    pool_game_tab,pool_current_tab=st.tabs(["🏈 Game-by-Game","👥 Current Player Pool"])
+    with pool_game_tab:
+        selected_game=st.selectbox(
+            "Open game",game_values,
+            format_func=lambda g: f"🏈 {game_labels.get(g,str(g))}",
+            key="nuke_active_pool_game",
+            help="Only the selected game is rendered. This keeps the SIM page fast even on large slates."
+        ) if game_values else None
+    
+        if selected_game is not None:
+            game=selected_game
+            gp=players[players.Game.eq(game)].copy()
+            teams=list(dict.fromkeys(gp.Team.astype(str).tolist()))
+            label=game_labels.get(game,str(game))
+            ge=env[env.Game.eq(str(game))].copy() if not env.empty else pd.DataFrame()
+            st.markdown(f"### 🏈 {label}")
+            if not ge.empty:
+                env_cols=["Team","Opponent","Spread","Team Total","Team Total Rank","Game Total","Game Total Rank","Books","Source"]
+                env_show=ge[[c for c in env_cols if c in ge.columns]]
+                st.dataframe(style_environment(env_show),use_container_width=True,hide_index=True)
+                book_rows=ge[ge["Source"].eq("Sportsbook Consensus")] if "Source" in ge.columns else pd.DataFrame()
+                if not book_rows.empty:
+                    last_update=str(book_rows.iloc[0].get("Last Update",""))
+                    st.caption(f"Consensus across {int(book_rows['Books'].max()) if 'Books' in book_rows.columns else 0} US sportsbooks · Last odds snapshot: {last_update}")
+                    movement=movement_for_game(odds_history,teams)
+                    if not movement.empty:
+                        with st.expander("📈 Odds movement this week",expanded=False):
+                            chart_cols=[c for c in ["Game Total",f"{teams[0]} Team Total",f"{teams[1]} Team Total"] if c in movement.columns]
+                            if chart_cols:
+                                chart_df=movement[["Timestamp"]+chart_cols].copy().set_index("Timestamp")
+                                st.line_chart(chart_df,use_container_width=True)
+                            first,last=movement.iloc[0],movement.iloc[-1]
+                            m1,m2,m3=st.columns(3)
+                            gt0=float(first.get("Game Total",0)); gt1=float(last.get("Game Total",0))
+                            a_col=f"{teams[0]} Team Total"; b_col=f"{teams[1]} Team Total"
+                            a0=float(first.get(a_col,0)); a1=float(last.get(a_col,0)); b0=float(first.get(b_col,0)); b1=float(last.get(b_col,0))
+                            m1.metric("Game Total",f"{gt1:.1f}",delta=f"{gt1-gt0:+.1f} vs first snapshot")
+                            m2.metric(f"{teams[0]} Team Total",f"{a1:.1f}",delta=f"{a1-a0:+.1f}")
+                            m3.metric(f"{teams[1]} Team Total",f"{b1:.1f}",delta=f"{b1-b0:+.1f}")
+                            spread_cols=[c for c in [f"{teams[0]} Spread",f"{teams[1]} Spread"] if c in movement.columns]
+                            if spread_cols:
+                                st.caption("Spread movement")
+                                st.line_chart(movement[["Timestamp"]+spread_cols].set_index("Timestamp"),use_container_width=True)
+            st.caption("Only this game's controls are loaded. Make as many changes as you want, then click Apply changes once.")
+            with st.form(key=f"pool_form_{str(game)}_{editor_version}",clear_on_submit=False):
+                st.markdown("**Game Action**")
+                game_action=st.selectbox("Game bulk action",["No bulk change","✅ Include entire game","🚫 Exclude entire game"],key=f"game_bulk_{str(game)}_{editor_version}",label_visibility="collapsed")
+                visible_teams=teams[:2]
+                team_cols=st.columns(len(visible_teams),gap="medium") if visible_teams else [st.container()]
+                pending_by_team={}
+                team_actions={}
+                for team_col,team in zip(team_cols,visible_teams):
+                    tp=gp[gp.Team.eq(team)].copy()
+                    pos_order={"QB":0,"RB":1,"WR":2,"TE":3,"DST":4}
+                    tp["_pos_order"]=tp.Position.map(pos_order).fillna(9)
+                    tp=tp.sort_values(["_pos_order","Salary"],ascending=[True,False])
+                    trow=ge[ge.Team.eq(team)].iloc[0] if not ge.empty and ge.Team.eq(team).any() else None
+                    with team_col:
+                        with st.container(border=True):
+                            if trow is not None:
+                                team_total=float(trow['Team Total'])
+                                team_rank=int(trow['Team Total Rank'])
+                                rank_badge="🏆" if team_rank<=3 else ""
+                                st.markdown(
+                                    f"""<div style='display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-bottom:.25rem'>
+                                    <span style='font-size:1.55rem;font-weight:800;letter-spacing:.01em'>{team}</span>
+                                    <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>TEAM TOTAL {team_total:.1f}</span>
+                                    <span style='padding:.18rem .48rem;border:1px solid rgba(250,250,250,.16);border-radius:999px;font-size:.78rem;font-weight:700'>{rank_badge} SLATE RANK #{team_rank}</span>
+                                    </div>""",
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.markdown(f"### {team}")
+                            st.caption("Team Action")
+                            team_actions[team]=st.selectbox(f"{team} bulk action",["No bulk change","✅ Include all","🚫 Exclude all"],key=f"team_bulk_{str(game)}_{team}_{editor_version}",label_visibility="collapsed")
+                            rows=[]
+                            for idx,row in tp.iterrows():
+                                key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+                                cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+                                rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Lock":bool(cfg.get("lock",False)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":f"${int(row.Salary):,}","Model Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
+                            edit_df=pd.DataFrame(rows).set_index("_row")
+                            all_available=bool(len(edit_df)) and edit_df["Status"].astype(str).str.lower().eq("available").all()
+                            visible_cols=["Include","Lock","Pos","Player"]
+                            disabled_cols=["Pos","Player","Salary","Model Role"]
+                            if not all_available:
+                                visible_cols.append("Status")
+                                disabled_cols.append("Status")
+                            visible_cols += ["Salary","Model Role","Role","Usage x"]
+                            edited_team=st.data_editor(
+                                edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
+                                disabled=disabled_cols,
+                                column_order=visible_cols,
+                                column_config={
+                                    "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active SIM pool."),
+                                    "Lock":st.column_config.CheckboxColumn("🔒",width="small",help="Force this player into every generated NUKE SIM candidate lineup. Use for confirmed value starters or other must-play stands."),
+                                    "Pos":st.column_config.TextColumn("Pos",width="small"),
+                                    "Player":st.column_config.TextColumn("Player",width="medium"),
+                                    "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. Healthy players are hidden from this column to reduce clutter."),
+                                    "Salary":st.column_config.TextColumn("Salary",width="small"),
+                                    "Model Role":st.column_config.TextColumn("Model Role",width="small",help="NUKE's automatically inferred depth-chart role."),
+                                    "Role":st.column_config.SelectboxColumn("Override",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small",help="Optional role override. Leave AUTO to use NUKE's model role."),
+                                    "Usage x":st.column_config.NumberColumn("Usage",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
+                                },key=f"game_pool_{str(game)}_{team}_{editor_version}"
                             )
-                        else:
-                            st.markdown(f"### {team}")
-                        st.caption("Team Action")
-                        team_actions[team]=st.selectbox(f"{team} bulk action",["No bulk change","✅ Include all","🚫 Exclude all"],key=f"team_bulk_{str(game)}_{team}_{editor_version}",label_visibility="collapsed")
-                        rows=[]
-                        for idx,row in tp.iterrows():
-                            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-                            cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
-                            rows.append({"_row":int(idx),"_key":key,"Include":bool(cfg.get("include",True)),"Lock":bool(cfg.get("lock",False)),"Pos":row.Position,"Player":row.Name,"Status":str(row.get("Availability","Available")),"Salary":f"${int(row.Salary):,}","Model Role":row.auto_role,"Role":str(cfg.get("role","AUTO")),"Usage x":float(cfg.get("usage",1.0))})
-                        edit_df=pd.DataFrame(rows).set_index("_row")
-                        all_available=bool(len(edit_df)) and edit_df["Status"].astype(str).str.lower().eq("available").all()
-                        visible_cols=["Include","Lock","Pos","Player"]
-                        disabled_cols=["Pos","Player","Salary","Model Role"]
-                        if not all_available:
-                            visible_cols.append("Status")
-                            disabled_cols.append("Status")
-                        visible_cols += ["Salary","Model Role","Role","Usage x"]
-                        edited_team=st.data_editor(
-                            edit_df.drop(columns=["_key"]),use_container_width=True,hide_index=True,
-                            disabled=disabled_cols,
-                            column_order=visible_cols,
-                            column_config={
-                                "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active SIM pool."),
-                                "Lock":st.column_config.CheckboxColumn("🔒",width="small",help="Force this player into every generated NUKE SIM candidate lineup. Use for confirmed value starters or other must-play stands."),
-                                "Pos":st.column_config.TextColumn("Pos",width="small"),
-                                "Player":st.column_config.TextColumn("Player",width="medium"),
-                                "Status":st.column_config.TextColumn("Status",width="small",help="Automated injury/availability status. Healthy players are hidden from this column to reduce clutter."),
-                                "Salary":st.column_config.TextColumn("Salary",width="small"),
-                                "Model Role":st.column_config.TextColumn("Model Role",width="small",help="NUKE's automatically inferred depth-chart role."),
-                                "Role":st.column_config.SelectboxColumn("Override",options=["AUTO","QB1","RB1","RB2","RB3","WR1","WR2","WR3","TE1","BACKUP"],width="small",help="Optional role override. Leave AUTO to use NUKE's model role."),
-                                "Usage x":st.column_config.NumberColumn("Usage",min_value=.25,max_value=2.25,step=.05,format="%.2f",width="small",help="Changes the football simulation itself. Leave at 1.00 unless you believe actual usage changes."),
-                            },key=f"game_pool_{str(game)}_{team}_{editor_version}"
-                        )
-                        pending_by_team[team]=(edit_df,edited_team)
-                        excluded_count=sum(not bool(updated_state.get(str(r.ID) if str(r.ID) else f"{r.Name}|{r.Team}|{r.Position}|{int(r.Salary)}",{}).get("include",True)) for _,r in tp.iterrows())
-                        if excluded_count:
-                            st.caption(f"🚫 {excluded_count} excluded from {team}")
-            apply_changes=st.form_submit_button(f"Apply changes for {label}",type="primary",use_container_width=True)
-        if apply_changes:
-            for team,(edit_df,edited_team) in pending_by_team.items():
-                action=team_actions.get(team,"No bulk change")
-                for idx,erow in edited_team.iterrows():
-                    key=str(edit_df.loc[idx,"_key"])
-                    include=bool(erow["Include"])
-                    lock=bool(erow.get("Lock",False))
-                    if action=="✅ Include all": include=True
-                    elif action=="🚫 Exclude all": include=False
-                    if game_action=="✅ Include entire game": include=True
-                    elif game_action=="🚫 Exclude entire game": include=False
-                    if lock: include=True
-                    updated_state[key]={"include":include,"role":str(erow["Role"]),"usage":float(erow["Usage x"]),"lock":lock}
-            st.session_state["nuke_pregame_pool"]=updated_state
-            st.session_state["nuke_pool_editor_version"]=editor_version+1
-            st.rerun()
-
-with pool_current_tab:
-    st.markdown("### 👥 Current Player Pool")
-    st.caption("Build the active SIM pool here or use the Game-by-Game tab. Both views edit the same player pool, so you can use either workflow or mix them.")
-
-    # Global pool actions. Preserve role/usage settings; removing all also clears locks
-    # because a locked player must remain included.
-    pool_action_c1,pool_action_c2,pool_action_c3=st.columns([1,1,3])
-    include_all_clicked=pool_action_c1.button("✅ INCLUDE ALL",use_container_width=True,key=f"pool_include_all_{editor_version}")
-    remove_all_clicked=pool_action_c2.button("🚫 REMOVE ALL",use_container_width=True,key=f"pool_remove_all_{editor_version}")
-    if include_all_clicked or remove_all_clicked:
-        new_include=bool(include_all_clicked)
-        for _,row in players.iterrows():
-            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-            cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
-            updated_state[key]={
-                "include":new_include,
-                "role":str(cfg.get("role","AUTO")),
-                "usage":float(cfg.get("usage",1.0)),
-                "lock":bool(cfg.get("lock",False)) if new_include else False,
-            }
-        st.session_state["nuke_pregame_pool"]=updated_state
-        st.session_state["nuke_pool_editor_version"]=editor_version+1
-        st.rerun()
-
-    all_pool_rows=[]
-    for idx,row in players.iterrows():
-        key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
-        pcfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
-        override=str(pcfg.get("role","AUTO")).upper()
-        model_role=str(getattr(row,"auto_role","AUTO"))
-        role=model_role if override=="AUTO" else override
-        all_pool_rows.append({
-            "_row":int(idx),
-            "_key":key,
-            "Include":bool(pcfg.get("include",True)),
-            "Locked":bool(pcfg.get("lock",False)),
-            "Player":str(row.Name),
-            "Team":str(row.Team),
-            "Pos":str(row.Position),
-            "Salary":int(row.Salary),
-            "Role":role,
-            "Usage":float(pcfg.get("usage",1.0)),
-        })
-    all_pool=pd.DataFrame(all_pool_rows)
-    included_pool=all_pool[all_pool["Include"]].copy() if not all_pool.empty else all_pool.copy()
-    pos_order=["QB","RB","WR","TE","DST"]
-    counts=included_pool["Pos"].value_counts().to_dict() if not included_pool.empty else {}
-    m0,m1,m2,m3,m4,m5=st.columns(6)
-    m0.metric("Active",f"{len(included_pool):,}")
-    for col,pos in zip([m1,m2,m3,m4,m5],pos_order):
-        col.metric(pos,f"{int(counts.get(pos,0)):,}")
-
-    st.markdown("#### Manage by Position")
-    st.caption("Check or uncheck individual players below, then click Apply for that position. Excluded players stay visible so they can be added back at any time.")
-    total_by_pos=all_pool["Pos"].value_counts().to_dict() if not all_pool.empty else {}
-    pos_tabs=st.tabs([f"{pos} · {int(counts.get(pos,0))}/{int(total_by_pos.get(pos,0))}" for pos in pos_order])
-    for tab,pos in zip(pos_tabs,pos_order):
-        with tab:
-            view=all_pool[all_pool["Pos"].eq(pos)].copy()
-            if view.empty:
-                st.caption(f"No {pos} players available on this slate.")
-                continue
-            view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
-            source=view.set_index("_row")
-            edit_view=source[["Include","Locked","Player","Team","Salary","Role","Usage"]].copy()
-            edit_view["Salary"]=edit_view["Salary"].map(lambda x:f"${int(x):,}")
-            with st.form(f"current_pool_form_{pos}_{editor_version}",border=False):
-                edited=st.data_editor(
-                    edit_view,
-                    use_container_width=True,
-                    hide_index=True,
-                    disabled=["Player","Team","Salary","Role","Usage"],
-                    column_config={
-                        "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active NUKE SIM pool."),
-                        "Locked":st.column_config.CheckboxColumn("🔒",width="small",help="Force this player into every generated candidate lineup. A locked player is automatically included."),
-                        "Player":st.column_config.TextColumn("Player",width="medium"),
-                        "Team":st.column_config.TextColumn("Team",width="small"),
-                        "Salary":st.column_config.TextColumn("Salary",width="small"),
-                        "Role":st.column_config.TextColumn("Role",width="small"),
-                        "Usage":st.column_config.NumberColumn("Usage",format="%.2fx",width="small"),
-                    },
-                    key=f"current_pool_editor_{pos}_{editor_version}",
-                )
-                apply_pos=st.form_submit_button(f"APPLY {pos} PLAYER POOL",type="primary",use_container_width=True)
-            if apply_pos:
-                for original_idx,erow in zip(source.index.tolist(),edited.to_dict("records")):
-                    key=str(source.loc[original_idx,"_key"])
-                    old_cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
-                    lock=bool(erow.get("Locked",False))
-                    include=bool(erow.get("Include",True)) or lock
-                    updated_state[key]={
-                        "include":include,
-                        "role":str(old_cfg.get("role","AUTO")),
-                        "usage":float(old_cfg.get("usage",1.0)),
-                        "lock":lock,
-                    }
+                            pending_by_team[team]=(edit_df,edited_team)
+                            excluded_count=sum(not bool(updated_state.get(str(r.ID) if str(r.ID) else f"{r.Name}|{r.Team}|{r.Position}|{int(r.Salary)}",{}).get("include",True)) for _,r in tp.iterrows())
+                            if excluded_count:
+                                st.caption(f"🚫 {excluded_count} excluded from {team}")
+                apply_changes=st.form_submit_button(f"Apply changes for {label}",type="primary",use_container_width=True)
+            if apply_changes:
+                for team,(edit_df,edited_team) in pending_by_team.items():
+                    action=team_actions.get(team,"No bulk change")
+                    for idx,erow in edited_team.iterrows():
+                        key=str(edit_df.loc[idx,"_key"])
+                        include=bool(erow["Include"])
+                        lock=bool(erow.get("Lock",False))
+                        if action=="✅ Include all": include=True
+                        elif action=="🚫 Exclude all": include=False
+                        if game_action=="✅ Include entire game": include=True
+                        elif game_action=="🚫 Exclude entire game": include=False
+                        if lock: include=True
+                        updated_state[key]={"include":include,"role":str(erow["Role"]),"usage":float(erow["Usage x"]),"lock":lock}
                 st.session_state["nuke_pregame_pool"]=updated_state
                 st.session_state["nuke_pool_editor_version"]=editor_version+1
                 st.rerun()
-st.session_state["nuke_pregame_pool"]=updated_state
+    
+    with pool_current_tab:
+        st.markdown("### 👥 Current Player Pool")
+        st.caption("Build the active SIM pool here or use the Game-by-Game tab. Both views edit the same player pool, so you can use either workflow or mix them.")
+    
+        # Global pool actions. Preserve role/usage settings; removing all also clears locks
+        # because a locked player must remain included.
+        pool_action_c1,pool_action_c2,pool_action_c3=st.columns([1,1,3])
+        include_all_clicked=pool_action_c1.button("✅ INCLUDE ALL",use_container_width=True,key=f"pool_include_all_{editor_version}")
+        remove_all_clicked=pool_action_c2.button("🚫 REMOVE ALL",use_container_width=True,key=f"pool_remove_all_{editor_version}")
+        if include_all_clicked or remove_all_clicked:
+            new_include=bool(include_all_clicked)
+            for _,row in players.iterrows():
+                key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+                cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+                updated_state[key]={
+                    "include":new_include,
+                    "role":str(cfg.get("role","AUTO")),
+                    "usage":float(cfg.get("usage",1.0)),
+                    "lock":bool(cfg.get("lock",False)) if new_include else False,
+                }
+            st.session_state["nuke_pregame_pool"]=updated_state
+            st.session_state["nuke_pool_editor_version"]=editor_version+1
+            st.rerun()
+    
+        all_pool_rows=[]
+        for idx,row in players.iterrows():
+            key=str(row.ID) if str(row.ID) else f"{row.Name}|{row.Team}|{row.Position}|{int(row.Salary)}"
+            pcfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+            override=str(pcfg.get("role","AUTO")).upper()
+            model_role=str(getattr(row,"auto_role","AUTO"))
+            role=model_role if override=="AUTO" else override
+            all_pool_rows.append({
+                "_row":int(idx),
+                "_key":key,
+                "Include":bool(pcfg.get("include",True)),
+                "Locked":bool(pcfg.get("lock",False)),
+                "Player":str(row.Name),
+                "Team":str(row.Team),
+                "Pos":str(row.Position),
+                "Salary":int(row.Salary),
+                "Role":role,
+                "Usage":float(pcfg.get("usage",1.0)),
+            })
+        all_pool=pd.DataFrame(all_pool_rows)
+        included_pool=all_pool[all_pool["Include"]].copy() if not all_pool.empty else all_pool.copy()
+        pos_order=["QB","RB","WR","TE","DST"]
+        counts=included_pool["Pos"].value_counts().to_dict() if not included_pool.empty else {}
+        m0,m1,m2,m3,m4,m5=st.columns(6)
+        m0.metric("Active",f"{len(included_pool):,}")
+        for col,pos in zip([m1,m2,m3,m4,m5],pos_order):
+            col.metric(pos,f"{int(counts.get(pos,0)):,}")
+    
+        st.markdown("#### Manage by Position")
+        st.caption("Check or uncheck individual players below, then click Apply for that position. Excluded players stay visible so they can be added back at any time.")
+        total_by_pos=all_pool["Pos"].value_counts().to_dict() if not all_pool.empty else {}
+        pos_tabs=st.tabs([f"{pos} · {int(counts.get(pos,0))}/{int(total_by_pos.get(pos,0))}" for pos in pos_order])
+        for tab,pos in zip(pos_tabs,pos_order):
+            with tab:
+                view=all_pool[all_pool["Pos"].eq(pos)].copy()
+                if view.empty:
+                    st.caption(f"No {pos} players available on this slate.")
+                    continue
+                view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
+                source=view.set_index("_row")
+                edit_view=source[["Include","Locked","Player","Team","Salary","Role","Usage"]].copy()
+                edit_view["Salary"]=edit_view["Salary"].map(lambda x:f"${int(x):,}")
+                with st.form(f"current_pool_form_{pos}_{editor_version}",border=False):
+                    edited=st.data_editor(
+                        edit_view,
+                        use_container_width=True,
+                        hide_index=True,
+                        disabled=["Player","Team","Salary","Role","Usage"],
+                        column_config={
+                            "Include":st.column_config.CheckboxColumn("In",width="small",help="Include this player in the active NUKE SIM pool."),
+                            "Locked":st.column_config.CheckboxColumn("🔒",width="small",help="Force this player into every generated candidate lineup. A locked player is automatically included."),
+                            "Player":st.column_config.TextColumn("Player",width="medium"),
+                            "Team":st.column_config.TextColumn("Team",width="small"),
+                            "Salary":st.column_config.TextColumn("Salary",width="small"),
+                            "Role":st.column_config.TextColumn("Role",width="small"),
+                            "Usage":st.column_config.NumberColumn("Usage",format="%.2fx",width="small"),
+                        },
+                        key=f"current_pool_editor_{pos}_{editor_version}",
+                    )
+                    apply_pos=st.form_submit_button(f"APPLY {pos} PLAYER POOL",type="primary",use_container_width=True)
+                if apply_pos:
+                    for original_idx,erow in zip(source.index.tolist(),edited.to_dict("records")):
+                        key=str(source.loc[original_idx,"_key"])
+                        old_cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+                        lock=bool(erow.get("Locked",False))
+                        include=bool(erow.get("Include",True)) or lock
+                        updated_state[key]={
+                            "include":include,
+                            "role":str(old_cfg.get("role","AUTO")),
+                            "usage":float(old_cfg.get("usage",1.0)),
+                            "lock":lock,
+                        }
+                    st.session_state["nuke_pregame_pool"]=updated_state
+                    st.session_state["nuke_pool_editor_version"]=editor_version+1
+                    st.rerun()
+    st.session_state["nuke_pregame_pool"]=updated_state
 payouts_override=None
 active_rows=[]
 for _,row in players.iterrows():
@@ -490,7 +499,43 @@ if not players.empty:
     locked_count=int(players.get("sim_lock",pd.Series(False,index=players.index)).fillna(False).astype(bool).sum())
     st.caption(f"Active pool: {len(players):,} players" + (f" · 🔒 {locked_count} locked" if locked_count else ""))
 
-if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
+with strategy_workspace:
+    lineup_rules=render_strategy_studio(players,site,slate_source)
+    rule_ready=True
+    try:
+        compile_rules(players,lineup_rules)
+    except RuleError:
+        rule_ready=False
+    
+    # Rules can be tuned after a run without re-simulating football outcomes.
+    saved_candidates=st.session_state.get("nuke_contest_results")
+    saved_players=st.session_state.get("nuke_sim_players")
+    if saved_candidates is not None and saved_players is not None and not saved_candidates.empty:
+        same_pool=set(saved_players.ID.astype(str))==set(players.ID.astype(str))
+        if st.button("APPLY RULEBOOK TO PORTFOLIO",type="primary",use_container_width=True,
+                     disabled=not rule_ready or not same_pool,
+                     help="Select a new verified portfolio from the existing contest-simmed candidates."):
+            try:
+                with st.spinner("Selecting lineups that satisfy your rules and exposure limits…"):
+                    updated=build_portfolio(saved_candidates,size=int(portfolio_size),max_overlap=int(max_overlap),
+                        path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100,
+                        max_qb_exposure=float(max_qb_exp)/100,players=saved_players,
+                        max_team_exposure=float(max_team_exp)/100,max_game_exposure=float(max_game_exp)/100,
+                        player_preferences=st.session_state.get("nuke_player_takes",{}),lineup_rules=lineup_rules)
+                pp,ps=portfolio_summary(updated)
+                st.session_state.update(nuke_portfolio=updated,nuke_portfolio_paths=pp,nuke_portfolio_stats=ps,
+                                        nuke_path_exposure=path_exposure(updated,len(updated)))
+                st.session_state.pop(f"nr_notice_{site}",None)
+                st.rerun()
+            except RuleError as exc:
+                st.error(str(exc))
+        st.caption("Uses the portfolio size and caps in the sidebar, plus saved Player Takes. Run NUKE SIM again if matching candidates are scarce.")
+        if not same_pool: st.info("The active player pool changed. Run NUKE SIM to build candidates for this pool before applying rules.")
+    
+if not rule_ready:
+    st.warning("A saved lineup rule needs attention. Open Strategy Studio to edit or pause it before running.")
+
+if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True,disabled=not rule_ready):
     run_started=time.perf_counter()
     stage_times={}
     seed=int(manual_seed) if fixed_seed else int.from_bytes(__import__("secrets").token_bytes(4), "big") % 2147483646 + 1
@@ -511,22 +556,30 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         # Build the requested FLEX construction inside the candidate engine. The old
         # FanDuel path generated as many as 5,000 unrestricted lineups and filtered
         # them afterward, which made a 1,450-lineup workspace needlessly take minutes.
-        lineups=generate_lineups(
-            players,
-            int(candidates),
-            int(min_salary),
-            int(seed),
-            site=site,
-            flex_position=flex_position,
-            locked_indices=locked_indices,
-            no_offense_vs_dst=no_offense_vs_dst,
-        )
+        try:
+            lineups=generate_lineups(
+                players,
+                int(candidates),
+                int(min_salary),
+                int(seed),
+                site=site,
+                flex_position=flex_position,
+                locked_indices=locked_indices,
+                no_offense_vs_dst=no_offense_vs_dst,
+                lineup_rules=lineup_rules,
+            )
+        except RuleError as exc:
+            status.update(label="Rulebook needs attention",state="error")
+            st.error(str(exc))
+            st.stop()
         stage_times["Candidate Generation"]=time.perf_counter()-stage
         st.write(f"Candidate generation: {stage_times['Candidate Generation']:.1f}s")
         if not lineups:
             status.update(label="No legal lineups found",state="error")
             st.stop()
         st.write(f"Generated {len(lineups):,} unique candidates.")
+        if active_rules(lineup_rules) and len(lineups)<int(candidates):
+            st.warning(f"The rule-constrained search produced {len(lineups):,} of {int(candidates):,} requested candidates within its time budget. Every returned candidate meets your Every rules. Loosen a rule or increase the pool for more options.")
         candidate_diag=candidate_diagnostics(players,lineups,int(candidates),int(min_salary))
         st.write(f"Candidate Pool Health: {candidate_diag.get('grade','?')} · {candidate_diag.get('score',0):.0f}/100")
         stage=time.perf_counter()
@@ -547,12 +600,22 @@ if st.button("☢️ RUN NUKE SIM",type="primary",use_container_width=True):
         st.write(f"Contest simulation: {stage_times['Contest Simulation']:.1f}s")
         stage=time.perf_counter()
         st.write(f"5/5 · Building {PORTFOLIO_ENGINE_VERSION} portfolio...")
-        portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0,players=players,max_team_exposure=float(max_team_exp)/100.0,max_game_exposure=float(max_game_exp)/100.0)
+        try:
+            portfolio=build_portfolio(contest_results,size=int(portfolio_size),max_overlap=int(max_overlap),path_balance=float(path_balance),max_player_exposure=float(max_player_exp)/100.0,max_qb_exposure=float(max_qb_exp)/100.0,players=players,max_team_exposure=float(max_team_exp)/100.0,max_game_exposure=float(max_game_exp)/100.0,lineup_rules=lineup_rules)
+        except RuleError as exc:
+            # Keep scored candidates available for quick rule/cap adjustments.
+            st.session_state.update(nuke_sim_results=results,nuke_sim_players=players,
+                                    nuke_contest_results=contest_results,nuke_contest_summary=contest_summary,
+                                    nuke_sim_exposure=exposure,nuke_candidate_diagnostics=candidate_diag)
+            status.update(label="Candidates ready; portfolio rules need attention",state="error")
+            st.error(str(exc))
+            st.stop()
         portfolio_paths,portfolio_stats=portfolio_summary(portfolio)
         pexposure=path_exposure(portfolio,len(portfolio))
         stage_times["Portfolio Build"]=time.perf_counter()-stage
         st.write(f"Portfolio build: {stage_times['Portfolio Build']:.1f}s")
         total_runtime=time.perf_counter()-run_started
+        st.session_state.pop(f"nr_notice_{site}",None)
         st.session_state["nuke_sim_results"]=results
         st.session_state["nuke_sim_players"]=players
         st.session_state["nuke_sim_exposure"]=exposure
@@ -576,6 +639,16 @@ contest_results=st.session_state.get("nuke_contest_results")
 contest_summary=st.session_state.get("nuke_contest_summary")
 portfolio_paths=st.session_state.get("nuke_portfolio_paths")
 portfolio_stats=st.session_state.get("nuke_portfolio_stats",{})
+
+if portfolio is not None and not portfolio.empty and active_rules(lineup_rules):
+    try:
+        audit=rule_report(sim_players,portfolio["_indices"],lineup_rules)
+        if audit.Status.eq("Unmet").any():
+            st.error("The saved portfolio does not meet the current rulebook. Apply the rulebook before exporting.")
+            st.stop()
+    except RuleError as exc:
+        st.error(str(exc))
+        st.stop()
 
 if results is not None and sim_players is not None:
     tabs=st.tabs(["Contest SIM","Portfolio","NUKEM Lineups","Path Mix","Exposure","Combos","Export","About"])
@@ -760,8 +833,12 @@ if results is not None and sim_players is not None:
     with tab7:
         export_platform_name="FanDuel" if site=="FD" else "DraftKings"
         st.subheader(f"📤 {export_platform_name} Lineup Export")
-        source_options=["Portfolio","Contest-ranked","NUKEM-ranked"]
+        source_options=(["Portfolio"] if portfolio is not None and not portfolio.empty else [])+["Contest-ranked","NUKEM-ranked"]
+        if active_rules(lineup_rules):
+            st.caption("Rule percentage targets apply to Portfolio exports. Ranked candidate exports are research views and may not meet your rulebook.")
         export_source=st.selectbox("Lineup source",source_options,index=0,key=f"export_source_{site}")
+        if active_rules(lineup_rules) and export_source!="Portfolio":
+            st.warning("Candidate export: this file is not a rule-verified portfolio. Use Apply rulebook and choose Portfolio for enforced percentages.")
         export_results=portfolio if export_source=="Portfolio" and portfolio is not None and not portfolio.empty else contest_results if export_source=="Contest-ranked" and contest_results is not None and not contest_results.empty else results
         max_export=min(150,len(export_results))
         export_count=st.number_input("Lineups to export",1,max_export,min(150,max_export),1,key=f"export_count_{site}")
@@ -778,3 +855,4 @@ if results is not None and sim_players is not None:
                 st.error(f"Could not build {export_platform_name} upload file: {e}")
     with tab8:
         st.markdown(f"""**Football engine:** {engine_version(site)}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5.1 adds marginal path-value concentration control on top of player/team/game caps, QB-stack exposure reporting, and Portfolio Health diagnostics. Path control is soft rather than a forced quota. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+

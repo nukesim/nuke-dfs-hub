@@ -436,7 +436,7 @@ with pool_workspace:
             col.metric(pos,f"{int(counts.get(pos,0)):,}")
     
         st.markdown("#### Manage by Position")
-        st.caption("Check or uncheck individual players below, then click Apply for that position. Excluded players stay visible so they can be added back at any time.")
+        st.caption("Use Include all / Remove all to update one position instantly, or change individual checkboxes and click Apply. Removed players stay visible so you can add them back.")
         total_by_pos=all_pool["Pos"].value_counts().to_dict() if not all_pool.empty else {}
         pos_tabs=st.tabs([f"{pos} · {int(counts.get(pos,0))}/{int(total_by_pos.get(pos,0))}" for pos in pos_order])
         for tab,pos in zip(pos_tabs,pos_order):
@@ -445,6 +445,22 @@ with pool_workspace:
                 if view.empty:
                     st.caption(f"No {pos} players available on this slate.")
                     continue
+                pos_include_col,pos_remove_col,pos_help_col=st.columns([1,1,3])
+                include_pos=pos_include_col.button(f"✅ INCLUDE ALL {pos}",use_container_width=True,key=f"pool_include_all_{site}_{pos}_{editor_version}")
+                remove_pos=pos_remove_col.button(f"🚫 REMOVE ALL {pos}",use_container_width=True,key=f"pool_remove_all_{site}_{pos}_{editor_version}")
+                pos_help_col.caption(f"Only changes {pos}. Removing also clears {pos} locks. Run the SIM again after changing the pool.")
+                if include_pos or remove_pos:
+                    for key in view["_key"]:
+                        old_cfg=updated_state.get(key,{"include":True,"role":"AUTO","usage":1.0,"lock":False})
+                        updated_state[key]={
+                            **old_cfg,
+                            "include":bool(include_pos),
+                            "lock":bool(old_cfg.get("lock",False)) if include_pos else False,
+                        }
+                    st.session_state["nuke_pregame_pool"]=updated_state
+                    st.session_state["nuke_pool_editor_version"]=editor_version+1
+                    invalidate_sim_results(st.session_state)
+                    st.rerun()
                 view=view.sort_values(["Salary","Team","Player"],ascending=[False,True,True])
                 source=view.set_index("_row")
                 edit_view=source[["Include","Locked","Player","Team","Salary","Role","Usage"]].copy()
@@ -855,4 +871,5 @@ if results is not None and sim_players is not None:
                 st.error(f"Could not build {export_platform_name} upload file: {e}")
     with tab8:
         st.markdown(f"""**Football engine:** {engine_version(site)}.\n\n**Pre-sim player takes:** Game-by-game Include/Boost controls shape candidate generation before the sim. Boost does not alter simulated fantasy points; Usage x does.\n\n**Portfolio engine:** {PORTFOLIO_ENGINE_VERSION}. Player Takes remain portfolio-only after the run. V5.1 adds marginal path-value concentration control on top of player/team/game caps, QB-stack exposure reporting, and Portfolio Health diagnostics. Path control is soft rather than a forced quota. Duplication is not part of portfolio selection.\n\n**Correlation:** NUKE generates a tournament mixture of QB+1, QB+1/1, QB+2, QB+2/1 and QB+2/2 structures.\n\n**Field:** opponent ownership remains modeled until real regular-season contest data is available for calibration.""")
+
 

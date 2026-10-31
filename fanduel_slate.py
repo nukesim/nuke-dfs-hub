@@ -7,7 +7,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 FD_SLATE_PATH = ROOT / "data" / "fanduel_nfl_current.csv"
 FD_B64_PREFIX = ROOT / "data" / "fanduel_nfl_current.csv.gz.b64.part"
-FD_SLATE_LABEL = "2026 FanDuel Week 7 Sunday Main · 2026-10-25 · Updated 2026-10-25"
+FD_SLATE_LABEL = "2026 FanDuel Week 8 Sunday Main · 2026-11-01 · Updated 2026-10-31"
 
 
 def _payload_parts():
@@ -47,3 +47,4 @@ def fanduel_slate_status():
         return {"available": True, "path": str(FD_SLATE_PATH), "players": int(len(df))}
     except Exception:
         return {"available": False, "path": str(FD_SLATE_PATH), "players": 0}
+

@@ -179,6 +179,55 @@ def _baycurrent_2026_context():
         "forecast_as_of":"October 7, 2026, 5:30 AM JST",
         "forecast_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/baycurrentclassic/weather/Wednesday.pdf"}
 
+def _wwt_2026_context():
+    """Official November 5/6 2026 tee sheet, in Cabo course-local MST.
+
+    Source: https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/worldwidetechnologychampionship/roundInfo/R1-R2%20Tee%20Times.pdf
+    The afternoon wave starts at 11:05 AM. Preserve the published times.
+    """
+    schedule=Path(__file__).resolve().parents[1]/"data"/"pga_wwt_2026_pairings.psv"
+    groups=pd.read_csv(schedule,sep="|",dtype=str)
+    tee={}
+    for _,group in groups.iterrows():
+        r1=pd.Timestamp("2026-11-05 "+group["R1_Local"],tz="America/Mazatlan")
+        r2=pd.Timestamp("2026-11-06 "+group["R2_Local"],tz="America/Mazatlan")
+        for player in group["Players"].split(";"):
+            key=_norm_name(player)
+            if key in tee:
+                raise ValueError(f"Duplicate WWT tee sheet player: {player}")
+            tee[key]={1:r1.isoformat(),2:r2.isoformat()}
+    aliases={
+        "Benjamin James":"Ben James",
+        "Jordan L. Smith":"Jordan Smith",
+        "Zachary Bauchou":"Zach Bauchou",
+        "Kris Ventura":"Kristoffer Ventura",
+        "Cameron Davis":"Cam Davis",
+        "Willie Mack":"Willie Mack III",
+    }
+    for dk_name,official_name in aliases.items():
+        found=tee.get(_norm_name(official_name))
+        if found: tee[_norm_name(dk_name)]=dict(found)
+    return {
+        "event_id":"2026457","event_name":"World Wide Technology Championship",
+        "course":"El Cardonal at Diamante","location":"Los Cabos, Mexico",
+        "lat":22.902,"lon":-109.985,
+        "timezone":"America/Mazatlan","timezone_label":"MST (Cabo local)",
+        "has_cut":True,
+        "round_dates":["2026-11-05","2026-11-06","2026-11-07","2026-11-08"],
+        "tee_times":tee,"tee_source":"PGA TOUR official R1/R2 tee sheet",
+        "status":"Published R1/R2 tee times loaded",
+        "tee_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/worldwidetechnologychampionship/roundInfo/R1-R2%20Tee%20Times.pdf",
+        "forecast_summary":(
+            "PGA TOUR forecast (Nov 3, 3 PM local): Thu/Fri 10% rain chance, "
+            "74–84°F. Thu NW winds 7–12 mph increasing to W/NW 12–17 mph, gusting 22; "
+            "Fri variable winds 3–8 mph increasing to W/NW 10–15 mph, gusting 20. "
+            "Weekend rain chance 30%. Golfer weather edges use live hourly forecasts."
+        ),
+        "forecast_as_of":"November 3, 2026, 3:00 PM course-local",
+        "forecast_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/worldwidetechnologychampionship/weather/Tuesday.pdf",
+    }
+
+
 def _mexico_2026_context():
     """Official PGA TOUR Mexico Open R1/R2 tee sheet (October 29-30, 2026).
 
@@ -270,6 +319,8 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
+    if "worldwidetechnologychampionship" in wanted and datetime.now().year == 2026:
+        return _wwt_2026_context()
     if "vidantaworldmexicoopen" in wanted and datetime.now().year == 2026:
         # Use the verified event sheet, not ESPN's closest unrelated event.
         return _mexico_2026_context()
@@ -584,6 +635,9 @@ if st.session_state.get("pga_slate_key") != slate_key:
             st.session_state.pop(key,None)
     st.session_state["pga_slate_key"]=slate_key
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
+if "worldwidetechnologychampionship" in _norm_name(event):
+    st.caption("Field update Nov 3: Adam Schenk and Aldrich Potgieter withdrew. "
+               "Both are excluded from the default pool; replacements Will Gordon and Harry Higgs are included.")
 if "vidantaworldmexicoopen" in _norm_name(event) and "Adam Hadwin" not in set(golfers["Name"]):
     st.caption("Field update Oct 28: C.T. Pan withdrew and Adam Hadwin replaced him. "
                "C.T. Pan is excluded by the DK CSV; Adam Hadwin is not in this DK salary file, "

@@ -20,7 +20,7 @@ def helpers():
              if isinstance(node, ast.FunctionDef) and node.name in wanted]
     names = {node.name for node in funcs}
     assert names == wanted, f"Missing page functions: {wanted - names}"
-    env = {"__file__": str(PAGE), "np": np, "pd": pd, "re": re}
+    env = {"__file__": str(PAGE), "np": np, "pd": pd, "re": re, "Path": Path}
     exec(compile(ast.Module(body=funcs, type_ignores=[]),
                  str(PAGE), "exec"), env)
     return env
@@ -31,7 +31,7 @@ class MexicoTeeTimeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.h = helpers()
         cls.ctx = cls.h["_mexico_2026_context"]()
-        cls.dk = cls.h["load_csv"](ROOT / "data" / "pga_current.csv")
+        cls.dk = cls.h["load_csv"](ROOT / "tests" / "fixtures" / "pga_mexico_2026.csv")
 
     def test_all_active_dk_golfers_have_both_published_rounds(self):
         self.assertEqual(len(self.dk), 119)

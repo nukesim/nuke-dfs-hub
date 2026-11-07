@@ -22,9 +22,9 @@ jobs:
           python - <<'PY'
           from default_slate import load_default_slate, SLATE_LABEL
           df = load_default_slate()
-          assert len(df) == 518, f'Expected 518 players, got {len(df)}'
-          assert '2026-10-25' in SLATE_LABEL
-          assert df['Game Info'].astype(str).str.contains('10/25/2026').any()
+          assert len(df) == 586, f'Expected 586 players, got {len(df)}'
+          assert '2026-11-08' in SLATE_LABEL
+          assert df['Game Info'].astype(str).str.contains('11/08/2026').all()
           print(f'Validated {len(df)} DK players: {SLATE_LABEL}')
           PY
       - name: Execute Streamlit landing and NFL Sim pages

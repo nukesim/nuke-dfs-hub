@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-SLATE_LABEL = "2026 Week 8 Sunday Main · 2026-11-01 · Updated 2026-10-30"
+SLATE_LABEL = "2026 Week 9 Sunday Main · 2026-11-08 · Updated 2026-11-07"
 
 def load_default_slate():
     """Load the current DraftKings NFL salary CSV."""

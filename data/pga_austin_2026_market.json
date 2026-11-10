@@ -1,0 +1,473 @@
+{
+  "event": "Austin Championship presented by Compliance Solutions",
+  "source": "Hard Rock Bet",
+  "source_url": "https://www.hardrock.bet/news/2026-austin-championship-odds/",
+  "odds_as_of": "2026-11-09",
+  "checked_on": "2026-11-10",
+  "players": [
+    {
+      "name": "Jackson Koivun",
+      "american_odds": 1400
+    },
+    {
+      "name": "Doug Ghim",
+      "american_odds": 1600
+    },
+    {
+      "name": "Blades Brown",
+      "american_odds": 2000
+    },
+    {
+      "name": "Andrew Novak",
+      "american_odds": 2500
+    },
+    {
+      "name": "Brian Harman",
+      "american_odds": 3000
+    },
+    {
+      "name": "Chris Kirk",
+      "american_odds": 3000
+    },
+    {
+      "name": "Jordan Smith",
+      "american_odds": 3000
+    },
+    {
+      "name": "Austin Smotherman",
+      "american_odds": 3000
+    },
+    {
+      "name": "Seamus Power",
+      "american_odds": 4000
+    },
+    {
+      "name": "Zach Bauchou",
+      "american_odds": 4000
+    },
+    {
+      "name": "Pierceson Coody",
+      "american_odds": 4000
+    },
+    {
+      "name": "Johnny Keefer",
+      "american_odds": 4000
+    },
+    {
+      "name": "Max Homa",
+      "american_odds": 5000
+    },
+    {
+      "name": "David Ford",
+      "american_odds": 5000
+    },
+    {
+      "name": "Kristoffer Ventura",
+      "american_odds": 5000
+    },
+    {
+      "name": "Beau Hossler",
+      "american_odds": 5000
+    },
+    {
+      "name": "Ben Kohles",
+      "american_odds": 5000
+    },
+    {
+      "name": "Stephan Jaeger",
+      "american_odds": 5000
+    },
+    {
+      "name": "Max Greyserman",
+      "american_odds": 5000
+    },
+    {
+      "name": "Ricky Castillo",
+      "american_odds": 5000
+    },
+    {
+      "name": "Rico Hoey",
+      "american_odds": 5000
+    },
+    {
+      "name": "Eric Cole",
+      "american_odds": 5000
+    },
+    {
+      "name": "Marco Penge",
+      "american_odds": 5000
+    },
+    {
+      "name": "Mac Meissner",
+      "american_odds": 6000
+    },
+    {
+      "name": "Sudarshan Yellamaraju",
+      "american_odds": 6000
+    },
+    {
+      "name": "Neal Shipley",
+      "american_odds": 6000
+    },
+    {
+      "name": "Miles Russell",
+      "american_odds": 6000
+    },
+    {
+      "name": "Christiaan Bezuidenhout",
+      "american_odds": 6000
+    },
+    {
+      "name": "Billy Horschel",
+      "american_odds": 6000
+    },
+    {
+      "name": "Daniel Berger",
+      "american_odds": 6000
+    },
+    {
+      "name": "Mackenzie Hughes",
+      "american_odds": 6000
+    },
+    {
+      "name": "Haotong Li",
+      "american_odds": 6000
+    },
+    {
+      "name": "Rasmus Højgaard",
+      "american_odds": 6000
+    },
+    {
+      "name": "Davis Thompson",
+      "american_odds": 6000
+    },
+    {
+      "name": "Sam Stevens",
+      "american_odds": 6000
+    },
+    {
+      "name": "Tommy Morrison",
+      "american_odds": 6000
+    },
+    {
+      "name": "Jackson Suber",
+      "american_odds": 6000
+    },
+    {
+      "name": "Trace Crowe",
+      "american_odds": 6000
+    },
+    {
+      "name": "Karl Vilips",
+      "american_odds": 7500
+    },
+    {
+      "name": "Matt McCarty",
+      "american_odds": 7500
+    },
+    {
+      "name": "Nick Taylor",
+      "american_odds": 7500
+    },
+    {
+      "name": "Cole Sherwood",
+      "american_odds": 7500
+    },
+    {
+      "name": "Luke Clanton",
+      "american_odds": 7500
+    },
+    {
+      "name": "Taylor Moore",
+      "american_odds": 7500
+    },
+    {
+      "name": "Zecheng Dou",
+      "american_odds": 7500
+    },
+    {
+      "name": "Kevin Roy",
+      "american_odds": 7500
+    },
+    {
+      "name": "Zac Blair",
+      "american_odds": 7500
+    },
+    {
+      "name": "Austin Eckroat",
+      "american_odds": 7500
+    },
+    {
+      "name": "Kevin Yu",
+      "american_odds": 7500
+    },
+    {
+      "name": "Rasmus Neergaard-Petersen",
+      "american_odds": 7500
+    },
+    {
+      "name": "John Parry",
+      "american_odds": 7500
+    },
+    {
+      "name": "Jesper Svensson",
+      "american_odds": 10000
+    },
+    {
+      "name": "Emiliano Grillo",
+      "american_odds": 10000
+    },
+    {
+      "name": "Matthieu Pavon",
+      "american_odds": 10000
+    },
+    {
+      "name": "Sami Valimaki",
+      "american_odds": 10000
+    },
+    {
+      "name": "Chad Ramey",
+      "american_odds": 10000
+    },
+    {
+      "name": "Max McGreevy",
+      "american_odds": 10000
+    },
+    {
+      "name": "Patrick Fishburn",
+      "american_odds": 10000
+    },
+    {
+      "name": "Taylor Pendrith",
+      "american_odds": 10000
+    },
+    {
+      "name": "Isaiah Salinda",
+      "american_odds": 10000
+    },
+    {
+      "name": "Chandler Phillips",
+      "american_odds": 10000
+    },
+    {
+      "name": "Alvaro Ortiz",
+      "american_odds": 10000
+    },
+    {
+      "name": "Hayden Springer",
+      "american_odds": 10000
+    },
+    {
+      "name": "Adrien Dumont de Chassart",
+      "american_odds": 10000
+    },
+    {
+      "name": "Lucas Glover",
+      "american_odds": 15000
+    },
+    {
+      "name": "William Mouw",
+      "american_odds": 15000
+    },
+    {
+      "name": "Patrick Rodgers",
+      "american_odds": 15000
+    },
+    {
+      "name": "Andrew Putnam",
+      "american_odds": 15000
+    },
+    {
+      "name": "Erik van Rooyen",
+      "american_odds": 15000
+    },
+    {
+      "name": "Kevin Streelman",
+      "american_odds": 15000
+    },
+    {
+      "name": "Lee Hodges",
+      "american_odds": 15000
+    },
+    {
+      "name": "Christiaan Maas",
+      "american_odds": 15000
+    },
+    {
+      "name": "Gordon Sargent",
+      "american_odds": 15000
+    },
+    {
+      "name": "Kensei Hirata",
+      "american_odds": 15000
+    },
+    {
+      "name": "Joel Dahmen",
+      "american_odds": 20000
+    },
+    {
+      "name": "Tom Hoge",
+      "american_odds": 20000
+    },
+    {
+      "name": "Cam Davis",
+      "american_odds": 20000
+    },
+    {
+      "name": "Paul Peterson",
+      "american_odds": 20000
+    },
+    {
+      "name": "Takumi Kanaya",
+      "american_odds": 20000
+    },
+    {
+      "name": "Davis Riley",
+      "american_odds": 20000
+    },
+    {
+      "name": "John VanDerLaan",
+      "american_odds": 20000
+    },
+    {
+      "name": "Nick Dunlap",
+      "american_odds": 20000
+    },
+    {
+      "name": "Alejandro Tosti",
+      "american_odds": 20000
+    },
+    {
+      "name": "A.J. Ewart",
+      "american_odds": 20000
+    },
+    {
+      "name": "Pontus Nyholm",
+      "american_odds": 25000
+    },
+    {
+      "name": "Peter Malnati",
+      "american_odds": 25000
+    },
+    {
+      "name": "David Skinns",
+      "american_odds": 25000
+    },
+    {
+      "name": "Matt Kuchar",
+      "american_odds": 25000
+    },
+    {
+      "name": "Brice Garnett",
+      "american_odds": 25000
+    },
+    {
+      "name": "David Lipsky",
+      "american_odds": 25000
+    },
+    {
+      "name": "Vince Whaley",
+      "american_odds": 25000
+    },
+    {
+      "name": "Justin Lower",
+      "american_odds": 25000
+    },
+    {
+      "name": "Dylan Wu",
+      "american_odds": 25000
+    },
+    {
+      "name": "Danny Walker",
+      "american_odds": 25000
+    },
+    {
+      "name": "Adrien Saddier",
+      "american_odds": 25000
+    },
+    {
+      "name": "Chandler Blanchet",
+      "american_odds": 25000
+    },
+    {
+      "name": "Emilio Gonzalez",
+      "american_odds": 50000
+    },
+    {
+      "name": "Joe Highsmith",
+      "american_odds": 50000
+    },
+    {
+      "name": "Mark Hubbard",
+      "american_odds": 50000
+    },
+    {
+      "name": "Patton Kizzire",
+      "american_odds": 50000
+    },
+    {
+      "name": "Davis Chatfield",
+      "american_odds": 50000
+    },
+    {
+      "name": "Aaron Wise",
+      "american_odds": 50000
+    },
+    {
+      "name": "C.T. Pan",
+      "american_odds": 50000
+    },
+    {
+      "name": "Jimmy Stanger",
+      "american_odds": 50000
+    },
+    {
+      "name": "Adam Schenk",
+      "american_odds": 50000
+    },
+    {
+      "name": "Hank Lebioda",
+      "american_odds": 50000
+    },
+    {
+      "name": "Adam Svensson",
+      "american_odds": 50000
+    },
+    {
+      "name": "Rikuya Hoshino",
+      "american_odds": 50000
+    },
+    {
+      "name": "Jeffrey Kang",
+      "american_odds": 50000
+    },
+    {
+      "name": "Rafael Campos",
+      "american_odds": 100000
+    },
+    {
+      "name": "Marcelo Rozo",
+      "american_odds": 100000
+    },
+    {
+      "name": "Christo Lamprecht",
+      "american_odds": 100000
+    },
+    {
+      "name": "Brendon Todd",
+      "american_odds": 250000
+    },
+    {
+      "name": "Michael Thompson",
+      "american_odds": 250000
+    },
+    {
+      "name": "Nicholas Lindheim",
+      "american_odds": 250000
+    },
+    {
+      "name": "Casey Russell",
+      "american_odds": 250000
+    }
+  ]
+}

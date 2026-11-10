@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from nuke_nav import render_nav
+from nuke_pga_data import load_market_snapshot, attach_market, expected_points
 from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
     generate_pga_candidates, select_pga_portfolio, wave_lineup_bounds,
     salary_build_type, build_type_summary)
@@ -16,7 +17,7 @@ from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
 
-PGA_PORTFOLIO_VERSION=8
+PGA_PORTFOLIO_VERSION=9
 if st.session_state.get("pga_results_version") != PGA_PORTFOLIO_VERSION:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)
@@ -45,15 +46,18 @@ def salary_baseline(d):
     sal=d["Salary"].to_numpy(float)
     if not len(sal):
         return np.array([],dtype=float)
+    market=pd.to_numeric(d.get("Market Adjustment",pd.Series(0.,index=d.index)),errors="coerce").fillna(0).to_numpy(float)
     lo=float(sal.min()); hi=float(sal.max())
     if np.isclose(lo,hi):
-        return np.full(len(sal),60.0,dtype=float)
-    return np.interp(sal,[lo,hi],[42,78])
+        return np.full(len(sal),60.0,dtype=float)+market
+    return np.interp(sal,[lo,hi],[42,78])+market
 
 def ownership_estimate(d):
     sal=d["Salary"].to_numpy(float)
     z=(sal-sal.mean())/(sal.std()+1e-9)
     raw=np.exp(np.clip(z,-2.5,2.5))
+    market=pd.to_numeric(d.get("Market Adjustment",pd.Series(0.,index=d.index)),errors="coerce").fillna(0).to_numpy(float)
+    raw*=np.exp(market/12)
     # six roster spots across the field -> ownership sums to ~600%
     return raw/raw.sum()*600
 
@@ -450,6 +454,7 @@ def fetch_hourly_weather(lat,lon,timezone="auto",refresh_token=0):
         df=pd.DataFrame(h)
         if len(df): df["time"]=pd.to_datetime(df["time"])
         df.attrs["timezone"]=j.get("timezone",timezone)
+        df.attrs["fetched_at"]=datetime.now().astimezone().isoformat()
         return df
     except Exception: return pd.DataFrame()
 
@@ -525,7 +530,8 @@ def simulate_golfers(d,n_sims,seed):
     mu=mu+edge
     salary=d["Salary"].to_numpy(float)
     # Salary-tier-informed cut probability; missed cuts score much lower.
-    strength=(salary-salary.mean())/(salary.std()+1e-9)
+    market=pd.to_numeric(d.get("Market Adjustment",pd.Series(0.,index=d.index)),errors="coerce").fillna(0).to_numpy(float)
+    strength=(salary-salary.mean())/(salary.std()+1e-9)+market/16
     make_cut=1/(1+np.exp(-(.25+strength))) if d.attrs.get("has_cut",True) else np.ones(len(d))
     cut=rng.random((n_sims,len(d)))<make_cut
     made=rng.normal(mu,14+np.maximum(0,7600-salary)/800,size=(n_sims,len(d)))
@@ -663,6 +669,21 @@ if st.session_state.get("pga_slate_key") != slate_key:
             st.session_state.pop(key,None)
     st.session_state["pga_slate_key"]=slate_key
 st.success(f"{source}: {event} · {len(golfers)} active golfers")
+market_snapshot=load_market_snapshot(event)
+golfers=attach_market(golfers,market_snapshot)
+if market_snapshot:
+    priced=int(golfers["Win Odds"].notna().sum())
+    st.caption(f"Win odds: {priced}/{len(golfers)} active golfers · {market_snapshot['source']} "
+               f"snapshot dated {market_snapshot['odds_as_of']} · Checked {market_snapshot['checked_on']}. "
+               "Odds are shown to 1; blank means no verified price in this snapshot.")
+    with st.expander("Course & field notes",expanded=False):
+        st.markdown("**Fazio Canyons · Par 72 · 7,451 yards**  \n"
+                    "November 12–15 · 120-player field · Cut after 36 holes: low 65 and ties.  \n"
+                    "Inaugural event: no previous tournament course history.")
+        st.write("Withdrawals are excluded from this CSV: Benjamin James, Michael Kim, Beau Hossler and Tom Hoge. "
+                 "Monday qualifiers William Sides, Thomas Rosenmueller, Frankie Harris and Nick Hardy are included.")
+        st.markdown("[PGA TOUR field updates](https://pgatourmedia.pgatourhq.com/tours/2026/pgatour/austinchampionship) · "
+                    f"[Odds source]({market_snapshot['source_url']})")
 if "worldwidetechnologychampionship" in _norm_name(event):
     st.caption("Field update Nov 3: Adam Schenk and Aldrich Potgieter withdrew. "
                "Both are excluded from the default pool; replacements Will Gordon and Harry Higgs are included.")
@@ -683,7 +704,8 @@ golfers=attach_tee_weather(golfers,ctx,weather)
 # A change in published tee times or refreshed weather invalidates stale simulations.
 pga_context_key=(tuple(golfers["R1 Tee"].astype(str)),
                  tuple(golfers["R2 Tee"].astype(str)),
-                 tuple(golfers["Weather Edge"].round(2)))
+                 tuple(golfers["Weather Edge"].round(2)),
+                 tuple(golfers["Market Adjustment"].round(4)))
 if st.session_state.get("pga_context_key") != pga_context_key:
     st.session_state.pop("pga_results",None)
     st.session_state.pop("pga_run_settings",None)
@@ -698,6 +720,10 @@ if tee_ready:
     wcols[1].info(f"✅ R1/R2 tee times: {tee_matches}/{len(golfers)} DK golfers · {ctx.get('tee_source','ESPN')}")
 else:
     wcols[1].info("⏳ Tee times not loaded")
+    if market_snapshot:
+        st.caption("Individual R1/R2 pairings are not verified yet. "
+                   "The published event schedule has morning starts at 7:00–8:39 AM and "
+                   "afternoon starts at 11:40 AM–1:19 PM CST. Waves stay TBD until individual tee times load.")
 if wcols[1].button("🔄 REFRESH TEE TIMES & WEATHER",use_container_width=True,key="pga_refresh_tee"):
     st.session_state["pga_tee_refresh_nonce"]=pga_refresh_nonce+1
     fetch_pga_context.clear()
@@ -728,24 +754,34 @@ if not weather.empty and ctx.get("round_dates"):
     daily=[]
     for rnd,date in enumerate(ctx["round_dates"],1):
         day=weather.loc[weather["time"].dt.strftime("%Y-%m-%d")==date]
-        play=day.loc[day["time"].dt.hour.between(8,16)]
+        play=day.loc[day["time"].dt.hour.between(7,18)]
         if not play.empty:
             daily.append({"Round":f"R{rnd} · {date}",
                 "Temperature °F":f"{day['temperature_2m'].min():.0f}–{day['temperature_2m'].max():.0f}",
-                "Wind mph (8 AM–4 PM)":f"{play['wind_speed_10m'].min():.0f}–{play['wind_speed_10m'].max():.0f}",
+                "Wind mph (7 AM–6 PM)":f"{play['wind_speed_10m'].min():.0f}–{play['wind_speed_10m'].max():.0f}",
                 "Max gust mph":round(float(play['wind_gusts_10m'].max())),
                 "Max rain chance %":round(float(play['precipitation_probability'].max()))})
     if daily:
-        with st.expander("Hourly forecast by round"):
+        with st.expander("Hourly forecast by round",expanded=bool(market_snapshot)):
             st.dataframe(pd.DataFrame(daily),hide_index=True,use_container_width=True)
+            fetched=weather.attrs.get("fetched_at")
+            stamp=pd.Timestamp(fetched).tz_convert(ctx.get("timezone","UTC")).strftime("%b %d, %-I:%M %p %Z") if fetched else "this session"
+            st.caption(f"[Open-Meteo hourly forecast](https://open-meteo.com/) · Course-local time · Fetched {stamp}. "
+                       "Individual weather edges require published tee times.")
 
 m1,m2,m3,m4=st.columns(4)
 m1.metric("Golfers",len(golfers)); m2.metric("Roster","6 G"); m3.metric("Salary Cap","$50,000"); m4.metric("Event",event)
 
 st.subheader("🏌️ Golfer Pool")
 st.caption("Include/exclude golfers, lock golfers, and set boosts or exposure limits. Automatic caps use salary tier, simulated cut strength, and estimated ownership. An explicit Max % overrides the automatic cap within the global limit; locks use 100%. In portfolios of 10+ lineups, every golfer used appears at least twice.")
-editor=golfers[["ID","Name","Salary","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
+editor=golfers[["ID","Name","Salary","Win Odds","Implied Win %","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"]].copy()
 _, preview_cut=simulate_golfers(golfers,1,0)
+editor["Proj DK"]=np.round(expected_points(golfers,salary_baseline(golfers),preview_cut),1)
+editor["Value"]=np.round(editor["Proj DK"]/(editor["Salary"]/1000),2)
+editor["Make Cut %"]=np.round(preview_cut*100,1)
+st.caption("Proj DK, Value, Make Cut % and pOwn% are NUKE estimates. Salary is the starting point; "
+           "verified outright odds add a small market adjustment. Odds-implied win chances include sportsbook margin. "
+           "DK FPPG is not used. Click a column heading to sort.")
 editor["Auto Max %"]=automatic_exposure_caps(golfers["Salary"],salary_baseline(golfers),preview_cut,ownership_estimate(golfers))
 # Show the same projected ownership model used by the PGA contest SIM directly in the player pool.
 editor["pOwn%"] = np.round(ownership_estimate(golfers), 1)
@@ -771,13 +807,19 @@ if "pga_pool_bulk_in" in st.session_state:
     editor["In"] = bool(st.session_state.pop("pga_pool_bulk_in"))
 
 edited=st.data_editor(editor,hide_index=True,use_container_width=True,height=430,
-    column_order=[c for c in editor.columns if c != "ID"],
-    disabled=["Auto Max %","ID","Name","Salary","pOwn%","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
+    column_order=["In","Lock","Name","Salary","Proj DK","Value","pOwn%","Win Odds","Make Cut %",
+                  "R1 Tee","R2 Tee","Wave","Weather","Weather Edge","Implied Win %","Auto Max %","Boost %","Min %","Max %"],
+    disabled=["Auto Max %","ID","Name","Salary","pOwn%","Win Odds","Implied Win %","Proj DK","Value","Make Cut %","R1 Tee","R2 Tee","Wave","Weather","Weather Edge"],
     column_config={
       "In":st.column_config.CheckboxColumn("In"),
       "Lock":st.column_config.CheckboxColumn("🔒 Lock"),
       "Salary":st.column_config.NumberColumn("Salary",format="$%d"),
       "pOwn%":st.column_config.NumberColumn("pOwn%",format="%.1f%%"),
+      "Win Odds":st.column_config.NumberColumn("Win odds (to 1)",format="%.1f",help="Outright snapshot. 14 means 14/1, equivalent to +1400. Blank means unverified."),
+      "Implied Win %":st.column_config.NumberColumn("Odds implied %",format="%.2f%%",help="Raw sportsbook implied probability, including margin. Not a NUKE win forecast."),
+      "Proj DK":st.column_config.NumberColumn("Proj DK",format="%.1f",help="Expected DK points including made/missed-cut outcomes and any verified tee-time weather edge."),
+      "Value":st.column_config.NumberColumn("Pts / $1K",format="%.2f"),
+      "Make Cut %":st.column_config.NumberColumn("Est. cut %",format="%.1f%%"),
       "Weather Edge":st.column_config.NumberColumn("Wx Edge",format="%+.2f"),
       "Boost %":st.column_config.NumberColumn("Boost %",min_value=-50,max_value=100,step=5),
       "Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=5),

@@ -76,6 +76,29 @@ def build_type_summary(results, cands, golfers, portfolio):
                          for kind in sorted(available, key=lambda v: tuple(map(int, v.split("/"))), reverse=True)])
 
 
+def wave_stack_summary(results, cands, golfers, portfolio, ranges=None):
+    """Count complete AM/PM stacks; preserve unknown assignments as TBD."""
+    waves = golfers.get("Wave", pd.Series("TBD", index=golfers.index)).to_numpy()
+    def kind(j):
+        values = waves[np.asarray(cands[int(j)]["idx"], dtype=int)]
+        return int(np.sum(values == "AM")) if np.isin(values, ["AM", "PM"]).all() else None
+    available = Counter(kind(j) for j in results["_candidate"])
+    selected = Counter(kind(j) for j in portfolio["_candidate"])
+    total = max(1, len(portfolio))
+    ranges = ranges or {}
+    rows = []
+    for am in range(6, -1, -1):
+        lo, hi = ranges.get(am, (0, 100))
+        rows.append({"Wave Stack": f"{am} AM / {6-am} PM", "Lineups": selected[am],
+                     "Portfolio %": round(100*selected[am]/total, 1), "Candidates": available[am],
+                     "Min %": lo, "Max %": hi})
+    if available[None] or selected[None]:
+        rows.append({"Wave Stack": "TBD", "Lineups": selected[None],
+                     "Portfolio %": round(100*selected[None]/total, 1), "Candidates": available[None],
+                     "Min %": None, "Max %": None})
+    return pd.DataFrame(rows)
+
+
 def automatic_exposure_caps(salaries, projections, cut_prob, ownership):
     """Conservative allocation heuristics, not calibrated win probabilities.
 

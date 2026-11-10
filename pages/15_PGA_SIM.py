@@ -12,7 +12,7 @@ from nuke_nav import render_nav
 from nuke_pga_data import load_market_snapshot, attach_market, expected_points
 from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
     generate_pga_candidates, select_pga_portfolio, wave_lineup_bounds,
-    salary_build_type, build_type_summary)
+    salary_build_type, build_type_summary, wave_stack_summary)
 
 st.set_page_config(page_title="NUKE PGA Sim", page_icon="⛳", layout="wide")
 render_nav()
@@ -839,7 +839,7 @@ with st.sidebar:
     max_triple=st.slider("Max 3-golfer combo exposure",5,100,20,5,key="pga_max_triple",
                          help="Maximum share of portfolio lineups that may contain the same 3-golfer combination.")
     with st.expander("🌦️ Wave ranges",expanded=False):
-        st.caption("Min/max % of portfolio lineups. 0–100 leaves a type open; 0 max excludes it. No exact mix required. Activates when tee times load.")
+        st.caption("Wave limits for the next simulation. After running, edit the current portfolio's wave mix in the results section. 0–100 leaves a type open; 0 max excludes it.")
         if set(golfers["Wave"])=={"AM"}:
             st.caption("All golfers start in the morning this week. Every lineup is 6A / 0P.")
         wave_table=pd.DataFrame({"Wave":[f"{am}A / {6-am}P" for am in range(6,-1,-1)],
@@ -869,8 +869,11 @@ if st.button("☢️ RUN PGA CONTEST SIM",type="primary",use_container_width=Tru
     if any(personal_min[pid]>0 for pid in excluded):
         st.error("An excluded golfer has a positive minimum. Include that golfer or clear the minimum."); st.stop()
     waves=golfers["Wave"].astype(str).to_numpy()
-    wave_active=tee_ready and bool(set(waves).intersection({"AM","PM"}))
+    eligible_waves=golfers.loc[~golfers["ID"].astype(int).isin(excluded),"Wave"]
+    wave_active=bool(len(eligible_waves)) and eligible_waves.isin(["AM","PM"]).all()
     try:
+        if not wave_active and any(lo>0 or hi<100 for lo,hi in wave_ranges.values()):
+            raise PortfolioError("Wave limits need AM/PM assignments for every included golfer. Refresh tee times or reset the wave ranges to 0–100 before running.")
         wave_bounds=wave_lineup_bounds(int(portfolio_n),wave_ranges) if wave_active else None
         with st.spinner("Generating PGA lineups and simulating tournament outcomes..."):
             cands=generate_candidates(golfers,int(candidates_n),int(min_salary),seed,locked,excluded,wave_bounds=wave_bounds)
@@ -918,7 +921,24 @@ if "pga_results" in st.session_state:
     a,b,c,d=st.columns(4)
     settings=st.session_state["pga_run_settings"]
     a.metric("Candidates",len(results)); b.metric("Portfolio",len(portfolio)); c.metric("Universes",f"{settings['universes']:,}"); d.metric("Seed",seed)
-    st.success(f"Complete portfolio: {len(portfolio)} unique lineups. Golfer, pair/triple, minimum-use, and wave constraints validated.")
+    wave_note="Wave constraints validated." if settings["wave_active"] else "Wave stacks are pending tee times."
+    st.success(f"Complete portfolio: {len(portfolio)} unique lineups. Golfer, pair/triple and minimum-use constraints validated. {wave_note}")
+    with st.expander("Wave stacks · portfolio mix & limits",expanded=True):
+        wave_mix=wave_stack_summary(results,cands,golfers,portfolio,settings.get("wave_ranges",{}))
+        unknown_candidates=int(wave_mix.loc[wave_mix["Wave Stack"]=="TBD","Candidates"].sum())
+        wave_rebuild_ready=bool(len(results)) and unknown_candidates==0
+        if wave_rebuild_ready:
+            st.caption("See how many lineups use each AM/PM stack. Edit Min % / Max %, then REBUILD PORTFOLIO below. Salary build limits apply at the same time.")
+        else:
+            unknown_lineups=int(wave_mix.loc[wave_mix["Wave Stack"]=="TBD","Lineups"].sum())
+            st.info(f"{unknown_lineups} portfolio lineups have unverified wave assignments and are shown as TBD. Wave limits unlock when all candidate golfers have AM/PM assignments. You can still rebuild using salary build limits.")
+        wave_result_edit=st.data_editor(wave_mix,hide_index=True,use_container_width=True,
+            height=318 if unknown_candidates else 282,key=f"pga_result_wave_editor_{seed}",
+            disabled=["Wave Stack","Lineups","Portfolio %","Candidates"] if wave_rebuild_ready else True,
+            column_config={"Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=1,required=True),
+                           "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=1,required=True)})
+        requested_wave_ranges={int(r["Wave Stack"].split()[0]):(r["Min %"],r["Max %"])
+                               for _,r in wave_result_edit.iterrows() if r["Wave Stack"]!="TBD"}
     with st.expander("Salary build types · view mix / adjust ranges",expanded=False):
         st.caption("10/9/8/7/7/6 means one $10K, one $9K, one $8K, two $7K and one $6K golfer. Each tier covers the full $1,000 band. Raise Min % to increase a build's share; lower Max % to cap it. Other types stay flexible.")
         mix=build_type_summary(results,cands,golfers,portfolio)
@@ -930,24 +950,25 @@ if "pga_results" in st.session_state:
             disabled=["Build Type","Lineups","Portfolio %","Candidates"],
             column_config={"Min %":st.column_config.NumberColumn("Min %",min_value=0,max_value=100,step=1,required=True),
                            "Max %":st.column_config.NumberColumn("Max %",min_value=0,max_value=100,step=1,required=True)})
-        st.caption("Rebuild uses the existing simulated candidates, golfer pool and boosts. Portfolio size, global exposure caps and sidebar wave ranges apply on rebuild. No new tournament simulations are needed.")
-        if st.button("REBUILD PORTFOLIO",type="primary",key="pga_rebuild_portfolio"):
-            requested_builds={r["Build Type"]:(r["Min %"],r["Max %"]) for _,r in build_edit.iterrows()}
-            try:
-                requested_waves=wave_lineup_bounds(int(portfolio_n),wave_ranges) if settings["wave_active"] else None
-                with st.spinner("Selecting a new portfolio from the existing sim..."):
-                    rebuilt=select_pga_portfolio(results,cands,golfers,int(portfolio_n),
-                        float(max_player),float(max_pair),float(max_triple),settings["personal_min"],
-                        settings["personal_max"],settings["auto_caps"],settings["locked"],
-                        wave_bounds=requested_waves,build_ranges=requested_builds)
-            except PortfolioError as e:
-                st.error(f"{e} Your last valid portfolio and downloads are unchanged.")
-            else:
-                settings["wave_ranges"]=dict(wave_ranges)
-                settings["build_ranges"]=requested_builds
-                st.session_state["pga_run_settings"]=settings
-                st.session_state["pga_results"]=(results,cands,rebuilt,golfers,own,cut_prob,seed)
-                st.rerun()
+    st.caption("Rebuild applies the wave and salary build limits above together, plus the sidebar portfolio size and global exposure caps. It reuses the existing simulation, golfer pool and boosts.")
+    if st.button("REBUILD PORTFOLIO",type="primary",key="pga_rebuild_portfolio",use_container_width=True):
+        requested_builds={r["Build Type"]:(r["Min %"],r["Max %"]) for _,r in build_edit.iterrows()}
+        try:
+            requested_waves=wave_lineup_bounds(int(portfolio_n),requested_wave_ranges) if wave_rebuild_ready else None
+            with st.spinner("Selecting a new portfolio from the existing sim..."):
+                rebuilt=select_pga_portfolio(results,cands,golfers,int(portfolio_n),
+                    float(max_player),float(max_pair),float(max_triple),settings["personal_min"],
+                    settings["personal_max"],settings["auto_caps"],settings["locked"],
+                    wave_bounds=requested_waves,build_ranges=requested_builds)
+        except PortfolioError as e:
+            st.error(f"{e} Your last valid portfolio and downloads are unchanged.")
+        else:
+            settings["wave_ranges"]=dict(requested_wave_ranges)
+            settings["wave_active"]=wave_rebuild_ready
+            settings["build_ranges"]=requested_builds
+            st.session_state["pga_run_settings"]=settings
+            st.session_state["pga_results"]=(results,cands,rebuilt,golfers,own,cut_prob,seed)
+            st.rerun()
     mix=build_type_summary(results,cands,golfers,portfolio)
     if not mix.empty:
         most_used=mix.sort_values("Lineups",ascending=False).head(3)
@@ -957,22 +978,11 @@ if "pga_results" in st.session_state:
     for rank,r in portfolio.reset_index(drop=True).iterrows():
         cand=cands[int(r["_candidate"])]
         show.append({"#":rank+1,"Golfers":" · ".join(lineup_names(cand,golfers)),"Salary":int(r["Salary"]),
-                     "Build Type":r["Build Type"],
+                     "Build Type":r["Build Type"],"Wave Stack":r.get("Wave Build","TBD"),
                      "Mean":r["Mean"],"P95":r["P95"],"Top 1%":r["Top 1%"],"6/6 %":r["6/6 %"],"5+/6 %":r["5+/6 %"],
                      "Win %":r["Win %"],"Top 1% %":r["Top 1% %"],"Cash %":r["Cash %"],"Est. ROI %":r["Est. ROI %"],
                      "Est. Duplicates":r["Est. Duplicates"],"Own Sum %":r["Ownership Sum"],"NUKE Score":round(float(r["NUKE Score"]),3)})
     st.dataframe(pd.DataFrame(show),hide_index=True,use_container_width=True,height=430)
-    if settings["wave_active"] and len(portfolio):
-        wave_rows=[]
-        for am_n in range(6,-1,-1):
-            ct=0
-            for _,rr in portfolio.iterrows():
-                cc=cands[int(rr["_candidate"])]
-                if sum(1 for ix in cc["idx"] if str(golfers.iloc[ix]["Wave"])=="AM")==am_n: ct+=1
-            applied=settings["wave_ranges"].get(am_n,(0,100))
-            wave_rows.append({"Construction":f"{am_n} AM / {6-am_n} PM","Lineups":ct,"Portfolio %":round(ct/len(portfolio)*100,1),"Min %":applied[0],"Max %":applied[1]})
-        st.markdown("#### 🌦️ Portfolio Wave Construction")
-        st.dataframe(pd.DataFrame(wave_rows),hide_index=True,use_container_width=True)
     st.download_button("DOWNLOAD PGA PORTFOLIO + STATS CSV",export_csv(portfolio,cands,golfers),
                        file_name="nuke_pga_portfolio.csv",mime="text/csv",type="primary",use_container_width=True)
 

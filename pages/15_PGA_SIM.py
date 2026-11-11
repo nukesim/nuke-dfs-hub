@@ -9,6 +9,12 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from nuke_nav import render_nav
+import importlib
+import nuke_pga_data
+
+# Streamlit can rerun a changed page while retaining its previous helper module.
+# Reload before importing newly added functions so a rolling update stays usable.
+importlib.reload(nuke_pga_data)
 from nuke_pga_data import load_market_snapshot, attach_market, expected_points, parse_austin_pairings
 from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
     generate_pga_candidates, select_pga_portfolio, wave_lineup_bounds,

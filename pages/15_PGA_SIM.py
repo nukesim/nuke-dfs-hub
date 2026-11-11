@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from nuke_nav import render_nav
-from nuke_pga_data import load_market_snapshot, attach_market, expected_points
+from nuke_pga_data import load_market_snapshot, attach_market, expected_points, parse_austin_pairings
 from nuke_pga_portfolio import (PortfolioError, automatic_exposure_caps,
     generate_pga_candidates, select_pga_portfolio, wave_lineup_bounds,
     salary_build_type, build_type_summary, wave_stack_summary)
@@ -318,22 +318,53 @@ def _bermuda_2026_context():
         "tee_url":"https://www.pgatour.com/tournaments/2026/butterfield-bermuda-championship/R2026528/tee-times"}
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+def _austin_2026_context():
+    """Official R1/R2 pairings in course-local CST, not estimated group slots."""
+    groups=pd.read_csv(Path(__file__).resolve().parents[1]/"data"/"pga_austin_2026_pairings.psv",sep="|",dtype=str)
+    tee={}
+    for _,group in groups.iterrows():
+        record={1:pd.Timestamp("2026-11-12 "+group["R1_Local"],tz="America/Chicago").isoformat(),
+                2:pd.Timestamp("2026-11-13 "+group["R2_Local"],tz="America/Chicago").isoformat()}
+        for name in group["Players"].split(";"):
+            key=_norm_name(name)
+            if key in tee:
+                raise ValueError(f"Duplicate Austin tee sheet player: {name}")
+            tee[key]=dict(record)
+    aliases={"Jordan L. Smith":"Jordan Smith","Zachary Bauchou":"Zach Bauchou",
+             "Kris Ventura":"Kristoffer Ventura","Matthew McCarty":"Matt McCarty",
+             "Cameron Davis":"Cam Davis","Thomas Morrison":"Tommy Morrison"}
+    for dk_name,official_name in aliases.items():
+        tee[_norm_name(dk_name)]=tee[_norm_name(official_name)]
+    return {"event_id":"2026558","event_name":"Austin Championship presented by Compliance Solutions",
+            "course":"Fazio Canyons Course - Omni Barton Creek Resort & Spa",
+            "location":"Austin, Texas","lat":30.272,"lon":-97.874,
+            "timezone":"America/Chicago","timezone_label":"CST (Austin local)","has_cut":True,
+            "round_dates":["2026-11-12","2026-11-13","2026-11-14","2026-11-15"],
+            "tee_times":tee,"tee_source":"PGA TOUR official R1/R2 pairings",
+            "status":"Published R1/R2 tee times loaded",
+            "tee_url":"https://pgatourmedia.pgatourhq.com/static-assets/page/files/tours/2026/pgatour/austinchampionship/roundInfo/R1%20and%20R2%20Tee%20Times.pdf"}
+
+
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     """Automatic event, course and tee-time context with a published current-event fallback."""
     out={"event_id":None,"event_name":event_name,"course":"","location":"","lat":None,"lon":None,"tee_times":{},"status":"Tee times not released"}
     wanted=_norm_name(event_name)
-    austin_2026={}
     if ("austinchampionship" in wanted or "goodgoodchampionship" in wanted) and datetime.now().year == 2026:
-        # PGA TOUR event R2026558. ESPN IDs use a different namespace.
-        # Keep verified course metadata even before ESPN lists this event.
-        # https://pgatourmedia.pgatourhq.com/tours/2026/pgatour/austinchampionship
-        austin_2026={"event_name":"Austin Championship presented by Compliance Solutions",
-            "course":"Fazio Canyons Course - Omni Barton Creek Resort & Spa",
-            "location":"Austin, Texas","lat":30.272,"lon":-97.874,
-            "timezone":"America/Chicago","timezone_label":"CST (Austin local)",
-            "has_cut":True,"round_dates":["2026-11-12","2026-11-13","2026-11-14","2026-11-15"]}
-        out.update(austin_2026)
+        ctx=_austin_2026_context()
+        # ESPN's pre-event summary endpoints return 404. Load the published
+        # official sheet immediately and check the current field feed on refresh.
+        try:
+            response=requests.get("https://datagolf.com/fields/pga-tour",timeout=8)
+            response.raise_for_status()
+            latest=parse_austin_pairings(response.text)
+            for key,record in latest.items():
+                ctx["tee_times"].setdefault(key,{}).update(record)
+            if latest:
+                ctx["tee_source"]="PGA TOUR official pairings + Data Golf current field"
+        except Exception:
+            pass
+        return ctx
     if "worldwidetechnologychampionship" in wanted and datetime.now().year == 2026:
         return _wwt_2026_context()
     if "vidantaworldmexicoopen" in wanted and datetime.now().year == 2026:
@@ -367,11 +398,6 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
         choices=[]
         for ev in sb.get("events",[]): choices.append((ev.get("id"),ev.get("name",""),ev))
         for cal in (sb.get("leagues") or [{}])[0].get("calendar",[]): choices.append((cal.get("id"),cal.get("label",""),cal))
-        if austin_2026:
-            # Never substitute WWT, a match-play event, or another year's event.
-            choices=[x for x in choices if any(token in _norm_name(x[1]) for token in
-                     ("austinchampionship","goodgoodchampionship"))
-                     and str(x[2].get("date",x[2].get("startDate","")))[:10] == "2026-11-12"]
         if choices:
             def sim(x):
                 n=_norm_name(x[1])
@@ -406,20 +432,9 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
                         tt=obj.get("teeTime") or obj.get("startTime") or obj.get("date")
                         period=obj.get("period") or obj.get("round") or 1
                         if name and tt and "T" in str(tt):
-                            accept=True
-                            if austin_2026:
-                                try:
-                                    stamp=pd.Timestamp(tt)
-                                    if stamp.tzinfo is None: accept=False
-                                    else:
-                                        local=stamp.tz_convert("America/Chicago")
-                                        rnd=int(period)
-                                        accept=(rnd in (1,2) and str(local.date()) == austin_2026["round_dates"][rnd-1])
-                                except (ValueError,TypeError,IndexError): accept=False
-                            if accept:
-                                rec=out["tee_times"].setdefault(_norm_name(name),{})
-                                try: rec[int(period)]=str(tt)
-                                except Exception: rec.setdefault(1,str(tt))
+                            rec=out["tee_times"].setdefault(_norm_name(name),{})
+                            try: rec[int(period)]=str(tt)
+                            except Exception: rec.setdefault(1,str(tt))
                         for v in obj.values(): walk(v)
                     elif isinstance(obj,list):
                         for v in obj: walk(v)
@@ -427,7 +442,6 @@ def fetch_pga_context(event_name, player_names=(), refresh_token=0):
     except Exception:
         pass
 
-    out.update(austin_2026)
     if out["tee_times"] and out["status"]=="Tee times not released":
         out["status"]=f"Tee times loaded automatically ({len(out['tee_times'])} golfers)"
     return out

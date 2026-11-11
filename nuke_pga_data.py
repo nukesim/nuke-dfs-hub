@@ -10,6 +10,34 @@ import pandas as pd
 DATA = Path(__file__).resolve().parent / "data"
 
 
+def parse_austin_pairings(html):
+    """Read Data Golf's public field payload; reject other events and round dates."""
+    match = re.search(r"var data = JSON.parse\('((?:\\.|[^'])*)'\);", html)
+    if not match:
+        return {}
+    payload = json.loads(match.group(1).replace("\\'", "'"))
+    event = payload.get("pga", {})
+    if str(event.get("event_id")) != "558" or "austinchampionship" not in name_key(event.get("event_name", "")):
+        return {}
+    result = {}
+    for player in event.get("data", []):
+        parts = player.get("player_name", "").split(", ", 1)
+        if len(parts) != 2:
+            continue
+        key = re.sub(r"[^a-z0-9]", "", (parts[1] + " " + parts[0]).lower())
+        if key == "rasmushojgaard":
+            key = "rasmushjgaard"
+        record = {}
+        for rnd, day in [(1, "2026-11-12"), (2, "2026-11-13")]:
+            tee = player.get("teetimes", {}).get(str(rnd), {})
+            clock = tee.get("time", "")
+            if tee.get("date") == day and re.fullmatch(r"\d{1,2}:\d{2} [AP]M", clock):
+                record[rnd] = pd.Timestamp(day + " " + clock, tz="America/Chicago").isoformat()
+        if len(record) == 2:
+            result[key] = record
+    return result
+
+
 def name_key(name):
     text = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]", "", text.lower())
